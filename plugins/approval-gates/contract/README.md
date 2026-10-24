@@ -142,8 +142,8 @@ There is no side column. A jump to an anchor lands below the bar, and it opens w
 **Revisions.**
 - Each revision from v2 on has its own colour, used on the rows, the steps and the exact sub-steps that changed.
 - The header has one filter per revision that shows only that revision's changes.
-- A read mark records the revision that was read. On a new revision, only the rows marked with that revision turn
-  unread.
+- A row is marked read only with its own read control; opening a row doesn't mark it. A read mark records the
+  revision that was read. On a new revision, only the rows marked with that revision turn unread.
 
 **What the person writes.** Read marks are the viewer's own. Notes on a row, and the lean on a suggestion (Do it /
 Leave it), are stored with the page's row for the agent to read when the person answers in chat. The decision itself

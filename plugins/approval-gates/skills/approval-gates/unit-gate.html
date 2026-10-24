@@ -19,9 +19,10 @@
 
     bundles/<id>.notes[<row anchor>] = "text"          a note to the agent on a row or a step (step-<n>)
     bundles/<id>.picks[<row anchor>] = "do"|"leave"    the person's lean on a suggestion row
-    data/users/<viewer>/reads/<intent>--<unit>--<page> {marks: {<row anchor>: <revision read>}}
-      Read marks are the viewer's own (localStorage when the user capability is not served). A row is read when its
-      mark is at least the row's revision, so on a new revision only the rows marked with it turn unread.
+    data/users/<viewer>/reads-<intent>--<unit>--<page>  {marks: {<row anchor or step key>: <revision read>}}
+      Read marks are the viewer's own (localStorage when the user capability is not served), set only with the row's
+      read dot (opening a row does not mark it). A row is read when its mark is at least the row's revision, so on a
+      new revision only the rows marked with it turn unread.
 
   Notes and picks reach the agent only when the person answers in chat; the decision itself is given in chat.
   Link to a page: <artifact url>#<id>. No hash: the list of pages.
@@ -84,6 +85,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 button:focus-visible, a:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .mono { font-family: var(--mono); }
 .num { font-variant-numeric: tabular-nums; }
+#app { display: flex; flex-direction: column; gap: 16px; }
 .wrap { width: 100%; max-width: 1180px; margin: 0 auto; padding-block: 24px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 16px; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
@@ -615,8 +617,10 @@ if (typeof module !== "undefined") module.exports = GateView;
   function saveReads() {
     var marks = Object.assign({}, view.st.read);
     try { localStorage.setItem(localKey(), JSON.stringify(marks)); } catch (e) { /* storage refused: the db copy still holds */ }
-    if (db && uid) db.doc("data/users/" + uid + "/reads/" + view.readKey).set({ marks: marks }).catch(function () { /* kept locally */ });
+    try { if (db && uid) readsDoc().set({ marks: marks }).catch(function () { /* kept locally */ }); } catch (e) { /* kept locally */ }
   }
+  /* data/users/<viewer> is the viewer's own collection; the marks of one page are one document in it. */
+  function readsDoc() { return db.collection("data/users/" + uid).doc("reads-" + view.readKey); }
   function markRead(keys, rev) { keys.forEach(function (k) { view.st.read[k] = Math.max(view.st.read[k] || 0, rev); }); saveReads(); }
 
   /* ---------- notes and picks: on the row, read by the agent with the chat answer ---------- */
@@ -682,7 +686,7 @@ if (typeof module !== "undefined") module.exports = GateView;
     if (act === "row") {
       var now = !(st.open[key] === undefined ? st.mode === "full" : st.open[key]);
       st.open[key] = now;
-      if (now) { var item = GateView.itemsOf(view.bundle).filter(function (x) { return x.anchor === key; })[0]; if (item) markRead([item.key], item.item.rev || 1); }
+      /* opening a row only opens it: the read dot is the one thing that marks a row read */
     } else if (act === "sec") {
       var dflt = key === "design" ? false : true;
       st.sec[key] = !(st.sec[key] === undefined ? dflt : st.sec[key]);
@@ -732,7 +736,7 @@ if (typeof module !== "undefined") module.exports = GateView;
       if (first) {
         view.readKey = [row.intent || view.bundle.header.intent, row.unit || view.bundle.header.unit, view.bundle.page].join("--");
         view.st.read = loadLocalReads();
-        if (db && uid) db.doc("data/users/" + uid + "/reads/" + view.readKey).get().then(function (d) {
+        if (db && uid) Promise.resolve().then(function () { return readsDoc().get(); }).then(function (d) {
           var marks = d && d.exists ? (d.data().marks || {}) : {};
           Object.keys(marks).forEach(function (k) { view.st.read[k] = Math.max(view.st.read[k] || 0, marks[k] || 0); });
           paint();
