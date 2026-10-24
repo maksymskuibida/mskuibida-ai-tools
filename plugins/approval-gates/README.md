@@ -10,11 +10,54 @@ page holds no decision.
 
 ```
 skills/approval-gates/SKILL.md            the procedure the agent follows at every gate
-skills/approval-gates/approval-gate.html  the template — the data contract is in its header
+skills/approval-gates/approval-gate.html  the per-stage template — the data contract is in its header
+skills/approval-gates/unit-gate.html      the unit-end template: a Unit's plan page and unit-end page
 skills/release/SKILL.md                   /approval-gates:release
-scripts/gate_bundle.py                    builds the rows for one gate from the intent's files
+scripts/gate_bundle.py                    builds the rows for one per-stage gate from the intent's files
+scripts/unit_bundle.py                    drafts and finalizes a Unit's gate bundle (unit-end rhythm)
+scripts/validate_bundle.py                checks a gate bundle against its contract
+contract/                                 the gate-bundle contract: README.md and gate-bundle.schema.json
 hooks/gate_guard.py                       the guard (hooks/hooks.json registers it)
 ```
+
+## A Unit with the unit-end rhythm
+
+A team Unit claimed with `--rhythm unit-end` (the `unit-claim` plugin asks for the rhythm before the claim) runs its
+design stages with their reviewer rounds and no approval between them. You stop twice:
+
+- **The plan page**, at the Code Generation plan approval. This is your one look at every design stage. It shows:
+  - where the design narrows something already approved;
+  - every assumption the agent made;
+  - reviewer findings that were waived or left open, each with what in the plan settles it;
+  - changes to what people see, stored data, API or MCP shape, security and dependencies;
+  - the code plan, in build order;
+  - the tests, grouped;
+  - your answers, one group per questions file.
+- **The unit-end page**, at the Unit's one gate. It shows:
+  - what changed after the plan was approved, or "the design stays as approved";
+  - what isn't verified yet;
+  - what was built, in plain words, with a small map of how the pieces connect;
+  - the approved design, folded.
+
+Each page is one **gate bundle**: a JSON file whose contract is [`contract/README.md`](contract/README.md) and
+[`contract/gate-bundle.schema.json`](contract/gate-bundle.schema.json). `unit_bundle.py draft` fills every row it can
+take from the records. The agent then labels each row by what it costs if wrong: critical, high, medium or low, or
+core, main or minor for built pieces. It also picks "look first", rewrites titles in plain words, and writes the
+sections the records can't give. `unit_bundle.py finalize` marks what changed since the last presentation and
+validates the bundle.
+
+The page lives in a second private artifact, **AI-DLC unit approvals** (`unit-gate.html`, with the `db` and `user`
+capabilities):
+
+- Every section starts open, with its rows folded to one line.
+- A sticky bar holds Summary/Full, the filters (All, Look first, Unread, High and critical), Expand all and Collapse
+  all, your read progress, and a chip per section.
+- Revisions v2, v3 and so on each have their own colour, down to the sub-step, with one filter per revision.
+- Read marks are yours. On a new revision, only the changed rows turn unread.
+- Notes on rows, and Do it / Leave it on suggestion rows, reach the agent with your chat answer. The decision itself
+  is given in chat.
+
+Per-stage gates are unchanged.
 
 ## What you see
 
@@ -88,7 +131,7 @@ when that holds one, before `CLAUDE_PROJECT_DIR`: in a git worktree the latter i
 per-clone pointers (`aidlc/active-space`, `active-intent`, `.aidlc-engine/`) are not the worktree's. Its state is `~/.claude/approval-gates/<session>.json`
 (`APPROVAL_GATES_DIR` changes the folder). To clear it, type `/approval-gates:release`.
 
-## Data contract, in brief
+## Data contract, in brief (per-stage)
 
 ```
 gates/<id>                  {title, stage, stageName, phase?, intent, project?, unit?, round, why?, status,
@@ -119,4 +162,10 @@ python3 -m unittest discover -s plugins/approval-gates/tests
 ```
 
 Python 3 standard library only. The tests use a fake project under `tests/fixtures/project` and a
-stand-in for `aidlc` (`$APPROVAL_GATES_AIDLC`).
+stand-in for `aidlc` (`$APPROVAL_GATES_AIDLC`). The unit page's renderer runs under Node when `node` is installed,
+and those tests are skipped without it.
+
+`test_unit_bundle.TestRealU4Records` builds, validates and renders both pages from Dayboard's real U4 records. It
+reads them from that checkout's git branch into a temporary folder: `APPROVAL_GATES_U4_REPO`, default `~/dayboard`;
+`APPROVAL_GATES_U4_REF`, default `origin/unit/u4-day-navigation`. The records are never copied into this repository,
+so the class is skipped where that checkout is missing, such as in CI.
