@@ -1,6 +1,6 @@
 ---
 name: approval-gates
-description: Use at every AI-DLC approval gate, right after `aidlc engine orchestrate report --result awaiting-approval` (or `--result revised`) and before the Approval question — publish the stage's documents as a page in the developer's "AI-DLC approval gates" artifact and send its link in a message of its own before the gate question. Also when the developer chose Request Changes, to read the notes they left in the page.
+description: Use at every AI-DLC approval gate, right after `aidlc engine orchestrate report --result awaiting-approval` (or `--result revised`) and before the Approval question — publish the stage's documents as a page in the developer's "AI-DLC approval gates" artifact and send its link in a message of its own before the gate question. For a Unit claimed with the unit-end rhythm, at its Code Generation plan approval and at its one unit-end gate, build the Unit's gate bundle instead and publish it in the "AI-DLC unit approvals" artifact. Also when the developer answered, to read the notes they left in the page.
 ---
 
 # Approval gates
@@ -62,9 +62,59 @@ The plan checkpoint of Code Generation (Approve Plan) is a gate too: the same st
 Never write `notes` (they are the developer's) or any decision field (the decision is given in chat),
 and never update a row: each presentation is a fresh id.
 
-## 5. The guard
+## 5. A Unit with the unit-end rhythm
+
+A team Unit claimed with `--rhythm unit-end` (the claim's stamp `aidlc/.aidlc-unit-scope.json` says
+`"gate_rhythm": "unit-end"`) stops for the developer twice, not once per stage: the design stages run with their
+reviewer rounds and no approval between them, then the **plan page** at the Code Generation plan approval (the
+developer's one look at every design stage), then the code, then the **unit-end page** at the Unit's one gate
+(`directive.unit_gate: "unit-end"`). Each page is one gate bundle, a JSON file whose contract is
+`contract/README.md` and `contract/gate-bundle.schema.json` in this plugin, rendered by `unit-gate.html` next to this
+file. Under `per-stage`, everything above (§ 1 to § 4) applies unchanged.
+
+**The artifact (once per developer).** `Artifact` → `action: "list"` → the artifact titled **AI-DLC unit
+approvals**. If there is none, publish `unit-gate.html` once: `capabilities: {db: {}, user: {}}`, `icon: "checklist"`,
+description "A Unit's plan and unit-end pages for AI-DLC; read here, answer in chat." Reuse its URL from then on, and
+republish from this file to the same URL after a plugin update.
+
+**At each of the two stops**, after the engine opened it (the hook tells you which page):
+
+1. Draft: `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/unit_bundle.py" draft --page plan|unit-end --unit <unit> --out <scratch>/bundle.json`.
+   It reads the stage records and fills every row a script can find (answers, assumptions, open or waived reviewer
+   findings and what in the plan settles each, the code plan's steps; on the unit-end page the code summary's
+   deviations, what is not verified and what was built, and the approved plan page folded). It prints a `todo` list.
+2. Do the `todo` list in the file. This is the judgment the page exists for:
+   - **Label every row** by what it costs if it is wrong: `critical` wrong data, security, or hard to undo; `high`
+     wrong behaviour the person would see; `medium` rework in this Unit; `low` cosmetic or internal. Rows of the
+     unit-end `built` section are `core`, `main` or `minor`.
+   - **Look first**: set `lookFirst` on the critical and high rows that are an assumption you made or a finding left
+     open (on the unit-end page: a change or an unverified point the person must check).
+   - **Plain words**: titles are one line; bodies say what it means for the person, not where it is written.
+   - **Write the sections the records cannot give**: `narrows` (where the design narrows something already approved),
+     `visible` (what people see, stored data, API/MCP shape, security, dependencies), `tests` (grouped, one row per
+     group); on the unit-end page an empty `changes` section with `asApproved: true` when the design stays as approved,
+     and a `map` of how the built pieces connect.
+   - **References**: every id you mention gets a `{label, tip, target}`: `#<anchor>` inside the bundle,
+     `path:<record>#<id>` for a record. The tip says what the reference says.
+   - **A revision** (after Request Changes): the draft carries every row whose source did not change over as you left
+     it. Write `revNote` on each row and step you changed ("Changed in v2: …", "New in v2: …") and one line in
+     `header.revisions` for the new revision.
+3. Finalize: `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/unit_bundle.py" finalize --bundle <scratch>/bundle.json --out <scratch>/out`.
+   It marks what changed since the last presentation, validates the bundle, and refuses with one problem per line
+   until it holds to the contract.
+4. Write `writes.json` with one `ArtifactData` `batch`, send `**Read:** <artifact url>#<bundle id>` in a message of its
+   own, then ask the engine's question as the protocol words it, with no link in it. End the turn.
+
+**After the answer**, `ArtifactData` `get` of `bundles/<id>`: the page stores the developer's notes per row
+(`notes.<row anchor>`) and their lean on a suggestion (`picks.<row anchor>`: `do` or `leave`). On Request Changes quote
+them in the rejected report's `--reason` with the chat answer. On Approve with notes or picks present, say so in one line
+and ask in chat whether to act on them; the decision is the chat answer. A Request Changes at the unit-end gate sends
+the Unit's whole chain back for review (the engine floors every stage of the Unit); say so when the developer asks for
+a small change that the plan page would have been the cheaper place for. Never write `notes` or `picks`.
+
+## 6. The guard
 
 `hooks/gate_guard.py` refuses the Approval question and the approved, rejected or accepted report until
-a `gates` row for the stage was written in this session after the gate was opened and a message of yours
+a `gates` row for the stage (under the unit-end rhythm: the `bundles` row of the page the gate needs) was written in this session after the gate was opened and a message of yours
 (in the session's transcript) carries its link `<artifact url>#<id>`, and refuses a question that carries
 the link itself: the link goes in a message of its own. The developer clears it with `/approval-gates:release`.
