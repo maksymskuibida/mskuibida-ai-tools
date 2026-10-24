@@ -59,6 +59,10 @@ runs `claim_choice.py save --scope me --stages agent --rhythm unit-end`.
   - when it is not the three-question shape above.
 - **`aidlc engine state unit start`** of a stage the choice leaves out for that Unit. The refusal names the skip
   report to run instead.
+- **Saving a choice the developer didn't ask for**: `claim_choice.py save` passes only after "For this project" in the
+  dialog (with the same stages and rhythm), or when the developer's last message asks to save. Writing a choice file
+  by hand (`.unit-claim.json`, the plugin's data folder) is refused.
+- **A claim whose Unit can't be read**, such as options before the Unit that the hook doesn't know.
 
 The hook does nothing outside an AI-DLC project (no `aidlc/spaces`). It never fails an after-call or prompt hook.
 The answer of each Unit is kept in the plugin's data folder (`answers/<project>/<intent>/<unit>.json`).

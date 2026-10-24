@@ -255,7 +255,11 @@ var GateView = (function () {
   function anchor(id) { return String(id).replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, ""); }
   function tone(name) { return "background:var(--" + name + "-bg);color:var(--" + name + "-fg)"; }
   function revTone(v) { var n = ((Math.max(2, v) - 2) % 4) + 2; return "r" + n; }
-  function plural(n, one, many) { return n + " " + (n === 1 ? one : (many || one + "s")); }
+  function plural(n, one, many) { n = +n || 0; return n + " " + (n === 1 ? one : (many || one + "s")); }
+  function int(n) { return (+n || 0) | 0; }
+  /* Only in-page anchors and http(s) addresses become links: a bundle is data, never a script. */
+  function safeHref(u) { u = String(u || ""); return /^#[A-Za-z0-9._-]*$/.test(u) || /^https?:\/\//i.test(u) ? u : "#"; }
+  function stepKey(st) { return st.source && st.source.key ? String(st.source.key) : "step:" + int(st.n); }
   var CHEVRON = '<svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14"><path d="M5 3l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>';
 
   function score(rows) {
@@ -298,10 +302,11 @@ var GateView = (function () {
     if (f === "top") return item.label === "critical" || item.label === "high" || item.label === "core";
     return true;
   }
+  /* key: the read mark's key (a row's anchor; a step's source, so a renumbered step keeps its mark); anchor: the jump target. */
   function itemsOf(bundle) {
     var out = [];
-    (bundle.sections || []).forEach(function (s) { (s.rows || []).forEach(function (r) { out.push({ key: anchor(r.id), item: r }); }); });
-    ((bundle.plan || {}).steps || []).forEach(function (st) { out.push({ key: "step-" + st.n, item: st }); });
+    (bundle.sections || []).forEach(function (s) { (s.rows || []).forEach(function (r) { out.push({ key: anchor(r.id), anchor: anchor(r.id), item: r }); }); });
+    ((bundle.plan || {}).steps || []).forEach(function (st) { out.push({ key: stepKey(st), anchor: "step-" + int(st.n), item: st }); });
     return out;
   }
   function revisionsIn(bundle) {
@@ -315,15 +320,15 @@ var GateView = (function () {
   function revBadge(item, extra) {
     if (!item.rev) return "";
     var t = revTone(item.rev);
-    return '<span class="tag' + (extra || "") + '" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">v' + item.rev + " " + (item.revKind === "new" ? "new" : "changed") + "</span>";
+    return '<span class="tag' + (extra || "") + '" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">v' + int(item.rev) + " " + (item.revKind === "new" ? "new" : "changed") + "</span>";
   }
   function refHtml(ref, bundle) {
     var t = String(ref.target || ""), href = "#", data = "";
-    if (t.charAt(0) === "#") { href = t; data = ' data-jump="' + esc(t.slice(1)) + '"'; }
-    else if (/^https?:\/\//.test(t)) href = t;
+    if (t.charAt(0) === "#") { href = safeHref(t); data = ' data-jump="' + esc(href.slice(1)) + '"'; }
+    else if (/^https?:\/\//i.test(t)) href = t;
     else if (t.indexOf("path:") === 0) {
       var path = t.slice(5), base = ((bundle.header || {}).links || {}).records;
-      if (base) href = base.replace(/\/?$/, "/") + path.replace(/#.*/, "");
+      if (base && /^https?:\/\//i.test(base)) href = base.replace(/\/?$/, "/") + path.replace(/#.*/, "");
       else data = ' data-path="' + esc(path) + '"';
     }
     var ext = /^https?:\/\//.test(href) ? ' target="_blank" rel="noopener"' : "";
@@ -370,7 +375,7 @@ var GateView = (function () {
     return kinds.map(function (k) { var n = rows.filter(function (r) { return r.label === k; }).length; return n ? labelChip(k, n) : ""; }).join("") +
       Object.keys(rows.reduce(function (m, r) { if (r.rev) m[r.rev] = 1; return m; }, {})).sort().map(function (v) {
         var n = rows.filter(function (r) { return r.rev === +v; }).length, t = revTone(+v);
-        return '<span class="lc" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">v' + v + "<b>" + n + "</b></span>";
+        return '<span class="lc" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">v' + int(v) + "<b>" + n + "</b></span>";
       }).join("");
   }
 
@@ -396,7 +401,8 @@ var GateView = (function () {
     }).join("");
     var boxes = nodes.map(function (n) {
       var p = pos[n.id], tag = n.target ? "a" : "div";
-      return "<" + tag + ' class="node ' + esc(n.weight) + '"' + (n.target ? ' href="' + esc(n.target) + '" data-jump="' + esc(n.target.slice(1)) + '"' : "") + ' style="left:' + p.x + "px;top:" + p.y + "px;width:" + W + "px;height:" + H + 'px"><b>' + esc(n.title) + "</b>" + (n.note ? "<small>" + esc(n.note) + "</small>" : "") + "</" + tag + ">";
+      var nt = n.target ? safeHref(n.target) : "";
+      return "<" + tag + ' class="node ' + esc(n.weight) + '"' + (n.target ? ' href="' + esc(nt) + '" data-jump="' + esc(nt.slice(1)) + '"' : "") + ' style="left:' + p.x + "px;top:" + p.y + "px;width:" + W + "px;height:" + H + 'px"><b>' + esc(n.title) + "</b>" + (n.note ? "<small>" + esc(n.note) + "</small>" : "") + "</" + tag + ">";
     }).join("");
     return '<div class="mapwrap"><span>' + esc(m.caption || "How the pieces connect: dark boxes matter most; dashed ones already existed.") + '</span><div class="mapscroll"><div class="map" style="width:' + width + "px;height:" + height + 'px">' +
       '<svg width="' + width + '" height="' + height + '" aria-hidden="true"><defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--muted)"></path></marker></defs>' + lines + "</svg>" + boxes + "</div></div></div>";
@@ -418,22 +424,22 @@ var GateView = (function () {
   }
 
   function stepHtml(st, bundle, step) {
-    var key = "step-" + step.n, open = isOpen(st, key), read = isRead(st, key, step), t = step.rev ? revTone(step.rev) : null;
+    var key = "step-" + int(step.n), open = isOpen(st, key), read = isRead(st, stepKey(step), step), t = step.rev ? revTone(step.rev) : null;
     var lt = LAYER_TONE[step.layer] || "low";
-    var head = '<div class="rowhead"><button type="button" class="twist" data-act="row" data-key="' + key + '" aria-expanded="' + open + '" aria-label="' + (open ? "Collapse" : "Expand") + " step " + step.n + '">' + CHEVRON + "</button>" +
-      '<span class="rid">Step ' + step.n + "</span>" +
+    var head = '<div class="rowhead"><button type="button" class="twist" data-act="row" data-key="' + key + '" aria-expanded="' + open + '" aria-label="' + (open ? "Collapse" : "Expand") + " step " + int(step.n) + '">' + CHEVRON + "</button>" +
+      '<span class="rid">Step ' + int(step.n) + "</span>" +
       '<button type="button" class="rtitle" data-act="row" data-key="' + key + '" title="' + esc(step.title) + '">' + esc(step.title) + "</button>" + revBadge(step) +
       '<span class="layer" style="' + tone(lt) + '">' + esc(step.layer) + "</span>" +
       '<span class="where num">' + plural(step.files, "file") + "</span>" +
       '<span class="where wide">' + ((step.implements || []).length ? plural(step.implements.length, "design pt", "design pts") : "") + "</span>" +
-      '<button type="button" class="dot" data-act="read" data-key="' + key + '" aria-label="Mark step ' + step.n + (read ? " unread" : " read") + '"><i></i></button></div>';
+      '<button type="button" class="dot" data-act="read" data-key="' + key + '" aria-label="Mark step ' + int(step.n) + (read ? " unread" : " read") + '"><i></i></button></div>';
     var body = "";
     if (open) {
       body = '<div class="rowbody">' + (step.rev && step.revNote ? '<p class="revnote" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">' + esc(step.revNote) + "</p>" : "") +
         '<ol class="subs">' + (step.subs || []).map(function (s) {
           if (!s.rev) return "<li>" + esc(s.text) + "</li>";
           var u = revTone(s.rev);
-          return '<li style="background:var(--' + u + '-bg)">' + esc(s.text) + '<span class="sv" style="color:var(--' + u + '-fg)">v' + s.rev + "</span></li>";
+          return '<li style="background:var(--' + u + '-bg)">' + esc(s.text) + '<span class="sv" style="color:var(--' + u + '-fg)">v' + int(s.rev) + "</span></li>";
         }).join("") + "</ol>" +
         ((step.implements || []).length ? '<div class="refs"><span>Implements</span>' + step.implements.map(function (x) { return refHtml(x, bundle); }).join("") + "</div>" : "") +
         noteBox(st, key, "Only if this step should change", false) + "</div>";
@@ -443,13 +449,13 @@ var GateView = (function () {
 
   function planHtml(st, bundle) {
     var p = bundle.plan, steps = p.steps || [], open = secOpen(st, "plan", true);
-    var shown = steps.filter(function (s) { return passes(st, s, "step-" + s.n, true); });
+    var shown = steps.filter(function (s) { return passes(st, s, stepKey(s), true); });
     var layers = LAYER_ORDER.map(function (l) {
       var n = steps.filter(function (s) { return s.layer === l; }).length;
       return n ? '<span class="lc" style="' + tone(LAYER_TONE[l]) + ';text-transform:none">' + esc(l) + "<b>" + n + "</b></span>" : "";
     }).join("");
     var revs = Object.keys(steps.reduce(function (m, s) { if (s.rev) m[s.rev] = 1; return m; }, {})).sort().map(function (v) {
-      var t = revTone(+v); return '<span class="lc" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">v' + v + "<b>" + steps.filter(function (s) { return s.rev === +v; }).length + "</b></span>";
+      var t = revTone(+v); return '<span class="lc" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">v' + int(v) + "<b>" + steps.filter(function (s) { return s.rev === +v; }).length + "</b></span>";
     }).join("");
     var right = layers + revs + '<span class="shown">' + (st.filter === "all" ? steps.length : shown.length + "/" + steps.length) + "</span>";
     var body = open ? '<div class="secbody">' + (shown.length ? shown.map(function (s) { return stepHtml(st, bundle, s); }).join("") : '<p class="empty">' + (/^(look|top)$/.test(st.filter) ? "Steps carry no label; switch to All to read them." : "Nothing here for this filter.") + "</p>") + "</div>" : "";
@@ -481,7 +487,7 @@ var GateView = (function () {
 
   function designHtml(st, bundle) {
     var d = bundle.design, open = secOpen(st, "design", false), rows = d.rows || [];
-    var link = d.bundle ? '<a href="#' + esc(d.bundle) + '" data-nav="' + esc(d.bundle) + '" style="margin-top:10px;font-size:13px">Open the full plan-approval page</a>' : (d.url ? '<a href="' + esc(d.url) + '" target="_blank" rel="noopener">Open the full plan-approval page</a>' : "");
+    var link = d.bundle ? '<a href="#' + esc(d.bundle) + '" data-nav="' + esc(d.bundle) + '" style="margin-top:10px;font-size:13px">Open the full plan-approval page</a>' : (d.url ? '<a href="' + esc(safeHref(d.url)) + '" target="_blank" rel="noopener">Open the full plan-approval page</a>' : "");
     var body = open ? '<div class="drows">' + rows.map(function (r) {
       return '<div class="drow"><span class="rid">' + esc(r.id) + '</span><span class="dt" title="' + esc(r.title) + '">' + esc(r.title) + '</span><span class="lab" style="' + tone(LABEL_TONE[r.label] || "low") + '">' + esc(r.label) + "</span></div>";
     }).join("") + link + "</div>" : "";
@@ -498,8 +504,8 @@ var GateView = (function () {
       var first = (h.revisions || [])[0] || { note: "first draft" };
       revRow = '<div class="revs"><span class="lbl">Revisions:</span><span class="v1"><span class="sw" style="background:var(--control)"></span>v1 ' + esc(first.note) + "</span>" +
         (h.revisions || []).slice(1).map(function (r) {
-          var t = revTone(r.n), on = st.filter === "v" + r.n, n = revs[r.n] || 0;
-          return '<button type="button" class="revbtn" data-act="filter" data-val="' + (on ? "all" : "v" + r.n) + '" aria-pressed="' + on + '" title="' + esc(r.note) + '" style="color:var(--' + t + "-fg);" + (on ? "background:var(--" + t + "-bg);border-color:var(--" + t + "-fg)" : "") + '"><span class="sw" style="background:var(--' + t + '-fg)"></span>v' + r.n + " · " + plural(n, "change") + (r.n === h.revision ? " (current)" : "") + "</button>";
+          var rn = int(r.n), t = revTone(rn), on = st.filter === "v" + rn, n = revs[rn] || 0;
+          return '<button type="button" class="revbtn" data-act="filter" data-val="' + (on ? "all" : "v" + rn) + '" aria-pressed="' + on + '" title="' + esc(r.note) + '" style="color:var(--' + t + "-fg);" + (on ? "background:var(--" + t + "-bg);border-color:var(--" + t + "-fg)" : "") + '"><span class="sw" style="background:var(--' + t + '-fg)"></span>v' + rn + " · " + plural(n, "change") + (rn === int(h.revision) ? " (current)" : "") + "</button>";
         }).join("") + '<span class="hint">Changed rows carry their version; press one to see only its changes.</span></div>';
     }
     return '<header class="card head">' + crumbs + '<div class="titlerow"><div><h1>' + esc(h.title) + '</h1><p class="lede">' + esc(h.lede) + "</p></div>" + (facts ? '<div class="facts">' + facts + "</div>" : "") + "</div>" + revRow + "</header>";
@@ -509,7 +515,7 @@ var GateView = (function () {
     var short, count = "", top = "", rev = "";
     if (key === "plan") {
       var steps = bundle.plan.steps || []; short = "Plan";
-      count = steps.filter(function (s) { return !isRead(st, "step-" + s.n, s); }).length + "/" + steps.length;
+      count = steps.filter(function (s) { return !isRead(st, stepKey(s), s); }).length + "/" + steps.length;
     } else if (key === "answers") { short = "Answers"; count = String((bundle.answers || []).reduce(function (n, g) { return n + (g.questions || []).length; }, 0)); }
     else if (key === "design") { short = "Approved design"; count = String((bundle.design.rows || []).length); }
     else {
@@ -518,11 +524,11 @@ var GateView = (function () {
       var lab = rows.some(function (r) { return r.label === "critical"; }) ? "critical" : (rows.some(function (r) { return r.label === "high"; }) ? "high" : "");
       if (lab) top = '<span class="tag" style="' + tone(LABEL_TONE[lab]) + '">' + lab + "</span>";
       var mx = Math.max.apply(null, [0].concat(rows.map(function (r) { return r.rev || 0; })));
-      if (mx) { var t = revTone(mx); rev = '<span class="tag" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">v' + mx + " ·" + rows.filter(function (r) { return r.rev; }).length + "</span>"; }
+      if (mx) { var t = revTone(mx); rev = '<span class="tag" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">v' + int(mx) + " ·" + rows.filter(function (r) { return r.rev; }).length + "</span>"; }
     }
     if (key === "plan") {
       var smx = Math.max.apply(null, [0].concat((bundle.plan.steps || []).map(function (s) { return s.rev || 0; })));
-      if (smx) { var u = revTone(smx); rev = '<span class="tag" style="background:var(--' + u + "-bg);color:var(--" + u + '-fg)">v' + smx + " ·" + bundle.plan.steps.filter(function (s) { return s.rev; }).length + "</span>"; }
+      if (smx) { var u = revTone(smx); rev = '<span class="tag" style="background:var(--' + u + "-bg);color:var(--" + u + '-fg)">v' + int(smx) + " ·" + bundle.plan.steps.filter(function (s) { return s.rev; }).length + "</span>"; }
     }
     return '<a class="chip" href="#' + esc(key) + '" data-jump="' + esc(key) + '">' + esc(short) + rev + top + '<span class="count">' + esc(count) + "</span></a>";
   }
@@ -566,7 +572,7 @@ var GateView = (function () {
       Object.keys(groups).map(function (k) {
         return '<section class="card list"><h2>' + esc(k) + "</h2>" + groups[k].map(function (r) {
           var b = r.bundle || {}, h = b.header || {};
-          return '<a class="lrow" href="#' + esc(r.id) + '" data-nav="' + esc(r.id) + '"><b>' + esc(r.title || h.title || r.id) + "</b><small>" + esc(r.page === "plan" ? "Plan approval" : "Unit end") + " · v" + esc(h.revision || 1) + " · " + esc(String(r.createdAt || "").replace("T", " ").replace(/:\d\d(\.\d+)?Z$/, " UTC")) + '</small><span class="end lc" style="' + tone(r.status === "open" ? "warn" : "low") + '">' + esc(r.status || "") + "</span></a>";
+          return '<a class="lrow" href="#' + esc(r.id) + '" data-nav="' + esc(r.id) + '"><b>' + esc(r.title || h.title || r.id) + "</b><small>" + esc(r.page === "plan" ? "Plan approval" : "Unit end") + " · v" + int(h.revision || 1) + " · " + esc(String(r.createdAt || "").replace("T", " ").replace(/:\d\d(\.\d+)?Z$/, " UTC")) + '</small><span class="end lc" style="' + tone(r.status === "open" ? "warn" : "low") + '">' + esc(r.status || "") + "</span></a>";
         }).join("") + "</section>";
       }).join("");
   }
@@ -585,7 +591,12 @@ if (typeof module !== "undefined") module.exports = GateView;
 
   function freshState() { return { mode: "summary", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {} }; }
   function toast(text) { toastEl.textContent = text; toastEl.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(function () { toastEl.hidden = true; }, 2400); }
-  function teardown() { view.unsub.forEach(function (u) { try { u(); } catch (e) { /* already gone */ } }); view.unsub = []; }
+  function teardown() {
+    if (view.unsaved) flush();  /* sends the pending note of the page being left; flush reads the id before it awaits */
+    clearTimeout(view.timer);
+    view.unsub.forEach(function (u) { try { u(); } catch (e) { /* already gone */ } }); view.unsub = [];
+    view.unsaved = false; view.saving = false;
+  }
   function pageId() { var h = decodeURIComponent(location.hash.slice(1)); return /-(plan|unit-end)-v\d+-\d{8}T\d{4}$/.test(h) ? h : ""; }
   function barHeight() { var b = document.getElementById("bar"); if (b) document.documentElement.style.setProperty("--bar-h", b.offsetHeight + "px"); }
 
@@ -614,18 +625,23 @@ if (typeof module !== "undefined") module.exports = GateView;
   async function flush() {
     clearTimeout(view.timer);
     if (view.saving || !view.unsaved || !db || !view.id) return;
+    var id = view.id, st = view.st;
     view.saving = true; view.unsaved = false;
-    var notes = Object.assign({}, view.st.notes), picks = Object.assign({}, view.st.picks);
-    Object.keys(notes).forEach(function (k) { if (view.st.noteStat[k] === "Unsaved") setStat(k, "Saving…"); });
+    var notes = Object.assign({}, st.notes), picks = Object.assign({}, st.picks);
+    Object.keys(notes).forEach(function (k) { if (st.noteStat[k] === "Unsaved") setStat(k, "Saving…"); });
+    var ok = true;
     try {
-      await db.doc("bundles/" + view.id).update({ notes: notes, picks: picks });
-      Object.keys(notes).forEach(function (k) { if (/^Sav/.test(view.st.noteStat[k] || "")) setStat(k, "Saved"); });
+      await db.doc("bundles/" + id).update({ notes: notes, picks: picks });
+      if (view.id === id) Object.keys(notes).forEach(function (k) { if (/^Sav/.test(st.noteStat[k] || "")) setStat(k, "Saved"); });
     } catch (e) {
-      view.unsaved = true;
-      toast(e && e.code === "invalid_argument" ? "You can read this page but not save notes to it." : "Couldn’t save your note. It retries when you type.");
+      ok = false;
+      if (view.id === id) { view.unsaved = true; Object.keys(notes).forEach(function (k) { if (/^Sav/.test(st.noteStat[k] || "")) setStat(k, "Not saved"); }); }
+      toast(e && e.code === "invalid_argument" ? "You can read this page but not save notes to it." : "Couldn’t save your note. It is sent again when you type.");
     }
-    view.saving = false;
-    if (view.unsaved) flush();
+    if (view.id === id) {
+      view.saving = false;
+      if (ok && view.unsaved) flush();  /* typed while the save was on its way; a failure waits for the next keystroke */
+    }
   }
 
   /* ---------- jumps land below the bar ---------- */
@@ -666,20 +682,20 @@ if (typeof module !== "undefined") module.exports = GateView;
     if (act === "row") {
       var now = !(st.open[key] === undefined ? st.mode === "full" : st.open[key]);
       st.open[key] = now;
-      if (now) { var item = GateView.itemsOf(view.bundle).filter(function (x) { return x.key === key; })[0]; markRead([key], item ? (item.item.rev || 1) : rev); }
+      if (now) { var item = GateView.itemsOf(view.bundle).filter(function (x) { return x.anchor === key; })[0]; if (item) markRead([item.key], item.item.rev || 1); }
     } else if (act === "sec") {
       var dflt = key === "design" ? false : true;
       st.sec[key] = !(st.sec[key] === undefined ? dflt : st.sec[key]);
     } else if (act === "group") st.open[key] = !st.open[key];
     else if (act === "read") {
-      var it = GateView.itemsOf(view.bundle).filter(function (x) { return x.key === key; })[0], r = it ? (it.item.rev || 1) : rev;
-      if (GateView.isRead(st, key, it ? it.item : {})) { st.read[key] = r - 1; saveReads(); } else markRead([key], r);
+      var it = GateView.itemsOf(view.bundle).filter(function (x) { return x.anchor === key; })[0];
+      if (it) { var r = it.item.rev || 1; if (GateView.isRead(st, it.key, it.item)) { st.read[it.key] = r - 1; saveReads(); } else markRead([it.key], r); }
     } else if (act === "mode") { st.mode = val; st.open = {}; st.sec = {}; }
     else if (act === "filter") { st.filter = val; st.sec = {}; }
     else if (act === "expand" || act === "collapse") {
       var on = act === "expand";
       GateView.order(view.bundle).forEach(function (k) { st.sec[k] = on; });
-      GateView.itemsOf(view.bundle).forEach(function (x) { st.open[x.key] = on; });
+      GateView.itemsOf(view.bundle).forEach(function (x) { st.open[x.anchor] = on; });
       (view.bundle.answers || []).forEach(function (g) { st.open["ans-" + g.key] = on; });
     } else if (act === "allread") markRead(GateView.itemsOf(view.bundle).map(function (x) { return x.key; }), rev);
     else if (act === "pick") { st.picks[key] = st.picks[key] === val ? "" : val; queueSave(); }

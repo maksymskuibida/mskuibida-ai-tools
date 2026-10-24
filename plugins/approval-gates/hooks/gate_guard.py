@@ -234,16 +234,24 @@ def current_stage(project):
     return None
 
 
+UNIT_END_STAGE = "code-generation"  # the last per-Unit stage: its plan approval and its gate are a Unit's two pages
+
+
 def make_key(stage, unit):
     return stage + (("/" + unit) if unit else "")
 
 
-def unit_rhythm(project, unit):
-    """"unit-end" when the gate in hand is a Unit's under the unit-end rhythm, else "per-stage". The claim's scope stamp
-    (aidlc/.aidlc-unit-scope.json, written by `aidlc unit claim`) names the Unit and its rhythm; the active directive's
-    `unit_gate` says the same for the unit-end gate itself."""
+def unit_rhythm(project, unit, stage=UNIT_END_STAGE):
+    """"unit-end" when the gate in hand is a Unit's under the unit-end rhythm, else "per-stage". Only the Code
+    Generation gates of the Unit (its plan approval and its unit-end gate) are the Unit's two pages: the claim's scope
+    stamp (aidlc/.aidlc-unit-scope.json, written by `aidlc unit claim`) names the Unit and its rhythm. A gate of any other
+    stage is unit-end only when the active directive says so for that stage (`unit_gate: "unit-end"`)."""
     if not unit:
         return "per-stage"
+    if stage != UNIT_END_STAGE:
+        return "unit-end" if directive_unit_gate(project, stage, unit) else "per-stage"
+    if directive_unit_gate(project, stage, unit):
+        return "unit-end"
     try:
         with open(os.path.join(project, "aidlc", ".aidlc-unit-scope.json"), encoding="utf-8") as f:
             stamp = json.load(f)
@@ -251,16 +259,21 @@ def unit_rhythm(project, unit):
             return "unit-end"
     except (OSError, ValueError):
         pass
-    _intent, root = intent_root(project)
-    if root:
-        try:
-            with open(os.path.join(root, ".aidlc-engine", "active-directive.json"), encoding="utf-8") as f:
-                directive = json.load(f)
-            if isinstance(directive, dict) and directive.get("unit") == unit and directive.get("unit_gate") == "unit-end":
-                return "unit-end"
-        except (OSError, ValueError):
-            pass
     return "per-stage"
+
+
+def directive_unit_gate(project, stage, unit):
+    """True when the active directive is the unit-end gate of this stage and Unit."""
+    _intent, root = intent_root(project)
+    if not root:
+        return False
+    try:
+        with open(os.path.join(root, ".aidlc-engine", "active-directive.json"), encoding="utf-8") as f:
+            directive = json.load(f)
+    except (OSError, ValueError):
+        return False
+    return isinstance(directive, dict) and directive.get("unit") == unit and directive.get("unit_gate") == "unit-end" \
+        and directive.get("stage", stage) == stage
 
 
 def page_of(pending):
@@ -268,7 +281,7 @@ def page_of(pending):
     return "plan" if (pending or {}).get("kind") == "plan" else "unit-end"
 
 
-BUNDLE_ID = re.compile(r"^(?P<head>[a-z0-9][a-z0-9.-]*)-(?P<page>plan|unit-end)-v\d+-\d{8}[Tt]\d{4}$")
+BUNDLE_ID = re.compile(r"^(?P<head>[a-z0-9][a-z0-9._-]*)-(?P<page>plan|unit-end)-v\d+-(?P<stamp>\d{8}[Tt]\d{4})$")
 
 
 # ---------------------------------------------------------------- tool calls
@@ -503,11 +516,14 @@ def require_published(state, stage, unit, opened):
 def check_gate_rows(tool_input):
     """The developer's fields of a gate row are written by the page only."""
     for op, collection, doc_id, data, _url in writes_of(tool_input):
-        if collection == "bundles" and op != "delete":
+        if collection == "bundles":
+            if op != "set":
+                raise Refusal(f"bundles/{doc_id}: a bundle row is written once, whole, with `set`; the developer's notes "
+                              "and picks live on it. Never update, edit or delete it: a new presentation is a new bundle.")
             if data is None:
                 raise Refusal(f"The write to bundles/{doc_id} cannot be read, so it cannot be checked. Write the row "
                               "from the file unit_bundle.py made.")
-            if "notes" in data or "picks" in data or "decision" in data:
+            if any(str(k).split(".")[0] in ("notes", "picks", "decision") for k in data):
                 raise Refusal(f"bundles/{doc_id}: `notes` and `picks` are written by the developer in the page. Never "
                               "write them, and never update a row you wrote: a new presentation is a new bundle.")
             continue
@@ -587,7 +603,7 @@ def guard_question(event, state, project, questions):
         sent, counts = link_sent(event, pub)
         if not sent:
             raise Refusal("The developer gets the page's link before the question, and no message of yours carries "
-                          f"it yet. Since gates/{pub.get('id', '')} was published, your transcript holds "
+                          f"it yet. Since {pub.get('id', '')} was published, your transcript holds "
                           f"{counts['thinking']} thinking, {counts['tool_use']} tool-call and {counts['text']} text "
                           "block(s), none with the link. Thinking is not output and a tool call is not a message: "
                           f"write `**Read:** {link_of(pub)}` as the text of your message, then ask the engine's "
@@ -655,7 +671,7 @@ def record_bash(event, project, state, tool_input):
                 continue
             stage = stage or "code-generation"
             unit = call.get("unit") or (cur[1] if cur and cur[0] == stage else None)
-            rhythm = unit_rhythm(project, unit)
+            rhythm = unit_rhythm(project, unit, stage)
             state["pending"] = {"stage": stage, "unit": unit, "opened_at": time.time(), "kind": "plan", "rhythm": rhythm}
             if rhythm == "unit-end":
                 say("PostToolUse", f"the plan for {unit} is open for approval (Approve Plan), the developer's one look at every "
@@ -670,7 +686,7 @@ def record_bash(event, project, state, tool_input):
             continue
         unit = call.get("unit") or (cur[1] if cur and cur[0] == stage else None)
         if call["result"] in OPENING:
-            rhythm = unit_rhythm(project, unit)
+            rhythm = unit_rhythm(project, unit, stage)
             state["pending"] = {"stage": stage, "unit": unit, "opened_at": time.time(), "kind": "gate", "rhythm": rhythm}
             if rhythm == "unit-end":
                 say("PostToolUse", f"the unit-end gate for {unit} is open. Before the Approval question: "
@@ -698,7 +714,9 @@ def record_artifact(project, state, tool_input, response):
             candidates.append(cand)
     changed = False
     for op, collection, doc_id, _data, url in writes_of(tool_input):
-        if op in ("set", "update") and collection == "bundles":
+        if collection == "bundles":
+            if op != "set":
+                continue
             changed = record_bundle(state, intent, doc_id, url) or changed
             continue
         if op not in ("set", "update") or collection != "gates":
@@ -719,6 +737,14 @@ def record_artifact(project, state, tool_input, response):
     return changed
 
 
+def stamp_epoch(stamp):
+    """Seconds since the epoch of a YYYYMMDDTHHMM stamp in UTC, or None."""
+    try:
+        return datetime.datetime.strptime(stamp.upper(), "%Y%m%dT%H%M").replace(tzinfo=datetime.timezone.utc).timestamp()
+    except ValueError:
+        return None
+
+
 def record_bundle(state, intent, doc_id, url):
     """A `bundles` row of the Unit whose unit-end-rhythm gate is open, for the page that gate needs."""
     pending = state["pending"]
@@ -728,6 +754,12 @@ def record_bundle(state, intent, doc_id, url):
     head, page = found.group("head"), found.group("page")
     unit = pending["unit"]
     if page != page_of(pending) or not head.endswith("-" + unit.lower()) or (intent and not head.startswith(intent.lower())):
+        return False
+    built = stamp_epoch(found.group("stamp"))
+    opened = pending.get("opened_at")
+    if built is None or (isinstance(opened, (int, float)) and built < opened - opened % 60):
+        say("PostToolUse", f"bundles/{doc_id} was built before this gate opened, so it does not count for it. Build the page "
+                           "again (unit_bundle.py draft, then finalize) and write the new bundle.")
         return False
     pub = {"id": doc_id, "url": str(url or "").rstrip("/"), "at": time.time(), "page": page}
     state["published"][make_key(pending["stage"], unit) + "@" + page] = pub

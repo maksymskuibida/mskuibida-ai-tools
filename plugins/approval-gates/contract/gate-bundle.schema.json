@@ -9,7 +9,7 @@
   "properties": {
     "schema": { "const": "aidlc-gate-bundle/1" },
     "page": { "enum": ["plan", "unit-end"], "description": "plan: shown at the Code Generation plan approval, the person's one look at every design stage. unit-end: shown at the Unit's single unit-end gate." },
-    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]*-(plan|unit-end)-v[0-9]+-[0-9]{8}T[0-9]{4}$", "description": "<intent>-<unit>-<page>-v<revision>-<YYYYMMDDTHHMM>, new for every presentation." },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*-(plan|unit-end)-v[0-9]+-[0-9]{8}T[0-9]{4}$", "description": "<intent>-<unit>-<page>-v<revision>-<YYYYMMDDTHHMM>, new for every presentation." },
     "createdAt": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2})?(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$" },
     "header": { "$ref": "#/$defs/header" },
     "sections": { "type": "array", "items": { "$ref": "#/$defs/section" } },

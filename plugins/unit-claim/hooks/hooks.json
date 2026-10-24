@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|AskUserQuestion",
+        "matcher": "Bash|AskUserQuestion|Write|Edit|MultiEdit",
         "hooks": [
           {
             "type": "command",

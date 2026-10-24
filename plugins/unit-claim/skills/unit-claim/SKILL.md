@@ -109,4 +109,5 @@ request:
 - For the project: the same command with `--scope project`, through a bookkeeping pull request (§ 5).
 - To be asked again for one Unit: `claim_choice.py forget --unit <unit>`.
 
-Do any of these only when the developer asks.
+Do any of these only when the developer asks. The hook refuses a `save` unless the developer chose that save in the
+dialog or asked for it in their last message, and it refuses writing a choice file by hand.

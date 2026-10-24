@@ -107,6 +107,15 @@ class TestClaimIsGated(Case):
         code, _out, err = self.claim()
         self.assertEqual(code, 0, err)
 
+    def test_options_before_the_unit_and_the_equals_form(self):
+        for cmd in (f"aidlc --claim={UNIT} --team A", f"aidlc unit claim --force {UNIT}", f"aidlc unit claim --team A --rhythm unit-end {UNIT}"):
+            code, _out, err = self.pre("Bash", {"command": cmd})
+            self.assertEqual(code, 2, cmd)
+            self.assertIn(f"Before {UNIT} is claimed", err, cmd)
+        code, _out, err = self.pre("Bash", {"command": "aidlc unit claim --team A"})
+        self.assertEqual(code, 2)
+        self.assertIn("names no Unit", err)
+
     def test_every_spelling_of_the_claim(self):
         for cmd in (f"aidlc unit claim {UNIT}", f"cd x && aidlc --claim {UNIT} --team A", f"bun .claude/tools/aidlc-unit.ts claim {UNIT}",
                     f"/usr/local/bin/aidlc unit claim --team A {UNIT}"):
@@ -231,6 +240,31 @@ class TestAnswer(Case):
         self.assertEqual(cc.choice_for(self.project, UNIT)["rhythm"], "unit-end")
 
 
+class TestSaving(Case):
+    def save_cmd(self, scope="me", stages="none", rhythm="per-stage"):
+        return {"command": f'python3 "{SCRIPT}" save --scope {scope} --stages {stages} --rhythm {rhythm}'}
+
+    def test_the_agent_cannot_save_on_its_own(self):
+        self.said("claim u4", kind="user")
+        for scope in ("me", "project"):
+            code, _out, err = self.pre("Bash", self.save_cmd(scope))
+            self.assertEqual(code, 2, scope)
+        for path in (os.path.join(self.project, ".unit-claim.json"), os.path.join(self.data, "choice.json"),
+                     os.path.join(self.data, "answers", "x", "y", f"{UNIT}.json")):
+            self.assertEqual(self.pre("Write", {"file_path": path, "content": "{}"})[0], 2, path)
+        self.assertEqual(self.pre("Write", {"file_path": os.path.join(self.project, "notes.md"), "content": "x"})[0], 0)
+
+    def test_the_developer_asking_allows_it(self):
+        self.said("please save my claim choice: no design stages, per-stage", kind="user")
+        self.assertEqual(self.pre("Bash", self.save_cmd())[0], 0)
+
+    def test_for_this_project_allows_exactly_that_answer(self):
+        self.answer("Functional Design", "unit-end", "For this project")
+        self.said("go on", kind="user")
+        self.assertEqual(self.pre("Bash", self.save_cmd("project", "functional-design", "unit-end"))[0], 0)
+        self.assertEqual(self.pre("Bash", self.save_cmd("project", "none", "unit-end"))[0], 2)
+
+
 class TestAfterTheClaim(Case):
     def test_skips_are_named_after_the_claim(self):
         self.answer()
@@ -323,8 +357,8 @@ class TestHooksJson(unittest.TestCase):
         with open(os.path.join(PLUGIN, "hooks", "hooks.json")) as f:
             hooks = json.load(f)["hooks"]
         self.assertEqual(set(hooks), {"PreToolUse", "PostToolUse", "UserPromptSubmit"})
-        for name in ("PreToolUse", "PostToolUse"):
-            self.assertEqual(hooks[name][0]["matcher"], "Bash|AskUserQuestion")
+        self.assertEqual(hooks["PreToolUse"][0]["matcher"], "Bash|AskUserQuestion|Write|Edit|MultiEdit")
+        self.assertEqual(hooks["PostToolUse"][0]["matcher"], "Bash|AskUserQuestion")
         for entries in hooks.values():
             self.assertIn("claim_guard.py", entries[0]["hooks"][0]["command"])
 

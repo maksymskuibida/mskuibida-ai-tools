@@ -191,6 +191,40 @@ class TestFinalize(Base):
         self.assertIn("Saturdays hold twelve", a2["body"])
         self.assertIn("A-2", " ".join(info["todo"]))
 
+    def test_an_assumption_added_in_front_takes_a_new_id(self):
+        _p, v1, _i = self.finished()
+        labels = {r["id"]: (r["label"], r["body"]) for r in rows_of(v1, "assumptions")}
+        spec = os.path.join(self.project, "aidlc/spaces/default/intents/260101-bakery-preorder/construction", UNIT, "functional-design/functional-spec.md")
+        with open(spec, encoding="utf-8") as f:
+            text = f.read()
+        with open(spec, "w", encoding="utf-8") as f:
+            f.write(text.replace("## Assumptions & Open Questions\n\n", "## Assumptions & Open Questions\n\n- [assumption] Pick-up is at the shop only.\n"))
+        path, d2, _info = self.draft()
+        rows = rows_of(d2, "assumptions")
+        ids = [r["id"] for r in rows]
+        self.assertEqual(len(ids), len(set(ids)), ids)
+        for r in rows:
+            if r["id"] in labels and r["body"] == labels[r["id"]][1]:
+                self.assertEqual(r["label"], labels[r["id"]][0], "a carried row keeps the agent's label")
+        new = next(r for r in rows if r["body"] == "Pick-up is at the shop only.")
+        self.assertEqual((new["id"], new["label"]), ("A-5", None))
+        new.update(label="low", revNote="New in v2: pick-up at the shop only.")
+        d2["header"]["revisions"][-1]["note"] = "one more assumption"
+        self.save(path, d2)
+        info = self.finalize(path)
+        with open(info["bundle"], encoding="utf-8") as f:
+            marked = {r["id"]: r.get("revKind") for r in rows_of(json.load(f), "assumptions") if r.get("rev")}
+        self.assertEqual(marked, {"A-5": "new"})
+
+    def test_a_revision_without_its_previous_presentation_is_refused(self):
+        self.finished()
+        path, d2, _info = self.draft()
+        self.save(path, agent_pass(d2))
+        shutil.rmtree(os.path.join(self.store, "bundles"))
+        out = self.run_script("finalize", "--bundle", path, "--out", os.path.join(self.tmp, "o"))
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("pass it with --previous", out.stderr)
+
     def test_unit_end_page_folds_the_approved_plan(self):
         _p, plan, _i = self.finished()
         _path, end, _info = self.finished("unit-end")
@@ -250,6 +284,27 @@ class TestRender(Base):
         self.assertIn('class="row" id="A-2"', out["read"], "a row changed in v2 turns unread")
         self.assertIn('id="A-2"', out["v2"])
         self.assertNotIn('id="A-1"', out["v2"])
+
+    def test_a_steps_read_mark_follows_the_step_not_its_number(self):
+        _path, b, _info = self.finished()
+        key = b["plan"]["steps"][1]["source"]["key"]
+        self.assertTrue(key.startswith("step:"))
+        b["plan"]["steps"].insert(0, dict(b["plan"]["steps"][0], title="A new first step", source={"path": "x", "key": "step:new", "digest": "0" * 12}))
+        for n, st in enumerate(b["plan"]["steps"], 1):
+            st["n"] = n
+        page = render(b, {"read": {"read": {key: 1}}})["read"]
+        self.assertIn('class="row step read" id="step-3"', page)
+        self.assertIn('class="row step" id="step-2"', page)
+
+    def test_bundle_values_cannot_inject_links(self):
+        _path, b, _info = self.finished()
+        b["header"]["links"] = {"records": "javascript:alert(1)//"}
+        b["sections"][2]["rows"][0]["refs"] = [{"label": "x", "tip": "<b>t</b>", "target": "path:a.md"}]
+        b["sections"][2]["rows"][0]["rev"] = "1<script>"
+        page = render(b, {"full": {"mode": "full"}})["full"]
+        self.assertNotIn("javascript:", page)
+        self.assertNotIn("<script>", page)
+        self.assertNotIn("<b>t</b>", page)
 
     def test_the_unit_end_page_renders(self):
         self.finished()

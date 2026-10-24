@@ -356,7 +356,7 @@ def assumptions(unit, stages, defs, questions):
                     "id": f"A-{n}", "title": one_line(body), "label": None, "body": body,
                     "where": STAGE_SHORT.get(stage, ("", unit.stage_name(stage)))[1],
                     "refs": make_refs(item, defs, stage, questions),
-                    "source": {"path": rel(path, unit.project), "key": f"assumption-{i}", "digest": digest(body)},
+                    "source": {"path": rel(path, unit.project), "key": "assumption:" + digest(body)[:8], "digest": digest(body)},
                 })
     return rows
 
@@ -468,7 +468,7 @@ def plan_steps(path, unit, defs, questions):
             "n": i, "title": one_line(st["title"], 120), "layer": layer_of(st["title"]), "files": len(files),
             "subs": [{"text": s[:4000]} for s in st["subs"]] or [{"text": st["title"]}],
             "implements": implements,
-            "source": {"path": rel(path, unit.project), "key": f"step-{st['n']}", "digest": digest(st["title"], *st["subs"])},
+            "source": {"path": rel(path, unit.project), "key": "step:" + gate_bundle.slugify(st["title"]), "digest": digest(st["title"], *st["subs"])},
         })
     return out, raw
 
@@ -526,11 +526,11 @@ def unit_end_sections(unit, defs, questions):
     changes = []
     for i, b in enumerate(bullets(pick("deviations")), 1):
         changes.append({"id": f"D-{i}", "title": one_line(b), "label": None, "body": b, "refs": make_refs(b, defs, "code-generation", questions),
-                        "source": {"path": src, "key": f"deviation-{i}", "digest": digest(b)}})
+                        "source": {"path": src, "key": "deviation:" + digest(b)[:8], "digest": digest(b)}})
     unverified = []
     for i, b in enumerate(bullets(pick("not verified")), 1):
         unverified.append({"id": f"V-{i}", "title": one_line(b), "label": None, "body": b, "refs": make_refs(b, defs, "code-generation", questions),
-                           "source": {"path": src, "key": f"unverified-{i}", "digest": digest(b)}})
+                           "source": {"path": src, "key": "unverified:" + digest(b)[:8], "digest": digest(b)}})
     built = []
     for i, r in enumerate(table_rows(pick("files created", "files")), 1):
         area = plain(r.get("area", "") or f"Piece {i}")
@@ -539,7 +539,7 @@ def unit_end_sections(unit, defs, questions):
         built.append({"id": f"B-{i}", "title": one_line(f"{area}: {what}" if what else area), "label": None,
                       "body": what or area, "where": files[0][:48] if files and files[0] else "", "whereIsPath": True,
                       "refs": make_refs(what, defs, "code-generation", questions),
-                      "source": {"path": src, "key": f"built-{i}", "digest": digest(area, what, r.get("files", ""))}})
+                      "source": {"path": src, "key": "built:" + gate_bundle.slugify(area), "digest": digest(area, what, r.get("files", ""))}})
     return [
         {"key": "changes", "kind": "changes", "title": "Changed after plan approval", "short": "Changed",
          "hint": "The design stays as approved, except these", "refsLabel": "Was", "rows": changes,
@@ -565,6 +565,15 @@ def folded_design(plan_bundle):
 
 # ---------------------------------------------------------------- carrying the agent's work over
 
+def next_free(rid, taken):
+    """The first id with the same prefix as `rid` (A-3 → A-n) that is not taken."""
+    found = re.match(r"^(.*?)(\d+)$", rid)
+    prefix, n = (found.group(1), int(found.group(2))) if found else (rid + "-", 1)
+    while f"{prefix}{n}" in taken:
+        n += 1
+    return f"{prefix}{n}"
+
+
 def carry_over(draft, previous):
     """Rows whose source is unchanged come back as the agent left them; hand-written rows and sections come back too."""
     if not previous:
@@ -585,19 +594,26 @@ def carry_over(draft, previous):
         for field in ("title", "short", "hint", "refsLabel"):
             if field in s:
                 mine[field] = s[field]
-        rows = []
+        rows = []  # [(row, carried)]
         for r in mine["rows"]:
             old = prev_rows.get((r["source"]["path"], r["source"]["key"])) if r.get("source") else None
             if old and old["source"]["digest"] == r["source"]["digest"]:
-                rows.append(copy.deepcopy(old))
+                rows.append((copy.deepcopy(old), True))
             elif old:
                 kept = copy.deepcopy(old)  # the agent's wording stays as a starting point; the label is asked again
                 kept.update(body=r["body"], source=r["source"], label=None)
                 kept.pop("revNote", None)
-                rows.append(kept)
+                rows.append((kept, True))
             else:
-                rows.append(r)
-        mine["rows"] = rows + [copy.deepcopy(r) for r in hand]
+                rows.append((r, False))
+        hand = [copy.deepcopy(r) for r in hand]
+        taken = {r["id"] for r, carried in rows if carried} | {r["id"] for r in hand}
+        for r, carried in rows:
+            if not carried:
+                if r["id"] in taken:
+                    r["id"] = next_free(r["id"], taken)
+                taken.add(r["id"])
+        mine["rows"] = [r for r, _carried in rows] + hand
         if mine.get("rows") and mine.get("asApproved"):
             mine.pop("asApproved")
     if draft.get("plan") and previous.get("plan"):
@@ -808,7 +824,11 @@ def finalize(args):
     if args.previous:
         previous = load_json(args.previous)
     elif revision > 1:
-        previous = load_json(os.path.join(store_dir(intent, unit), f"{bundle.get('page')}-v{revision - 1}.json"))
+        path = os.path.join(store_dir(intent, unit), f"{bundle.get('page')}-v{revision - 1}.json")
+        previous = load_json(path)
+        if not previous:
+            raise BundleError(f"this is v{revision}, and v{revision - 1}, which it is compared with to mark what changed, "
+                              f"is not in the bundle store ({path}); pass it with --previous")
     else:
         previous = None
     missing = mark_revisions(bundle, previous)

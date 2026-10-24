@@ -3,6 +3,7 @@ unit-end page (`bundles/<id>` rows) instead of a page per stage. Per-stage gates
 test_gate_guard.py; the last class here checks a per-stage claim still goes that way.
 Run: python3 -m unittest discover -s plugins/approval-gates/tests"""
 
+import datetime
 import json
 import os
 import unittest
@@ -10,14 +11,16 @@ import unittest
 from test_gate_guard import INTENT, URL, Case, gate_question
 
 UNIT = "u2-pickup-slots"
-PLAN_ID = f"{INTENT}-{UNIT}-plan-v1-20260101T0900"
-END_ID = f"{INTENT}-{UNIT}-unit-end-v1-20260101T1100"
+OLD_PLAN_ID = f"{INTENT}-{UNIT}-plan-v1-20260101T0900"
 
 
 class UnitCase(Case):
     def setUp(self):
         super().setUp()
         self.stamp("unit-end")
+        self.now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M")  # a bundle is stamped when it is built
+        self.plan_id = f"{INTENT}-{UNIT}-plan-v1-{self.now}"
+        self.end_id = f"{INTENT}-{UNIT}-unit-end-v1-{self.now}"
 
     def stamp(self, rhythm, unit=UNIT):
         with open(os.path.join(self.project, "aidlc", ".aidlc-unit-scope.json"), "w", encoding="utf-8") as f:
@@ -67,11 +70,11 @@ class TestPlanPage(UnitCase):
         code, _out, err = self.plan_question()
         self.assertEqual(code, 2)
         self.assertIn("plan page", err)
-        self.write_bundle(PLAN_ID)
+        self.write_bundle(self.plan_id)
         code, _out, err = self.plan_question()
         self.assertEqual(code, 2)
-        self.assertIn(f"{URL}#{PLAN_ID}", err)
-        self.said(f"**Read:** {URL}#{PLAN_ID}")
+        self.assertIn(f"{URL}#{self.plan_id}", err)
+        self.said(f"**Read:** {URL}#{self.plan_id}")
         code, _out, err = self.plan_question()
         self.assertEqual(code, 0, err)
 
@@ -83,22 +86,29 @@ class TestPlanPage(UnitCase):
 
     def test_the_unit_end_bundle_does_not_unlock_the_plan_page(self):
         self.open_plan()
-        self.write_bundle(END_ID)
-        self.said(f"**Read:** {URL}#{END_ID}")
+        self.write_bundle(self.end_id)
+        self.said(f"**Read:** {URL}#{self.end_id}")
+        self.assertEqual(self.plan_question()[0], 2)
+
+    def test_a_bundle_built_before_the_gate_opened_does_not_count(self):
+        self.open_plan()
+        _code, out = self.write_bundle(OLD_PLAN_ID)
+        self.assertIn("built before this gate opened", self.context(out))
+        self.said(f"**Read:** {URL}#{OLD_PLAN_ID}")
         self.assertEqual(self.plan_question()[0], 2)
 
     def test_a_bundle_of_another_unit_does_not_count(self):
         self.open_plan()
-        other = f"{INTENT}-u9-other-plan-v1-20260101T0900"
+        other = f"{INTENT}-u9-other-plan-v1-{self.now}"
         self.write_bundle(other)
         self.said(f"**Read:** {URL}#{other}")
         self.assertEqual(self.plan_question()[0], 2)
 
     def test_the_question_carries_no_link(self):
         self.open_plan()
-        self.write_bundle(PLAN_ID)
-        self.said(f"**Read:** {URL}#{PLAN_ID}")
-        code, _out, err = self.pre("AskUserQuestion", gate_question(f"Approve? {URL}#{PLAN_ID}", labels=("Approve Plan",)))
+        self.write_bundle(self.plan_id)
+        self.said(f"**Read:** {URL}#{self.plan_id}")
+        code, _out, err = self.pre("AskUserQuestion", gate_question(f"Approve? {URL}#{self.plan_id}", labels=("Approve Plan",)))
         self.assertEqual(code, 2)
         self.assertIn("message of its own", err)
 
@@ -114,14 +124,21 @@ class TestUnitEndPage(UnitCase):
         self.assertEqual(self.ask("Unit complete. How would you like to proceed?")[0], 2)
         report = {"command": f"aidlc engine orchestrate report --stage code-generation --unit {UNIT} --result approved --user-input Approve"}
         self.assertEqual(self.pre("Bash", report)[0], 2)
-        self.write_bundle(PLAN_ID)  # the plan page is not this gate's page
+        self.write_bundle(self.plan_id)  # the plan page is not this gate's page
         self.assertEqual(self.pre("Bash", report)[0], 2)
-        self.write_bundle(END_ID)
-        self.said(f"**Read:** {URL}#{END_ID}")
+        self.write_bundle(self.end_id)
+        self.said(f"**Read:** {URL}#{self.end_id}")
         code, _out, err = self.ask("Unit complete. How would you like to proceed?")
         self.assertEqual(code, 0, err)
         code, _out, err = self.pre("Bash", report)
         self.assertEqual(code, 0, err)
+
+    def test_another_stage_of_the_unit_keeps_its_page_per_stage(self):
+        code, out, err = self.post("Bash", {"command": f"aidlc engine orchestrate report --stage functional-design --unit {UNIT} --result revised"},
+                                   {"stdout": ""})
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.state_of()["pending"]["rhythm"], "per-stage")
+        self.assertIn("gate_bundle.py", self.context(out))
 
     def test_the_directive_alone_marks_the_unit_end_gate(self):
         os.remove(os.path.join(self.project, "aidlc", ".aidlc-unit-scope.json"))
@@ -135,28 +152,38 @@ class TestRowsAndAnswers(UnitCase):
     def test_notes_and_picks_are_the_developers(self):
         self.open_plan()
         for field in ("notes", "picks"):
-            code, err = self.write_bundle(PLAN_ID, {field: {"E-1": "x"}})
+            code, err = self.write_bundle(self.plan_id, {field: {"E-1": "x"}})
             self.assertEqual(code, 2)
             self.assertIn("written by the developer", err)
 
+    def test_a_bundle_row_is_written_once_and_whole(self):
+        self.open_plan()
+        self.write_bundle(self.plan_id)
+        for call in ({"action": "update", "url": URL, "collection": "bundles", "doc_id": self.plan_id, "data": {"status": "x"}},
+                     {"action": "delete", "url": URL, "collection": "bundles", "doc_id": self.plan_id},
+                     {"action": "str_replace", "url": URL, "collection": "bundles", "doc_id": self.plan_id, "field": "notes", "old_str": "a", "new_str": "b"},
+                     {"action": "set", "url": URL, "collection": "bundles", "doc_id": self.plan_id, "data": {"notes.E-1": "x"}}):
+            code, _out, err = self.pre("ArtifactData", call)
+            self.assertEqual(code, 2, call)
+
     def test_request_changes_says_to_quote_notes_and_picks(self):
         self.open_plan()
-        self.write_bundle(PLAN_ID)
+        self.write_bundle(self.plan_id)
         q = gate_question("Approve the code plan?", labels=("Approve Plan", "Request Changes"))
         code, out, err = self.post("AskUserQuestion", q, {"answers": {"Approve the code plan?": "Request Changes"}})
         self.assertEqual(code, 0, err)
         said = self.context(out)
-        self.assertIn(f"bundles/{PLAN_ID}", said)
+        self.assertIn(f"bundles/{self.plan_id}", said)
         self.assertIn("picks", said)
         self.assertIn("--reason", said)
 
     def test_approve_still_says_to_read_the_row(self):
         self.open_plan()
-        self.write_bundle(PLAN_ID)
+        self.write_bundle(self.plan_id)
         q = gate_question("Approve the code plan?", labels=("Approve Plan", "Request Changes"))
         _code, out, _err = self.post("AskUserQuestion", q, {"answers": {"Approve the code plan?": "Approve Plan"}})
         said = self.context(out)
-        self.assertIn(f"bundles/{PLAN_ID}", said)
+        self.assertIn(f"bundles/{self.plan_id}", said)
         self.assertIn("ask in chat", said)
 
 

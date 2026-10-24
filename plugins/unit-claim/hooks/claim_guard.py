@@ -82,22 +82,26 @@ def option(seg, name):
     return None
 
 
+VALUE_OPTIONS = {"--team", "--rhythm", "--space", "--intent", "--owner", "--label"}
+
+
 def positional(tokens):
-    """The first argument that is neither an option nor an option's value."""
+    """The first argument that is neither an option nor the value of one of the claim's value options."""
     skip = False
     for tok in tokens:
         if skip:
             skip = False
             continue
         if tok.startswith("-"):
-            skip = "=" not in tok and tok not in ("--help", "-h", "--json")
+            skip = tok in VALUE_OPTIONS
             continue
         return tok
     return None
 
 
 def claims(command):
-    """[(unit, rhythm or None)] of the Unit claims in a command line."""
+    """[(unit or None, rhythm or None)] of the Unit claims in a command line; None when a claim names no Unit that can
+    be read (the claim is then refused)."""
     found = []
     if "claim" not in command:
         return found
@@ -107,17 +111,17 @@ def claims(command):
             if not base.startswith("aidlc"):
                 continue
             rest = seg[i + 1:]
-            unit = None
-            if base.startswith("aidlc-unit") and rest[:1] == ["claim"]:
-                unit = positional(rest[1:])
-            elif rest[:2] == ["unit", "claim"]:
-                unit = positional(rest[2:])
-            elif "--claim" in rest:
-                unit = option(rest, "claim")
-            if unit and "--help" not in rest and "-h" not in rest:
-                found.append((unit, option(rest, "rhythm")))
-            if unit or "--help" in rest:
+            if "--help" in rest or "-h" in rest:
                 break
+            if base.startswith("aidlc-unit") and rest[:1] == ["claim"]:
+                found.append((positional(rest[1:]), option(rest, "rhythm")))
+            elif rest[:2] == ["unit", "claim"]:
+                found.append((positional(rest[2:]), option(rest, "rhythm")))
+            elif any(t == "--claim" or t.startswith("--claim=") for t in rest):
+                found.append((option(rest, "claim"), option(rest, "rhythm")))
+            else:
+                continue
+            break
     return found
 
 
@@ -260,10 +264,19 @@ def pre(event, project):
                           "(Functional Design, NFR Requirements, NFR Design, Infrastructure Design), each judged against "
                           f"the stage's own condition (`python3 \"{SCRIPT}\" stages` prints them). Then ask the dialog.")
         return
+    if tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
+        path = os.path.abspath(str(ti.get("file_path") or ti.get("notebook_path") or ""))
+        if os.path.basename(path) == cc.PROJECT_FILE or path.startswith(os.path.abspath(cc.data_dir()) + os.sep):
+            raise Refusal("A claim choice is written by claim_choice.py and the claim dialog only, never by hand.")
+        return
     if tool != "Bash":
         return
     command = str(ti.get("command", ""))
+    check_saves(event, project, command)
     for unit, rhythm in claims(command):
+        if not unit or unit.startswith("-"):
+            raise Refusal("This claim names no Unit that can be read. Write it as `aidlc unit claim <unit> --team \"<label>\" "
+                          "--rhythm <rhythm>`, the Unit first.")
         choice = cc.choice_for(project, unit)
         if not choice:
             scope, saved = cc.saved_choice(project)
@@ -281,6 +294,60 @@ def pre(event, project):
         if choice and stage in cc.left_out(choice):
             raise Refusal(f"{cc.NAMES.get(stage, stage)} was left out for {unit} at the claim. Report it skipped for this "
                           f"Unit instead, then run `next`: {cc.skip_command(stage, unit)}")
+
+
+def saves(command):
+    """[(scope, stages, rhythm)] of the `claim_choice.py save` calls in a command line."""
+    out = []
+    if "claim_choice" not in command:
+        return out
+    for seg in segments(command):
+        for i, tok in enumerate(seg):
+            if os.path.basename(tok) == "claim_choice.py" and seg[i + 1:i + 2] == ["save"]:
+                out.append((option(seg, "scope"), option(seg, "stages"), option(seg, "rhythm")))
+    return out
+
+
+def last_prompt(event):
+    """The text of the developer's last prompt in the transcript, or ''."""
+    path = event.get("transcript_path")
+    text = ""
+    if not path:
+        return text
+    try:
+        for entry in entries(path):
+            if is_prompt(entry):
+                content = entry["message"]["content"]
+                text = content if isinstance(content, str) else " ".join(str(b.get("text", "")) for b in content if isinstance(b, dict))
+    except (OSError, KeyError, TypeError):
+        return ""
+    return text
+
+
+def check_saves(event, project, command):
+    """A choice is saved only when the developer chose so: "For this project" in the dialog (the bookkeeping pull request
+    saves exactly that answer), or a prompt of theirs that asks to save or change it."""
+    for scope, stages, rhythm in saves(command):
+        if scope == "project":
+            answers = os.path.join(cc.data_dir(), "answers")  # any checkout: the pull request runs in a worktree of its own
+            wanted = cc.parse_stages(stages or "") if stages != "agent" else "agent"
+            if wanted not in (None, "agent"):
+                wanted, _notes = cc.with_needs(wanted)
+            for dirpath, _dirs, files in os.walk(answers):
+                for name in files:
+                    a = cc.load(os.path.join(dirpath, name)) or {}
+                    if a.get("save") == "project" and a.get("stages") == wanted and a.get("rhythm") == rhythm:
+                        break
+                else:
+                    continue
+                break
+            else:
+                if not re.search(r"\b(save|saved|claim choice|remember)\b", last_prompt(event), re.I):
+                    raise Refusal("A choice is saved for the project only when the developer chose \"For this project\" in "
+                                  "the claim dialog (with these stages and rhythm) or asked for it in their last message.")
+        elif not re.search(r"\b(save|saved|claim choice|remember)\b", last_prompt(event), re.I):
+            raise Refusal("A choice is saved for the developer when they pick \"For me\" in the claim dialog (the hook "
+                          "saves it) or ask for it in their last message; never on your own.")
 
 
 def post(event, project):
