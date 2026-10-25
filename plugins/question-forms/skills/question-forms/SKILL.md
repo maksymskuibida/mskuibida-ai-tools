@@ -14,9 +14,11 @@ edit a form page per stage.
 
 `Artifact` → `action: "list"` → the artifact titled **AI-DLC question forms**. If the
 developer has none, publish `question-form.html` from this skill's directory once:
-`capabilities: {db: {}}`, `icon: "form"`, description "Fill a stage's AI-DLC questions file in
-a form; Claude copies the saved answers word for word into the file." Reuse its URL for every
-form from then on.
+`capabilities: {db: {}, user: {}}`, `icon: "form"`, description "Fill a stage's AI-DLC questions
+file in a form; Claude copies the saved answers word for word into the file." Reuse its URL for
+every form from then on. After a plugin update, republish the page from this file to the same URL
+once, with the same capabilities: the rows stay. (`user` keeps each viewer's "new since you
+looked" marks with their account; without it they stay in that browser.)
 
 ## 2. Open a form (at every questions file)
 
@@ -48,6 +50,27 @@ Put the link `<artifact url>#<id>` beside the file path in the message that pres
 questions. Nothing is pre-selected (a board's cards are the one exception, § 5); a proposal is shown apart and adopted only by the developer's
 press; the engine's own mode question is unchanged, and answers from the form count as the
 developer editing the file.
+
+### What the page does with the rows, and the optional fields that feed it
+
+The page has a sticky bar (filters for unanswered and for new or changed questions, the answered
+count, save state, Done, and a chip per question that jumps to it), tooltips on ids, terms and
+badges, and links. None of it needs extra rows; these optional fields make it better:
+
+- `refs: [{label, tip, target}]` on a question or card — what it refers to: another question
+  (`target: "#Q3"`, a live link), a page (`https://…`), or a source the page does not hold
+  (`path:<repo path>`, or any other text such as `story:US2.1`): that one is still a link, its
+  `tip` is all the developer gets, and a press says the source isn't in the form. `tip` is plain
+  words ("The story about guests filtering dishes by diet"), never just the id again.
+- `terms: {"<word>": "<plain meaning>"}` on the form — words and abbreviations that get a
+  tooltip wherever they appear. The page knows common ones (AC, API, CI, MVP, NFR, PR, SSO, UI …);
+  add the project's own (a Unit name, a domain word).
+- `revNote` on a question — one line on why a follow-up was added or a question changed.
+
+Ids of other questions in the form's text (`Q5`, `R-06`) become links by themselves, and a
+`` `code` `` span that is a file path becomes a file link; write them as you would anyway. In
+`text`, `from`, `plain` and option labels say things in words, not by id: "Guests can't tell
+which dish is vegan", not "AC 3 of US2.1"; put the id in `refs`.
 
 ## 3. Change a form
 
@@ -88,11 +111,13 @@ agent proposes and can be moved by button or drag.
   board fills the screen; then each box scrolls on its own. Cards show their id, title and move
   buttons; details open per card or all at once from the bar.
 - `forms/<id>/questions/<qid>` per card — `{n, text, ctx?, kind: "card", from?, group?, proposed:
-  {k, why?}, outcomes?: {<box k>: "…"}}`; `group` is needed only when the proposed box is a sink. `text` is a short title a person understands without
+  {k, why?}, outcomes?: {<box k>: "…"}, plain?, action?, refs?}`; `group` is needed only when the proposed box is a sink. `text` is a short title a person understands without
   knowing the IDs (not "AC 3 of US2.1", but "Guests can't tell which dish is vegan"); `from` one
   line on who asked for what; `outcomes` says what happens when the card sits in each box. A
-  card's `ctx` follows the § 2 rule: paragraphs and `- ` bullets with **bold** lead-ins, never
-  one run-on paragraph; `text`, `from`, `outcomes` and `proposed.why` take the inline subset only. On a
+  card's optional `plain` says what it means in plain words (shown on the card under the
+  title), `action` the suggested action (shown in its details), and `refs` what it refers to
+  (§ 2). A card's `ctx` follows the § 2 rule: paragraphs and `- ` bullets with **bold** lead-ins, never
+  one run-on paragraph; `text`, `from`, `outcomes`, `plain`, `action` and `proposed.why` take the inline subset only. On a
   grouped board the group alone decides where a card can go; on a board without groups,
   `outcomes` also limits the boxes offered to its keys (plus the proposed box).
 - A board is never opened with zero cards: when there is nothing to sort, no board and no follow-up

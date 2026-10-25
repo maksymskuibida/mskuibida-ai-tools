@@ -1,22 +1,36 @@
 <title>AI-DLC question forms</title>
+<meta name="claude:viewport-fit-sides" content="cover">
 <!--
   AI-DLC question forms — the one template for every AI-DLC questions file.
 
-  Published ONCE per developer as a private Artifact with the `db` capability
-  (capabilities: {db: {}}, icon "form"); never regenerated per stage. Every questions
+  Published ONCE per developer as a private Artifact with the `db` and `user` capabilities
+  (capabilities: {db: {}, user: {}}, icon "form"); never regenerated per stage. Every questions
   file becomes a form INSIDE this artifact, always, written as rows by the agent with the
   ArtifactData tool (see SKILL.md next to this file). The page renders whatever the rows
   say, live, so a question can be added, changed or removed without republishing anything.
+  Published without `user`, the page still works; "new since you looked" marks then stay in
+  this browser only.
 
   Data contract (the only thing an agent writes):
 
     forms/<id>                       {title, stage, file, status: "open"|"done",
-                                      createdAt (ISO), intro?, savedAt?, answers?}
+                                      createdAt (ISO), intro?, savedAt?, answers?, terms?}
       id: [a-z0-9._-]+ — e.g. 261016-daily-page-mvp-intent-capture
+      terms?: {"NFR": "plain-language meaning", …} — words and abbreviations that get a tooltip
+        wherever they appear in the form's text (whole words, case as written). The page knows a
+        few common ones itself (AC, API, CI, MVP, NFR, PR, SSO, UI, UX …); terms adds or overrides.
     forms/<id>/questions/<qid>       {n: 1, text, ctx?, kind: "single"|"multi",
                                       options: [{k: "A", t: "…"}], other?: false,
-                                      proposed?: {k: "A", why: "…"}, hint?}
+                                      proposed?: {k: "A", why: "…"}, hint?, refs?, revNote?}
       qid: the file's question id (Q1, Q2 …). other defaults to true.
+      refs?: [{label, tip, target}] — what the question refers to, shown as links under it.
+        label is short (an id is fine here: "FR-3", "US2.1"); tip says in plain words what it is
+        (the tooltip, and all the reader gets when the target is not on this page).
+        target "#<qid>" — another question or card of this form: a live link that jumps there.
+        target "https://…" — opens in a new tab.
+        anything else ("path:src/app.ts", "story:US2.1", "") — the source isn't in this page: it
+        still looks like a link, shows tip as its tooltip, and a press says so.
+      revNote?: one line on why the question was added or changed (a follow-up), shown above it.
 
     Markdown the page renders (functions md and inline; nothing else):
       ctx (questions and cards) — blocks separated by a blank line. A block whose every line
@@ -24,13 +38,17 @@
         line is not a sub-item); any other block is a paragraph, its single line breaks kept.
         Inside both: `code` and **bold**.
       text, options[].t, proposed.why, proposed.t, hint, from, outcomes, boxes[].t/hint,
-        groups[].t/hint — `code` and **bold** only, no blocks or lists.
-      title, stage, file, intro — plain text.
+        groups[].t/hint, plain, action, revNote — `code` and **bold** only, no blocks or lists.
+      title, stage, file, intro, refs[].label/tip — plain text.
       Not rendered: •, –, numbered or nested lists, headings, links, _italic_; they show as
       literal text. A sentence before a list needs a blank line, or the list stays plain lines.
+      Linked by the page itself: an id of another question or card of this form written in any
+      rendered text (Q5, R-06) becomes a live link to it; on a question list, a Q<n> that is not
+      in this form is shown as a link that says so. A `code` span that is a file path is shown as
+      a file link (the file is not in this page). Terms get a tooltip.
 
     Text question — no options, only a text field (no Other):
-    forms/<id>/questions/<qid>       {n, text, ctx?, kind: "text", hint?, proposed?: {t: "…"}}
+    forms/<id>/questions/<qid>       {n, text, ctx?, kind: "text", hint?, proposed?: {t: "…"}, refs?}
       proposed.t is a suggested answer the developer can take with one press.
 
     Board form — cards sorted into boxes instead of questions answered one by one:
@@ -42,11 +60,14 @@
       move only within its group or to a sink box; a card proposed into a sink box names its group
       in `group` (card field), else it may go to any box.
     forms/<id>/questions/<qid>       {n, text, ctx?, kind: "card", from?, group?, proposed: {k: "<box k>", why?},
-                                      outcomes?: {"<box k>": "what happens when the card sits here"}}
+                                      outcomes?: {"<box k>": "what happens when the card sits here"},
+                                      plain?, action?, refs?}
       text is the card's short title; from is one line on who asked for what. A card starts
       in its proposed box. On a grouped board the group alone decides where it can go, and
       outcomes only describes; on a board without groups, outcomes (when present) limits the
       boxes offered to its keys and the proposed box.
+      plain?: what the card means in plain words, shown on the card under its title.
+      action?: the suggested action, shown in the card's details. refs?: as for questions.
 
   What the page writes (the only thing an agent reads back, one `get` of forms/<id>):
 
@@ -55,6 +76,8 @@
       On Done every card is written, moved or not.
     forms/<id>.status       = "done" when the developer presses Done; "open" again
                               after a later edit.   forms/<id>.savedAt = ISO of Done.
+    data/users/<viewer>/seen-<id>  {marks: {<qid>: <signature>}} — the viewer's own "seen" marks
+      (localStorage when the user capability is not served). Never read by the agent.
 
   Tag format when copying into the questions file:  A · A, C · X — each followed by
   " — <note>" when a note was written. A note is required for X, optional otherwise.
@@ -63,177 +86,279 @@
   Link to a form: <artifact url>#<id>. No hash: the list of forms.
 -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
-/* Layout: one reading column. A form is a numbered list of sections; options are selectable rows,
-   the note sits under them, the proposal apart. A fixed bar carries save state and Done. */
+/* The same visual system as the approval-gates unit page (unit-gate.html): one reading column, a header
+   card with the form's facts, a sticky bar (filters, progress, save state, Done, a chip per question or
+   box), then the questions as cards, or the board. */
 :root {
-  --bg: #f2f4f7; --surface: #ffffff; --fg: #151b26; --muted: #5a6474; --line: #d6dce6;
-  --accent: #b06f0c; --accent-soft: #fbefd9; --ink: #24427a; --ink-soft: #e2e9f6;
-  --ok: #2c7a4f; --warn: #a63a2b; --warn-soft: #fbe6e2;
-  --display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
-  --body: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
-  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --bg: #F5F6F8; --surface: #FFFFFF; --raised: #F8F9FB; --fg: #171A21; --fg-2: #3D4350; --muted: #5A6170;
+  --line: #E4E7EC; --line-soft: #EEF0F3; --control: #D5D9E0; --field: #878E9B; --hover: #F7F8FA;
+  --accent: #2F49C4; --accent-strong: #1E3399; --accent-soft: #EEF1FB; --accent-tint: #F4F6FE;
+  --crit-bg: #FDE4E4; --crit-fg: #9B1C1C; --high-bg: #FDEAD7; --high-fg: #8A3B00;
+  --med-bg: #E3ECFB; --med-fg: #1E4A9A; --low-bg: #EEF0F3; --low-fg: #4A5160;
+  --ok-bg: #E6F4EA; --ok-fg: #1F6B36; --warn-bg: #FFF4DB; --warn-fg: #7A4B00; --warn-dot: #B26B00;
+  --r2-tint: #F8F5FE; --r2-bg: #EDE5FC; --r2-fg: #5B2FA8;
+  --band-bg: #171A21; --band-fg: #FFFFFF; --band-muted: #C9CDD6; --tip-bg: #171A21; --tip-fg: #FFFFFF;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --bar-h: 120px;
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
-  --bg: #10141b; --surface: #181e28; --fg: #e5e9f0; --muted: #98a2b3; --line: #2b3442;
-  --accent: #eab062; --accent-soft: #3a2b14; --ink: #8fb0ec; --ink-soft: #1d2a42;
-  --ok: #6cc28f; --warn: #ef8f7c; --warn-soft: #3d221d; color-scheme: dark } }
+  --bg: #111318; --surface: #1A1D24; --raised: #20232B; --fg: #E6E8EE; --fg-2: #C3C8D2; --muted: #9AA1AF;
+  --line: #2A2E38; --line-soft: #22262F; --control: #3A3F4B; --field: #6E7585; --hover: #20242C;
+  --accent: #8FA2FF; --accent-strong: #B5C2FF; --accent-soft: #222B4D; --accent-tint: #1B2035;
+  --crit-bg: #3D1D1D; --crit-fg: #F4A4A4; --high-bg: #3A2614; --high-fg: #F2B27A;
+  --med-bg: #1C2A45; --med-fg: #9DBBF2; --low-bg: #262A33; --low-fg: #AEB4C0;
+  --ok-bg: #183024; --ok-fg: #8FD3A6; --warn-bg: #3A2C12; --warn-fg: #F0C36B; --warn-dot: #F0A93B;
+  --r2-tint: #1E1A2B; --r2-bg: #2E2547; --r2-fg: #C7B1F5;
+  --band-bg: #E6E8EE; --band-fg: #111318; --band-muted: #3D4350; --tip-bg: #E6E8EE; --tip-fg: #111318;
+  color-scheme: dark } }
 :root[data-theme="dark"] {
-  --bg: #10141b; --surface: #181e28; --fg: #e5e9f0; --muted: #98a2b3; --line: #2b3442;
-  --accent: #eab062; --accent-soft: #3a2b14; --ink: #8fb0ec; --ink-soft: #1d2a42;
-  --ok: #6cc28f; --warn: #ef8f7c; --warn-soft: #3d221d; color-scheme: dark }
+  --bg: #111318; --surface: #1A1D24; --raised: #20232B; --fg: #E6E8EE; --fg-2: #C3C8D2; --muted: #9AA1AF;
+  --line: #2A2E38; --line-soft: #22262F; --control: #3A3F4B; --field: #6E7585; --hover: #20242C;
+  --accent: #8FA2FF; --accent-strong: #B5C2FF; --accent-soft: #222B4D; --accent-tint: #1B2035;
+  --crit-bg: #3D1D1D; --crit-fg: #F4A4A4; --high-bg: #3A2614; --high-fg: #F2B27A;
+  --med-bg: #1C2A45; --med-fg: #9DBBF2; --low-bg: #262A33; --low-fg: #AEB4C0;
+  --ok-bg: #183024; --ok-fg: #8FD3A6; --warn-bg: #3A2C12; --warn-fg: #F0C36B; --warn-dot: #F0A93B;
+  --r2-tint: #1E1A2B; --r2-bg: #2E2547; --r2-fg: #C7B1F5;
+  --band-bg: #E6E8EE; --band-fg: #111318; --band-muted: #3D4350; --tip-bg: #E6E8EE; --tip-fg: #111318;
+  color-scheme: dark }
 
-body { background: var(--bg); color: var(--fg); font: 15px/1.55 var(--body); padding: 0 16px; }
-main { max-width: 760px; margin: 0 auto; padding-block: 36px 140px; display: grid; gap: 36px; }
-header { display: grid; gap: 8px; }
-.eyebrow { font: 500 12px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-.eyebrow a { color: inherit; text-decoration: none; }
-.eyebrow a:hover { text-decoration: underline; }
-h1 { font: 700 clamp(28px, 5vw, 38px)/1.1 var(--display); margin: 0; text-wrap: balance; }
-.lede { color: var(--muted); margin: 0; max-width: 62ch; }
-.meta { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; color: var(--muted); font-size: 14px; min-width: 0; }
-.file { font: 500 12.5px var(--mono); background: var(--ink-soft); color: var(--ink); padding: 4px 8px; border-radius: 4px; max-width: 100%; overflow-wrap: anywhere; }
-.pill { font: 500 12px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; padding: 5px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
-.pill.done { color: var(--ok); border-color: var(--ok); }
-.pill.open { color: var(--accent); border-color: var(--accent); }
+* { box-sizing: border-box; }
+html { overflow-x: hidden; }
+body { background: var(--bg); color: var(--fg); font: 14px/1.5 var(--body); margin: 0; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+[hidden] { display: none !important; }
+a { color: var(--accent); }
+a:hover { color: var(--accent-strong); }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, a:focus-visible, textarea:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mono { font-family: var(--mono); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.num { font-variant-numeric: tabular-nums; }
+.wrap { width: 100%; max-width: 920px; margin: 0 auto; padding-block: 24px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 16px; }
+body.wide .wrap { max-width: 1320px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
 
-#list { display: grid; gap: 10px; }
-.row { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; align-items: center; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; color: inherit; text-decoration: none; }
-.row:hover { border-color: var(--ink); }
-.row b { font: 600 17px/1.3 var(--display); }
-.row small { color: var(--muted); display: block; margin-top: 2px; }
-.row .pill { justify-self: end; }
-.empty { padding: 20px; border: 1px dashed var(--line); border-radius: 8px; color: var(--muted); display: grid; gap: 8px; max-width: 66ch; }
-.empty p { margin: 0; }
+/* header */
+.head { display: flex; flex-direction: column; gap: 14px; padding: 20px 24px; }
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--muted); font-size: 13px; min-width: 0; }
+.crumbs a { color: inherit; text-decoration: none; } .crumbs a:hover { text-decoration: underline; }
+.status { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 2px 10px; border-radius: 13px; background: var(--warn-bg); color: var(--warn-fg); font-weight: 500; }
+.status i { width: 7px; height: 7px; border-radius: 4px; background: var(--warn-dot); }
+.status.done { background: var(--ok-bg); color: var(--ok-fg); } .status.done i { background: var(--ok-fg); }
+.titlerow { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px 32px; }
+.titlerow > div:first-child { flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.25; text-wrap: balance; overflow-wrap: anywhere; }
+.lede { margin: 0; color: var(--fg-2); line-height: 1.55; max-width: 76ch; }
+.facts { display: flex; flex-wrap: wrap; gap: 10px; }
+.fact { display: flex; flex-direction: column; gap: 2px; padding: 8px 14px; border-radius: 8px; background: var(--bg); min-width: 96px; }
+.fact span { font-size: 12px; color: var(--muted); } .fact b { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.source { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border-radius: 8px; background: var(--raised); font-size: 13px; color: var(--fg-2); min-width: 0; }
+.source .ref { white-space: normal; overflow-wrap: anywhere; text-align: left; }
 
-#questions { display: grid; gap: 44px; }
-section.q { display: grid; gap: 14px; scroll-margin-top: 24px; }
-.qhead { display: flex; gap: 12px; align-items: baseline; }
-.qid { font: 500 13px/1 var(--mono); color: var(--ink); background: var(--ink-soft); padding: 5px 8px; border-radius: 4px; flex: none; }
-h2 { font: 600 22px/1.25 var(--display); margin: 0; text-wrap: balance; min-width: 0; }
-.ctx { display: grid; gap: 10px; max-width: 66ch; }
+/* sticky bar */
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 8; display: flex; flex-direction: column; gap: 10px; padding: 10px 14px; background: color-mix(in srgb, var(--surface) 96%, transparent); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 2px 8px rgba(23, 26, 33, .06); backdrop-filter: blur(6px); }
+.barrow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.filters { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.pill { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid var(--control); background: var(--surface); font-weight: 500; }
+.pill b { font-family: var(--mono); font-weight: 500; font-size: 12px; opacity: .8; }
+.pill[aria-pressed="true"] { background: var(--fg); color: var(--surface); border-color: var(--fg); }
+.tools { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.progress { display: inline-flex; align-items: center; gap: 10px; font-size: 13px; color: var(--fg-2); }
+.meter { width: 100px; height: 6px; border-radius: 3px; background: var(--line-soft); overflow: hidden; display: block; }
+.meter i { display: block; height: 6px; background: var(--accent); transition: width .2s; }
+.btn { height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--control); background: var(--surface); }
+.btn:hover, .pill:hover { border-color: var(--accent); }
+.primary { height: 32px; padding: 0 16px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; font-weight: 600; }
+:root[data-theme="dark"] .primary { color: #111318; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .primary { color: #111318; } }
+.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+.primary:disabled { opacity: .55; cursor: default; }
+.primary.is-done { background: var(--ok-fg); border-color: var(--ok-fg); }
+.save { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 2px 10px; border-radius: 13px; font-size: 12px; font-weight: 500; background: var(--line-soft); color: var(--fg-2); white-space: nowrap; }
+.save i { width: 7px; height: 7px; border-radius: 4px; background: var(--muted); flex: none; }
+.save.ok { background: var(--ok-bg); color: var(--ok-fg); } .save.ok i { background: var(--ok-fg); }
+.save.busy { background: var(--accent-soft); color: var(--accent); } .save.busy i { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+.save.fail { background: var(--crit-bg); color: var(--crit-fg); } .save.fail i { background: var(--crit-fg); }
+.save button { border: 0; background: transparent; padding: 0 0 0 4px; font-weight: 600; text-decoration: underline; color: inherit; }
+@keyframes pulse { 50% { opacity: .35; } }
+.barmsg { font-size: 13px; padding: 8px 10px; border-radius: 6px; background: var(--warn-bg); color: var(--warn-fg); display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.barmsg.crit { background: var(--crit-bg); color: var(--crit-fg); }
+.barmsg button { border: 0; background: transparent; padding: 0; font-weight: 600; text-decoration: underline; color: inherit; }
+.chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
+.chip { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border-radius: 16px; border: 1px solid var(--control); background: var(--surface); color: var(--fg); text-decoration: none; font-size: 13px; white-space: nowrap; }
+.chip:hover { border-color: var(--accent); color: var(--fg); }
+.chip .count { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.chip .st { width: 8px; height: 8px; border-radius: 4px; border: 1.5px solid var(--control); flex: none; }
+.chip.ans .st { background: var(--ok-fg); border-color: var(--ok-fg); }
+.chip.need .st { background: var(--crit-fg); border-color: var(--crit-fg); }
+.chip.fresh { border-color: var(--r2-fg); }
+.chip .sw { width: 8px; height: 8px; border-radius: 2px; background: var(--tone); flex: none; }
+.chip.dim { opacity: .45; }
+.tag { display: inline-flex; align-items: center; gap: 5px; height: 22px; font-size: 11px; font-weight: 600; padding: 0 7px; border-radius: 4px; white-space: nowrap; border: 0; letter-spacing: .02em; }
+.tag.open { background: var(--low-bg); color: var(--low-fg); }
+.tag.ans { background: var(--ok-bg); color: var(--ok-fg); }
+.tag.need { background: var(--crit-bg); color: var(--crit-fg); }
+.tag.differs { background: var(--warn-bg); color: var(--warn-fg); }
+.tag.fresh { background: var(--r2-bg); color: var(--r2-fg); }
+button.tag:hover { filter: brightness(.96); }
+
+/* links: a live jump, an external page, or a source that is not on this page */
+.ref { position: relative; display: inline-flex; align-items: center; gap: 4px; min-height: 22px; padding: 0 6px; border-radius: 5px; background: var(--accent-soft); color: var(--accent); font-family: var(--mono); font-size: 12px; text-decoration: none; white-space: nowrap; vertical-align: baseline; }
+.ref:hover { color: var(--accent-strong); filter: brightness(.97); }
+.ref.off { background: transparent; border: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent); }
+.ref.off::after { content: "↗"; font-size: 10px; opacity: .7; }
+.ref.code { font-weight: 500; }
+.term { text-decoration: underline dotted color-mix(in srgb, var(--fg) 45%, transparent); text-underline-offset: 3px; cursor: help; border-radius: 2px; }
+.refs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.refs > span { font-size: 12px; color: var(--muted); }
+#tip { position: fixed; z-index: 30; max-width: min(340px, calc(100vw - 24px)); padding: 8px 10px; border-radius: 6px; background: var(--tip-bg); color: var(--tip-fg); font: 12px/1.45 var(--body); pointer-events: none; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
+#tip b { font-family: var(--mono); font-weight: 500; }
+#toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); max-width: calc(100vw - 32px); background: var(--tip-bg); color: var(--tip-fg); padding: 8px 14px; border-radius: 8px; font-size: 13px; z-index: 31; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
+.flash { animation: flash 1.6s ease-out; }
+@keyframes flash { 0% { box-shadow: 0 0 0 3px var(--accent); background-color: var(--accent-tint); } 100% { box-shadow: 0 0 0 0 transparent; } }
+
+/* the list of forms */
+.list h2 { margin: 0; padding: 16px 16px 8px; font-size: 15px; font-weight: 600; }
+.lbar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+.search { flex: 1 1 220px; height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--field); background: var(--surface); color: var(--fg); font: inherit; }
+.lrow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 10px 16px; border-top: 1px solid var(--line-soft); color: var(--fg); text-decoration: none; }
+.lrow:hover { background: var(--hover); color: var(--fg); }
+.lrow > span:first-child { flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; }
+.lrow b { font-weight: 500; overflow-wrap: anywhere; } .lrow small { color: var(--muted); }
+.msg { padding: 28px 24px; display: flex; flex-direction: column; gap: 6px; }
+.msg p { margin: 0; color: var(--fg-2); max-width: 70ch; }
+.empty { margin: 0; padding: 14px 16px; color: var(--muted); }
+
+/* questions */
+#questions { display: flex; flex-direction: column; gap: 14px; }
+section.q { display: flex; flex-direction: column; gap: 14px; padding: 18px 20px 20px; scroll-margin-top: calc(var(--bar-h) + 16px); }
+section.q.is-ans { border-color: color-mix(in srgb, var(--ok-fg) 28%, var(--line)); }
+section.q.needs-note { border-color: var(--crit-fg); }
+section.q.filtered { display: none; }
+.qhead { display: flex; gap: 12px; align-items: flex-start; }
+.qid { flex: none; font: 500 12px/1 var(--mono); color: var(--fg-2); background: var(--line-soft); padding: 6px 8px; border-radius: 5px; margin-top: 1px; }
+h2 { flex: 1; margin: 0; font-size: 17px; font-weight: 600; line-height: 1.35; text-wrap: balance; min-width: 0; overflow-wrap: anywhere; }
+.qtags { flex: none; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 46%; }
+.revnote { margin: 0; padding: 8px 10px; border-radius: 6px; background: var(--r2-tint); color: var(--r2-fg); font-size: 13px; line-height: 1.5; }
+.qbody { display: flex; flex-direction: column; gap: 14px; padding-left: 46px; }
+.ctx { display: flex; flex-direction: column; gap: 10px; max-width: 72ch; color: var(--fg); line-height: 1.6; }
 .ctx p, .ctx ul { margin: 0; }
-.ctx ul { padding-left: 20px; display: grid; gap: 6px; }
-code { font: 500 13px var(--mono); background: var(--ink-soft); padding: 1px 5px; border-radius: 3px; }
-.hint { color: var(--muted); font-size: 14px; margin: 0; }
-.options { display: grid; gap: 8px; }
-.opt { display: grid; grid-template-columns: 22px 1fr; gap: 12px; padding: 13px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
-.opt > span { min-width: 0; }
-.opt:hover { border-color: var(--ink); }
-.opt:has(input:checked) { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
-.opt input { margin: 3px 0 0; accent-color: var(--ink); width: 16px; height: 16px; }
-.opt input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.optletter { font: 500 13px var(--mono); color: var(--muted); margin-right: 6px; }
-.note { display: grid; gap: 6px; }
-.note label { font-size: 13px; color: var(--muted); display: flex; gap: 8px; align-items: baseline; }
-.note label b { font: 500 11px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
-textarea { width: 100%; box-sizing: border-box; min-height: 56px; font: inherit; color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; resize: vertical; }
-textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-section.q.needs-note textarea { border-color: var(--warn); }
-section.q.needs-note .note label { color: var(--warn); }
-.proposal { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--accent-soft); border-radius: 8px; }
-.proposal p { margin: 0; flex: 1 1 320px; min-width: 0; font-size: 14px; }
-.proposal b { font: 500 12px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--accent); margin-right: 6px; }
-button { font: 600 14px var(--body); border-radius: 6px; cursor: pointer; }
-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.use { background: transparent; color: var(--fg); border: 1px solid var(--accent); padding: 6px 12px; }
+.ctx ul { padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+code { font: 500 12.5px var(--mono); background: var(--line-soft); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+.hint { color: var(--muted); font-size: 13px; margin: 0; }
+.options { display: flex; flex-direction: column; gap: 6px; }
+.opt { display: flex; align-items: flex-start; gap: 12px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--field); border-radius: 8px; cursor: pointer; transition: border-color .12s, background .12s; }
+.opt:hover { border-color: var(--accent); background: var(--hover); }
+.opt:has(input:checked) { border-color: var(--accent); background: var(--accent-tint); box-shadow: inset 0 0 0 1px var(--accent); }
+.opt:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.opt input { margin: 3px 0 0; accent-color: var(--accent); width: 16px; height: 16px; flex: none; }
+.opt input:focus-visible { outline: none; }
+.opt > span { min-width: 0; flex: 1; display: flex; gap: 10px; }
+.optletter { flex: none; font: 500 12px/20px var(--mono); color: var(--muted); min-width: 14px; }
+.opt:has(input:checked) .optletter { color: var(--accent); }
+.opt .ptag { flex: none; align-self: center; }
+.note { display: flex; flex-direction: column; gap: 4px; }
+.note label { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+.note label b { color: var(--fg-2); font-weight: 600; }
+.qsave { margin-left: auto; font-size: 12px; color: var(--muted); min-height: 18px; }
+.qsave.ok { color: var(--ok-fg); } .qsave.fail { color: var(--crit-fg); font-weight: 500; }
+textarea { width: 100%; min-height: 56px; font: inherit; font-size: 14px; color: var(--fg); background: var(--surface); border: 1px solid var(--field); border-radius: 6px; padding: 8px 10px; resize: vertical; }
+textarea:hover { border-color: var(--accent); }
+section.q.needs-note textarea { border-color: var(--crit-fg); }
+section.q.needs-note .note label { color: var(--crit-fg); }
+.proposal { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; padding: 12px 14px; background: var(--accent-tint); border: 1px solid var(--accent-soft); border-radius: 8px; }
+.proposal p { margin: 0; flex: 1 1 320px; min-width: 0; font-size: 13.5px; line-height: 1.55; }
+.proposal .tag { background: var(--accent-soft); color: var(--accent); margin-right: 8px; vertical-align: 1px; }
+.use { height: 32px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--accent); background: var(--surface); color: var(--accent); font-weight: 600; }
+.use:hover { background: var(--accent-soft); }
+.use[aria-pressed="true"] { background: var(--accent); color: var(--surface); }
 
-.bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--line); padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); }
-.barin { max-width: 760px; margin: 0 auto; display: flex; gap: 10px 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
-#status { color: var(--muted); font-size: 14px; min-width: 0; flex: 1 1 240px; }
-#status.ok { color: var(--ok); }
-#status.warn { color: var(--warn); }
-.actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.done { background: var(--ink); color: var(--surface); border: 0; padding: 10px 20px; }
-.done:disabled { opacity: .5; cursor: default; }
-.done.is-done { background: var(--ok); }
-.bar[hidden] { display: none; }
+.band { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 14px 18px; border-radius: 12px; background: var(--band-bg); color: var(--band-fg); }
+.band span { color: var(--band-muted); flex: 1 1 260px; } .band b { font-weight: 500; }
+.band .primary { background: var(--band-fg); color: var(--band-bg); border-color: var(--band-fg); }
+.band .primary.is-done { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-bg); }
 
 /* Board: boxes side by side when the column is wide enough, stacked otherwise. */
-main { container-type: inline-size; }
-body.wide main, body.wide .barin { max-width: 1320px; }
+.wrap { container-type: inline-size; }
 .board { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
 @container (min-width: 980px) { .board { grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); align-items: stretch; } }
-.box { --tone: var(--ink); background: var(--surface); border: 1px solid var(--line); border-top: 3px solid var(--tone); border-radius: 10px; display: grid; grid-template-rows: auto 1fr; min-width: 0; }
-.box.tone-accent { --tone: var(--accent); }
-.box.tone-warn { --tone: var(--warn); }
+.box { --tone: var(--accent); --box-bg: var(--surface); background: var(--surface); border: 1px solid var(--line); border-top: 3px solid var(--tone); border-radius: 12px; display: grid; grid-template-rows: auto 1fr; min-width: 0; scroll-margin-top: calc(var(--bar-h) + 16px); }
+.box.tone-accent { --tone: var(--high-fg); }
+.box.tone-warn { --tone: var(--crit-fg); }
 .box.tone-muted { --tone: var(--muted); }
 .box.over { box-shadow: 0 0 0 2px var(--tone); }
-.boxhead { padding: 12px 14px 10px; border-bottom: 1px solid var(--line); display: grid; gap: 4px; }
-.boxhead h3 { font: 600 17px/1.25 var(--display); margin: 0; display: flex; justify-content: flex-start; gap: 10px; align-items: baseline; }
+.boxhead { padding: 12px 16px 10px; border-bottom: 1px solid var(--line-soft); display: grid; gap: 2px; }
+.boxhead h3 { font-size: 15px; font-weight: 600; margin: 0; display: flex; justify-content: flex-start; gap: 10px; align-items: baseline; }
 .boxhead .count { font: 500 12px var(--mono); color: var(--tone); }
-.boxhead p { margin: 0; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.boxhead p { margin: 0; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cards { display: grid; gap: 10px; padding: 12px; align-content: start; min-height: 72px; }
-.cards:empty { border: 1px dashed var(--line); border-radius: 8px; margin: 12px; padding: 0; }
-.card { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: grid; gap: 8px; min-width: 0; }
-.card[draggable="true"] { cursor: grab; }
-.card.dragging { opacity: .45; }
-.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.chead { display: flex; gap: 10px; align-items: baseline; }
-.chead .qid { font-size: 12px; padding: 3px 6px; }
-.ctitle { font: 600 15px/1.35 var(--body); margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.card p { margin: 0; font-size: 13.5px; }
-.card .from { color: var(--muted); }
-.card .outcome { border-left: 3px solid var(--tone, var(--ink)); padding-left: 8px; }
-.card .outcome:empty, .card .sugg:empty { display: none; }
-.card .sugg { color: var(--muted); font-size: 13px; }
-.card .sugg b { font: 500 11px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--accent); margin-right: 4px; }
-.card.moved .sugg b { color: var(--muted); }
-/* Cards are compact: id, title, expand button and one row of move buttons. Details open per card
-   or all at once from the bar; an open card that is wide enough puts its details in two columns. */
-.card { container-type: inline-size; gap: 10px; padding: 12px 14px; }
-.chead { align-items: center; }
-.ctitle { flex: 1 1 auto; font-size: 14.5px; }
-.cflag { flex: none; font: 500 11px/1 var(--mono); color: var(--muted); }
-.cexp { flex: none; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--muted); }
-.cexp:hover { color: var(--fg); border-color: var(--line); }
+.cards:empty { border: 1px dashed var(--control); border-radius: 8px; margin: 12px; padding: 0; }
+.fcard { container-type: inline-size; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 8px; min-width: 0; scroll-margin-top: calc(var(--bar-h) + 16px); }
+.fcard[draggable="true"] { cursor: grab; }
+.fcard.dragging { opacity: .45; }
+.fcard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fcard.filtered { display: none; }
+.chead { display: flex; gap: 10px; align-items: center; }
+.chead .qid { font-size: 11.5px; padding: 4px 6px; margin: 0; }
+.ctitle { flex: 1 1 auto; font-size: 14px; font-weight: 600; line-height: 1.35; margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.cflags { flex: none; display: flex; gap: 4px; }
+.cflags .tag { height: 20px; font-size: 10.5px; padding: 0 6px; }
+.cexp { flex: none; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--muted); }
+.cexp:hover { color: var(--fg); border-color: var(--control); }
 .cexp svg { transition: transform .15s; }
-.card.open .cexp svg { transform: rotate(180deg); }
+.fcard.open .cexp svg { transform: rotate(180deg); }
+.plain { margin: 0; font-size: 13px; color: var(--fg-2); line-height: 1.5; }
 .cdetail { display: none; }
-.card.open .cdetail { display: block; border-top: 1px solid var(--line); padding-top: 10px; }
-.cin { display: grid; gap: 8px; }
+.fcard.open .cdetail { display: block; border-top: 1px solid var(--line); padding-top: 10px; }
+.cin { display: grid; gap: 10px; }
 .cmain, .cside { display: grid; gap: 8px; align-content: start; min-width: 0; }
-.cmain .ctx { font-size: 14px; }
-.addnote { justify-self: start; background: none; border: 0; padding: 0; font: 500 13px var(--body); color: var(--ink); cursor: pointer; }
-.card.noting .addnote { display: none; }
+.cmain .ctx { font-size: 13.5px; }
+.fcard p { margin: 0; font-size: 13px; }
+.fcard .from { color: var(--muted); font-size: 12.5px; }
+.fcard .outcome { border-left: 3px solid var(--tone, var(--accent)); padding-left: 8px; color: var(--fg-2); }
+.fcard .outcome:empty, .fcard .sugg:empty { display: none; }
+.fcard .sugg { color: var(--muted); }
+.fcard .sugg .tag { margin-right: 6px; background: var(--accent-soft); color: var(--accent); height: 20px; }
+.fcard.moved .sugg .tag { background: var(--low-bg); color: var(--low-fg); }
+.action { padding: 8px 10px; border-radius: 6px; background: var(--accent-tint); font-size: 13px; }
+.action b { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); margin-bottom: 2px; }
+.addnote { justify-self: start; background: none; border: 0; padding: 0; font-size: 13px; font-weight: 500; color: var(--accent); }
+.fcard.noting .addnote { display: none; }
 .cnote { display: none; }
-.card.noting .cnote { display: grid; }
+.fcard.noting .cnote { display: flex; }
 @container (min-width: 560px) { .cin { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 8px 20px; } }
-.allbtn { background: transparent; color: var(--fg); border: 1px solid var(--line); padding: 9px 14px; }
-.allbtn:hover { border-color: var(--ink); }
-.allbtn[hidden] { display: none; }
+.box.tone-ink .fcard { --tone: var(--accent); } .box.tone-accent .fcard { --tone: var(--high-fg); }
+.box.tone-warn .fcard { --tone: var(--crit-fg); } .box.tone-muted .fcard { --tone: var(--muted); }
+.moves { display: flex; flex-wrap: wrap; gap: 6px; }
+.move { height: 28px; background: var(--surface); color: var(--fg-2); border: 1px solid var(--control); border-radius: 6px; padding: 0 9px; font-size: 12.5px; font-weight: 500; }
+.move:hover { border-color: var(--accent); color: var(--fg); }
 
-/* Grouped board: one container for the groups, split by a divider, each group a small title; a
-   group's boxes are sections split by a line, each tinted with its own tone. Sink boxes get a row
-   below. */
-.gboard { display: grid; gap: 16px; }
+/* Grouped board: the groups side by side, each group's boxes stacked; sink boxes get a row below. */
+.gboard { display: grid; gap: 14px; }
 .grow { display: grid; gap: 0; grid-template-columns: minmax(0, 1fr); align-items: stretch; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface); }
 @container (min-width: 720px) { .grow { grid-template-columns: repeat(var(--g, 2), minmax(0, 1fr)); } .group + .group { border-top: 0; border-left: 1px solid var(--line); } }
 .group { background: var(--surface); display: grid; gap: 0; align-content: start; min-width: 0; grid-template-rows: auto; }
 @container (max-width: 719.98px) { .group + .group { border-top: 1px solid var(--line); } }
-/* Title and hint each keep to one line, so every group's header has the same height and the sections line up. */
 .ghead { display: grid; gap: 2px; padding: 12px 18px 10px; border-bottom: 1px solid var(--line); min-width: 0; }
-.ghead h3 { font: 600 12.5px/1.3 var(--body); margin: 0; color: var(--muted); }
+.ghead h3 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin: 0; color: var(--muted); }
 .ghead h3, .ghead p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ghead p { margin: 0; font-size: 12px; color: var(--muted); }
 .gboxes { display: grid; gap: 0; }
-.group .box { --box-bg: color-mix(in srgb, var(--tone) 6%, var(--surface)); background: var(--box-bg); border: 0; border-radius: 0; }
-.group .box.tone-accent { --box-bg: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
-.group .box.tone-warn { --box-bg: color-mix(in srgb, var(--warn) 11%, var(--surface)); }
+.group .box { --box-bg: color-mix(in srgb, var(--tone) 5%, var(--surface)); background: var(--box-bg); border: 0; border-radius: 0; }
 .group .box + .box { border-top: 1px solid var(--line); }
 .group .boxhead { border-bottom: 0; padding: 14px 18px 4px; }
 .group .boxhead p { padding-left: 16px; }
-.group .boxhead h3 > span:first-child::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--tone); margin-right: 8px; vertical-align: 2px; }
-.group .cards { padding: 8px 18px 18px; gap: 10px; }
-.group .card { background: var(--surface); }
-.box.sink { border-top-style: dashed; position: relative; }
-/* The handle on the sink's top edge exists only on a wide window (see the media block below). */
+.group .boxhead h3 > span:first-child::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--tone); margin-right: 8px; vertical-align: 1px; }
+.group .cards { padding: 8px 18px 18px; }
+.group .fcard { background: var(--surface); }
+.box.sink { border-top-style: dashed; position: relative; --box-bg: var(--surface); }
 .sinkgrip { display: none; }
 body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none; }
-.box.sink .cards { padding: 10px 18px 18px; gap: 12px; }
-.box.sink .cards { grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
-  /* one row of cards and a quarter of the next, so it is plain that the box scrolls (set by sizeSinks) */
+.box.sink .cards { padding: 10px 16px 16px; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
   max-height: var(--sink-max, 130px); overflow-y: auto; scrollbar-gutter: stable; }
 .box.sink .cards, body.wide .box .cards {
   /* scroll shadows: a soft edge appears only where there is more to scroll */
@@ -246,159 +371,431 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
   background-attachment: local, local, scroll, scroll; }
 .box.no-drop { opacity: .4; }
 
-/* On a window wide and tall enough, the page scrolls only until the header is gone: the board is
-   exactly as tall as the screen above the bar, so at the end of the page it fills it, and from
-   there each box scrolls on its own. The sink row is one row of cards and a quarter; the groups take the rest.
-   Phones scroll the page as usual. */
+/* On a window wide and tall enough, the board is exactly as tall as the screen below the bar, and each box
+   scrolls on its own. The sink row is one row of cards and a quarter; the groups take the rest. Phones
+   scroll the page as usual. */
 @media (min-width: 760px) and (min-height: 560px) {
-  body.wide main { padding-block: 20px 80px; gap: 16px; }
-  body.wide header { gap: 6px; }
-  body.wide h1 { font-size: clamp(24px, 3vw, 30px); }
-  body.wide #questions { height: calc(100dvh - 100px); min-height: 360px; }
+  body.wide #questions { height: calc(100dvh - var(--bar-h) - 40px); min-height: 360px; }
   body.wide .board { height: 100%; min-height: 0; align-items: stretch; }
   body.wide .gboard { height: 100%; min-height: 0; grid-template-rows: minmax(0, 1fr) auto; gap: 12px; }
   body.wide .grow { min-height: 0; height: 100%; align-items: stretch; }
   body.wide .group { min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
   body.wide .gboxes { min-height: 0; grid-auto-rows: minmax(0, 1fr); }
   body.wide .box { min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
-  body.wide .box.sink .boxhead { padding: 12px 18px 8px; }
+  body.wide .box.sink .boxhead { padding: 12px 16px 8px; }
   body.wide .sinkgrip { display: block; position: absolute; left: 0; right: 0; top: -9px; height: 16px; cursor: ns-resize; z-index: 1; touch-action: none; }
-  body.wide .sinkgrip::after { content: ""; position: absolute; left: 50%; top: 6px; width: 48px; height: 4px; margin-left: -24px; border-radius: 2px; background: var(--line); transition: background .15s; }
+  body.wide .sinkgrip::after { content: ""; position: absolute; left: 50%; top: 6px; width: 48px; height: 4px; margin-left: -24px; border-radius: 2px; background: var(--control); transition: background .15s; }
   body.wide .sinkgrip:hover::after, body.wide .sinkgrip:focus-visible::after, body.resizing .sinkgrip::after { background: var(--muted); }
   body.wide .sinkgrip:focus-visible { outline: none; }
-  body.wide .boxhead h3 { font-size: 15px; }
-  body.wide .boxhead p { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   body.wide .box .cards { min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
   body.wide .box .cards:empty { min-height: 48px; }
 }
-.moves { display: flex; flex-wrap: wrap; gap: 6px; }
-.move { background: transparent; color: var(--muted); border: 1px solid var(--line); padding: 4px 9px; font: 500 12.5px var(--body); }
-.move:hover { border-color: var(--ink); color: var(--fg); }
-.box.tone-ink .card { --tone: var(--ink); } .box.tone-accent .card { --tone: var(--accent); }
-.box.tone-warn .card { --tone: var(--warn); } .box.tone-muted .card { --tone: var(--muted); }
-@media (prefers-reduced-motion: no-preference) { .opt, .row, .box { transition: border-color .15s, box-shadow .15s; } }
+
+/* touch: every control at least 44px tall */
+@media (pointer: coarse) {
+  .pill, .btn, .chip, .primary, .use, .move, .search { min-height: 44px; }
+  .cexp { width: 44px; height: 44px; }
+  button.tag, .save button { min-height: 32px; padding-inline: 10px; }
+  .opt { padding-block: 12px; }
+}
+/* a short window (a phone on its side, or zoomed in): the bar scrolls away instead of covering the page */
+@media (max-height: 520px) { .bar { position: static; } }
+@media (max-width: 767px) {
+  .head { padding: 16px; }
+  section.q { padding: 16px; }
+  .qbody { padding-left: 0; }
+  .qhead { flex-wrap: wrap; }
+  .qtags { max-width: none; width: 100%; justify-content: flex-start; order: 3; }
+  .tools { margin-left: 0; width: 100%; }
+  .tools .grow-sp { flex: 1; }
+  .meter { width: 64px; }
+  .wide-only { display: none; }
+}
 </style>
 
-<main>
-  <header id="head">
-    <span class="eyebrow"><a href="#" id="home">AI-DLC · question forms</a></span>
-    <h1 id="title">Question forms</h1>
-    <p class="lede" id="lede">Connecting to saved answers…</p>
-    <div class="meta" id="meta" hidden></div>
-  </header>
-  <div id="list" hidden></div>
-  <div id="questions" hidden></div>
-</main>
-<div class="bar" id="bar" hidden><div class="barin">
-  <span id="status">Connecting…</span>
-  <div class="actions">
-    <button class="allbtn" id="expandall" type="button" hidden>Expand all</button>
-    <button class="allbtn" id="collapseall" type="button" hidden>Collapse all</button>
-    <button class="done" id="done" type="button" disabled>Mark as done</button>
-  </div>
-</div></div>
+<div class="wrap" id="wrap">
+  <div id="app"><div class="card msg"><b>Connecting…</b><p>The forms appear as soon as the saved answers load.</p></div></div>
+</div>
+<div id="tip" role="tooltip" hidden></div>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+<div id="live" class="sr" aria-live="polite"></div>
 
 <script>
 (() => {
+  "use strict";
   const $ = (id) => document.getElementById(id);
-  const el = { title: $("title"), lede: $("lede"), meta: $("meta"), list: $("list"), qs: $("questions"), bar: $("bar"), status: $("status"), done: $("done") };
+  const app = $("app"), tipEl = $("tip"), toastEl = $("toast");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const inline = (s) => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  const md = (s) => String(s ?? "").trim().split(/\n\s*\n/).filter(Boolean).map((b) => {
-    const lines = b.split("\n");
-    if (lines.every((l) => /^\s*-\s+/.test(l))) return "<ul>" + lines.map((l) => "<li>" + inline(l.replace(/^\s*-\s+/, "")) + "</li>").join("") + "</ul>";
-    return "<p>" + lines.map(inline).join("<br>") + "</p>";
-  }).join("");
+  const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const fmt = (iso) => { try { return new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }); } catch { return iso || ""; } };
-  const setStatus = (t, cls) => { el.status.textContent = t; el.status.className = cls || ""; };
+  const clock = (iso) => { try { return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
   const formId = () => { const h = decodeURIComponent(location.hash.replace(/^#/, "")); return /^[a-z0-9._-]+$/i.test(h) ? h : ""; };
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + "s")}`;
+  const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  let db = null;
-  const view = { id: "", unsub: [], form: null, mode: "", expanded: new Set(), closing: false, boxesKey: "", loaded: false, rendered: new Map(), drag: null, questions: new Map(), answers: {}, touched: {}, pending: {}, inflight: false, timer: null, confirmDone: false };
+  /* The page's own glossary; a form's `terms` adds to it or overrides it. */
+  const TERMS = {
+    AC: "Acceptance criteria: the checks that say a story is done.",
+    ADR: "Architecture decision record: a short note of one design decision and why.",
+    API: "Application programming interface: how one program talks to another.",
+    CI: "Continuous integration: the checks that run on every push.",
+    E2E: "End-to-end test: drives the whole app the way a person would.",
+    MVP: "Minimum viable product: the smallest version worth shipping.",
+    NFR: "Non-functional requirement: how well the system must work (speed, security, uptime), not what it does.",
+    PR: "Pull request: a proposed change, reviewed before it is merged.",
+    SLA: "Service level agreement: the availability promised to users.",
+    SLO: "Service level objective: the reliability target the team aims for.",
+    SSO: "Single sign-on: one company login for many apps.",
+    UI: "User interface: what people see and press.",
+    UX: "User experience: how using it feels, end to end.",
+    "AI-DLC": "AI-driven development life cycle: the staged way this project is planned, designed and built with an agent.",
+  };
 
-  function teardown() { view.unsub.forEach((u) => { try { u(); } catch {} }); view.unsub = []; view.questions = new Map(); view.rendered = new Map(); view.expanded = new Set(); view.mode = ""; view.boxesKey = ""; view.loaded = false; view.drag = null; view.answers = {}; view.touched = {}; view.pending = {}; view.confirmDone = false; el.qs.innerHTML = ""; document.body.classList.remove("wide"); }
+  let db = null, uid = null;
+  const view = {
+    id: "", unsub: [], form: null, mode: "", boxesKey: "", loaded: false, rendered: new Map(), drag: null,
+    questions: new Map(), answers: {}, touched: {}, pending: {}, qstat: {}, inflight: false, timer: null, retry: 0, retryTimer: null,
+    save: { state: "idle", at: "", msg: "" }, closing: false, confirmDone: false, expanded: new Set(), filter: "all",
+    marks: {}, marksReady: false, baselined: false, notice: null, tokens: null,
+  };
 
-  /* ---------- index ---------- */
+  /* ---------- tooltips: hover and keyboard focus; a tap on touch ---------- */
+  let tipFor = null;
+  function showTip(node) {
+    const text = node.getAttribute("data-tip"); if (!text) return;
+    tipFor = node; tipEl.textContent = text; tipEl.style.left = "0px"; tipEl.style.top = "0px"; tipEl.hidden = false;
+    node.setAttribute("aria-describedby", "tip");
+    const r = node.getBoundingClientRect(), t = tipEl.getBoundingClientRect();
+    let x = Math.min(Math.max(12, r.left), window.innerWidth - t.width - 12);
+    let y = r.top - t.height - 8; if (y < 12) y = r.bottom + 8;
+    tipEl.style.left = x + "px"; tipEl.style.top = y + "px";
+  }
+  function hideTip() { if (tipFor) tipFor.removeAttribute("aria-describedby"); tipFor = null; tipEl.hidden = true; }
+  document.addEventListener("mouseover", (e) => { if (tipFor && !tipFor.isConnected) hideTip(); const n = e.target.closest?.("[data-tip]"); if (n && n !== tipFor) showTip(n); else if (!n && tipFor && !tipFor.matches(":focus")) hideTip(); });
+  document.addEventListener("focusin", (e) => { const n = e.target.closest?.("[data-tip]"); if (n) showTip(n); else hideTip(); });
+  document.addEventListener("focusout", () => setTimeout(() => { if (tipFor && !tipFor.matches(":focus") && !tipFor.matches(":hover")) hideTip(); }, 0));
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideTip(); });
+  window.addEventListener("scroll", hideTip, { passive: true });
+  /* Repainting a bar keeps keyboard focus on the same control. */
+  function keepFocus(root, paint) {
+    const a = document.activeElement, inside = root && a && root.contains(a);
+    const key = inside ? ["data-filter", "data-act", "data-f", "data-jump"].map((n) => a.getAttribute(n) && `[${n}="${CSS.escape(a.getAttribute(n))}"]`).find(Boolean) : "";
+    paint();
+    if (key) root.querySelector(key)?.focus();
+  }
+  function toast(text) { toastEl.textContent = text; toastEl.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => { toastEl.hidden = true; }, 3200); }
+
+  /* ---------- text: the Markdown subset, with links to this form's ids and tooltips on terms ---------- */
+  function tokens() {
+    if (view.tokens) return view.tokens;
+    const ids = [...view.questions.keys()];
+    const terms = Object.assign({}, TERMS, (view.form && typeof view.form.terms === "object" && view.form.terms) || {});
+    const words = [...new Set([...ids, ...Object.keys(terms)])].filter(Boolean).sort((a, b) => b.length - a.length).map((w) => reEsc(esc(w)));
+    if (!isBoard()) words.push("Q\\d+");
+    const re = words.length ? new RegExp(`(?<![\\w-])(${words.join("|")})(?![\\w-])`, "g") : null;
+    view.tokens = { re, ids: new Set(ids), terms };
+    return view.tokens;
+  }
+  const qLabel = (q) => q ? (q.text || "").replace(/[`*]/g, "") : "";
+  function idRef(id, self) {
+    const t = tokens(), q = view.questions.get(id);
+    if (q) {
+      if (id === self) return esc(id);
+      const kind = q.kind === "card" ? "Card" : "Question";
+      return `<a class="ref" href="#" data-jump="q-${esc(id)}" data-tip="${esc(`${kind} ${id}: ${qLabel(q)}. Press to go there.`)}">${esc(id)}</a>`;
+    }
+    return `<a class="ref off" href="#" data-off="1" data-tip="${esc(`Question ${id} is not in this form; it may be in an earlier questions file.`)}">${esc(id)}</a>`;
+  }
+  function linkify(html, self) {
+    const t = tokens(); if (!t.re) return html;
+    /* only text between tags: never inside an attribute or a tag name */
+    return html.replace(/(<[^>]+>)|([^<]+)/g, (m, tag, text) => tag ? tag : text.replace(t.re, (w) => {
+      const raw = w.replace(/&amp;/g, "&");
+      if (t.ids.has(raw) || /^Q\d+$/.test(raw)) return idRef(raw, self);
+      const tip = t.terms[raw]; return tip ? `<span class="term" tabindex="0" data-tip="${esc(raw + ": " + tip)}">${w}</span>` : w;
+    }));
+  }
+  const PATH = /^(?:[\w.@~-]+\/)+[\w.@~-]+\/?$|^[\w-]+\.(?:md|mdx|ts|tsx|js|jsx|mjs|py|swift|kt|go|rs|rb|java|yml|yaml|json|toml|html|css|scss|sh|sql|csv|txt)$/;
+  function code(t) {
+    if (PATH.test(t) && !/^https?:/.test(t)) return `<a class="ref code off" href="#" data-off="1" data-path="${esc(t)}" data-tip="${esc(`A file in the repository: ${t}. It isn't part of this page.`)}">${esc(t)}</a>`;
+    return `<code>${esc(t)}</code>`;
+  }
+  function inline(s, self) {
+    const codes = [];
+    let h = String(s ?? "").replace(/`([^`]+)`/g, (m, c) => { codes.push(c); return `\u0000${codes.length - 1}\u0000`; });
+    h = esc(h).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    h = linkify(h, self);
+    return h.replace(/\u0000(\d+)\u0000/g, (m, i) => code(codes[+i]));
+  }
+  const md = (s, self) => String(s ?? "").trim().split(/\n\s*\n/).filter(Boolean).map((b) => {
+    const lines = b.split("\n");
+    if (lines.every((l) => /^\s*-\s+/.test(l))) return "<ul>" + lines.map((l) => "<li>" + inline(l.replace(/^\s*-\s+/, ""), self) + "</li>").join("") + "</ul>";
+    return "<p>" + lines.map((l) => inline(l, self)).join("<br>") + "</p>";
+  }).join("");
+  /* refs: [{label, tip, target}] — a live jump when the target is on this page, else a link that says it isn't */
+  function refHtml(r) {
+    const label = String(r.label || r.target || "").trim(), target = String(r.target || "").trim();
+    let tip = String(r.tip || "").trim();
+    if (!label) return "";
+    const local = target.replace(/^#/, "");
+    if (target.charAt(0) === "#" && view.questions.has(local)) {
+      const q = view.questions.get(local);
+      return `<a class="ref" href="#" data-jump="q-${esc(local)}" data-tip="${esc((tip ? tip + " " : "") + `(${q.kind === "card" ? "card" : "question"} ${local}: ${qLabel(q)}) Press to go there.`)}">${esc(label)}</a>`;
+    }
+    if (/^https?:\/\//i.test(target)) return `<a class="ref" href="${esc(target)}" target="_blank" rel="noopener" data-tip="${esc((tip || target) + " Opens in a new tab.")}">${esc(label)}</a>`;
+    const path = target.indexOf("path:") === 0 ? target.slice(5) : "";
+    if (!tip) tip = path ? `A file in the repository: ${path}.` : label;
+    return `<a class="ref off" href="#" data-off="1"${path ? ` data-path="${esc(path)}"` : ""} data-tip="${esc(tip + " Not part of this page.")}">${esc(label)}</a>`;
+  }
+  const refsHtml = (q, lead) => Array.isArray(q.refs) && q.refs.length ? `<div class="refs"><span>${esc(lead)}</span>${q.refs.map(refHtml).join("")}</div>` : "";
+
+  function teardown() {
+    if (Object.keys(view.pending).length) flush();
+    view.unsub.forEach((u) => { try { u(); } catch {} }); view.unsub = [];
+    clearTimeout(view.timer); clearTimeout(view.retryTimer);
+    Object.assign(view, { questions: new Map(), rendered: new Map(), expanded: new Set(), mode: "", boxesKey: "", loaded: false, drag: null, answers: {}, touched: {}, pending: {}, qstat: {}, confirmDone: false, filter: "all", marks: {}, marksReady: false, baselined: false, notice: null, tokens: null, retry: 0, save: { state: "idle", at: "", msg: "" } });
+    document.body.classList.remove("wide"); hideTip();
+  }
+
+  /* ---------- the list of forms ---------- */
+  const listState = { filter: "open", q: "", rows: [] };
   function showIndex() {
-    teardown(); view.id = ""; view.form = null;
-    el.title.textContent = "Question forms";
-    el.lede.textContent = "Every stage's questions file, as a form. Pick one; nothing is pre-selected, and Claude copies what you save word for word into the file.";
-    el.meta.hidden = true; el.qs.hidden = true; el.bar.hidden = true; el.list.hidden = false;
-    el.list.innerHTML = '<div class="empty"><p>Loading forms…</p></div>';
+    teardown(); view.id = ""; view.form = null; document.title = "AI-DLC question forms";
+    app.innerHTML = `<header class="card head"><div class="crumbs"><span>AI-DLC</span><span aria-hidden="true">/</span><span>Question forms</span></div>
+      <div class="titlerow"><div><h1>Question forms</h1><p class="lede">Every stage’s questions file, as a form. Pick one; nothing is pre-selected, and Claude copies what you save word for word into the file.</p></div><div class="facts" id="lfacts"></div></div></header>
+      <div class="bar" id="bar"><div class="lbar"><div class="filters" role="group" aria-label="Show forms" id="lfilters"></div><input class="search" id="lsearch" type="search" placeholder="Find a form by title, stage or file" aria-label="Find a form"></div></div>
+      <main id="lbody"><div class="card msg"><b>Loading forms…</b></div></main>`;
+    barHeight();
+    $("lsearch").addEventListener("input", (e) => { listState.q = e.target.value.trim().toLowerCase(); paintIndex(); });
+    $("lbody").addEventListener("click", (e) => { const b = e.target.closest("[data-f]"); if (b) { listState.filter = b.dataset.f; paintIndex(); } });
+    $("lfilters").addEventListener("click", (e) => { const b = e.target.closest("[data-f]"); if (b) { listState.filter = b.dataset.f; paintIndex(); } });
     if (!db) return;
-    const u = db.collection("forms").orderBy("createdAt", "desc").limit(100).onSnapshot((snap) => {
-      if (snap.empty) { el.list.innerHTML = '<div class="empty"><p><b>No forms yet.</b></p><p>Claude creates one here for every questions file a stage writes and gives you its link, which ends in <code>#</code> and the form’s id.</p></div>'; return; }
-      el.list.innerHTML = snap.docs.map((d) => { const f = d.data(); const n = Object.keys(f.answers || {}).length; return `<a class="row" href="#${esc(d.id)}"><span><b>${esc(f.title || d.id)}</b><small>${esc(f.stage || "")}${f.stage ? " · " : ""}${fmt(f.createdAt)}${n ? ` · ${n} answered` : ""}</small></span><span class="pill ${f.status === "done" ? "done" : "open"}">${f.status === "done" ? "done" : "open"}</span></a>`; }).join("");
-    }, () => { el.list.innerHTML = '<div class="empty"><p>Couldn’t load the forms. Reload the page.</p></div>'; });
+    const u = db.collection("forms").orderBy("createdAt", "desc").limit(200).onSnapshot((snap) => {
+      listState.rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })); paintIndex();
+    }, () => { $("lbody").innerHTML = '<div class="card msg"><b>Couldn’t load the forms.</b><p>Reload the page.</p></div>'; });
     view.unsub.push(u);
+  }
+  function paintIndex() {
+    const rows = listState.rows, open = rows.filter((r) => r.status !== "done").length;
+    if (!$("lbody")) return;
+    $("lfacts").innerHTML = `<div class="fact"><span>Open</span><b>${open}</b></div><div class="fact"><span>Done</span><b>${rows.length - open}</b></div>`;
+    keepFocus($("lfilters"), () => { $("lfilters").innerHTML = [["open", "Open", open], ["done", "Done", rows.length - open], ["all", "All", rows.length]].map(([k, t, n]) => `<button type="button" class="pill" data-f="${k}" aria-pressed="${listState.filter === k}">${t}<b>${n}</b></button>`).join(""); });
+    if (!rows.length) { $("lbody").innerHTML = '<div class="card msg"><b>No forms yet.</b><p>Claude creates one here for every questions file a stage writes and gives you its link, which ends in # and the form’s id.</p></div>'; return; }
+    const shown = rows.filter((r) => (listState.filter === "all" || (listState.filter === "done") === (r.status === "done")) &&
+      (!listState.q || [r.title, r.stage, r.file, r.id].join(" ").toLowerCase().includes(listState.q)));
+    $("lbody").innerHTML = `<section class="card list">${shown.length ? shown.map((f) => {
+      const n = Object.keys(f.answers || {}).length, done = f.status === "done";
+      return `<a class="lrow" href="#${esc(f.id)}"><span><b>${esc(f.title || f.id)}</b><small>${esc(f.stage || "")}${f.stage ? " · " : ""}${esc(fmt(f.createdAt))}${n ? ` · ${n} answered` : ""}${f.view === "board" ? " · board" : ""}</small></span><span class="tag ${done ? "ans" : "open"}">${done ? "Done" : "Open"}</span></a>`;
+    }).join("") : `<p class="empty">${listState.q ? "No form matches your search." : (listState.filter === "open" ? "Every form is done." : "Nothing here.")} ${listState.filter !== "all" ? `<button type="button" class="btn" data-f="all">Show all forms</button>` : ""}</p>`}</section>`;
   }
 
   /* ---------- one form ---------- */
   function showForm(id) {
     teardown(); view.id = id;
-    el.list.hidden = true; el.qs.hidden = false; el.bar.hidden = false; el.meta.hidden = false;
-    el.title.textContent = id; el.lede.textContent = ""; el.meta.innerHTML = ""; el.qs.innerHTML = '<p class="hint">Loading questions…</p>';
-    setStatus("Connecting…"); el.done.disabled = true;
+    app.innerHTML = `<header class="card head" id="head"><div class="crumbs"><a href="#" data-home="1">All forms</a></div><div class="titlerow"><div><h1 id="title">Loading…</h1></div></div></header>
+      <div class="bar" id="bar"></div><main id="questions"><div class="card msg"><b>Loading questions…</b></div></main><footer class="band" id="band" hidden></footer>`;
+    barHeight();
     if (!db) return;
     const ref = db.doc("forms/" + id);
+    loadMarks(id);
     view.unsub.push(ref.onSnapshot((snap) => {
-      if (!snap.exists) { view.form = null; el.title.textContent = "No such form"; el.lede.textContent = "Nothing is stored under this id. Check the link Claude gave you, or go back to the list."; el.qs.innerHTML = ""; el.bar.hidden = true; return; }
-      const f = snap.data(); view.form = f;
-      el.title.textContent = f.title || id;
-      el.lede.textContent = f.intro || (f.view === "board"
-        ? "Each card starts in the box Claude suggests. Move it with its buttons or by dragging; Done saves where every card sits."
-        : "Nothing is pre-selected. Pick an option or write your own; a note is optional unless you choose Other. Answers save as you go.");
-      el.meta.innerHTML = `${f.stage ? `<span>${esc(f.stage)}</span>` : ""}${f.file ? `<span class="file">${esc(f.file)}</span>` : ""}<span class="pill ${f.status === "done" ? "done" : "open"}">${f.status === "done" ? "done" : "open"}</span>`;
+      if (!snap.exists) { view.form = null; app.innerHTML = `<div class="card msg"><b>No such form</b><p>Nothing is stored under this id. Check the link Claude gave you, or go back to <a href="#" data-home="1">all forms</a>.</p></div>`; return; }
+      const f = snap.data(), termsChanged = JSON.stringify((view.form || {}).terms || null) !== JSON.stringify(f.terms || null);
+      view.form = f; if (termsChanged) { view.tokens = null; view.rendered = new Map(); }
+      document.title = (f.title || id) + " · AI-DLC question forms";
       layout();
       const remote = f.answers || {};
       for (const [qid, a] of Object.entries(remote)) { if (!view.pending[qid] && !(view.touched[qid] && Date.now() - view.touched[qid] < 2000)) { view.answers[qid] = a; paintAnswer(qid); } }
-      el.done.disabled = false; el.done.classList.toggle("is-done", f.status === "done");
-      el.done.textContent = f.status === "done" ? "Done ✓ — press to re-mark" : "Mark as done";
-      if (!view.inflight && !Object.keys(view.pending).length) setStatus(f.status === "done" ? `Done ${fmt(f.savedAt)}. Tell Claude in chat that the form is done.` : (Object.keys(remote).length ? `Saved ${fmt(latest(remote))}` : "No answers yet."), f.status === "done" ? "ok" : "");
-      updateCount();
-    }, () => setStatus("Couldn’t load the form. Reload the page.", "warn")));
+      if (!view.inflight && !Object.keys(view.pending).length && view.save.state !== "fail") view.save = { state: Object.keys(remote).length ? "ok" : "idle", at: latest(remote), msg: "" };
+      paintHead(); paintBar();
+    }, () => setSave("fail", "Couldn’t load the form. Reload the page.")));
     view.unsub.push(ref.collection("questions").orderBy("n").onSnapshot((snap) => {
       const next = new Map(); snap.docs.forEach((d) => next.set(d.id, { id: d.id, ...d.data() }));
-      view.questions = next; view.loaded = true; sync();
-    }, () => setStatus("Couldn’t load the questions. Reload the page.", "warn")));
+      const idsChanged = [...next.keys()].join("|") !== [...view.questions.keys()].join("|");
+      view.questions = next; view.loaded = true;
+      if (idsChanged) { view.tokens = null; view.rendered = new Map(); }
+      baseline(); sync();
+    }, () => setSave("fail", "Couldn’t load the questions. Reload the page.")));
   }
   const latest = (answers) => Object.values(answers).map((a) => a.at || "").sort().pop() || "";
   const isBoard = () => view.mode === "board";
   const ordered = () => [...view.questions.values()].sort((a, b) => (a.n ?? 0) - (b.n ?? 0));
+  function barHeight() { const b = $("bar"); if (b) document.documentElement.style.setProperty("--bar-h", b.offsetHeight + "px"); }
+  window.addEventListener("resize", barHeight);
+
+  function paintHead() {
+    const f = view.form, head = $("head"); if (!f || !head) return;
+    const done = f.status === "done", n = view.questions.size, a = [...view.questions.keys()].filter(answered).length;
+    const lede = f.intro || (f.view === "board"
+      ? "Each card starts in the box Claude suggests. Move it with its buttons or by dragging; Done saves where every card sits."
+      : "Nothing is pre-selected. Pick an option or write your own; a note is optional unless you choose Other. Answers save as you go.");
+    const facts = isBoard()
+      ? `<div class="fact"><span>Cards</span><b>${n}</b></div><div class="fact"><span>Moved</span><b>${movedCount()}</b></div><div class="fact"><span>With a note</span><b>${notedCount()}</b></div>`
+      : `<div class="fact"><span>Questions</span><b>${n}</b></div><div class="fact"><span>Answered</span><b>${a}</b></div><div class="fact"><span>Open</span><b>${n - a}</b></div>`;
+    const file = f.file ? `<div class="source"><span>Questions file</span>${refHtml({ label: f.file, target: "path:" + f.file, tip: `The file Claude copies your answers into: ${f.file}.` })}</div>` : "";
+    head.innerHTML = `<div class="crumbs"><a href="#" data-home="1">All forms</a>${f.stage ? `<span aria-hidden="true">/</span><span>${esc(f.stage)}</span>` : ""}
+        <span class="status${done ? " done" : ""}" tabindex="0" data-tip="${esc(done ? `You pressed Done ${fmt(f.savedAt)}. Claude reads the answers when you say so in chat. A later change reopens the form.` : "Still open: Claude reads the answers after you press Done and say so in chat.")}"><i aria-hidden="true"></i>${done ? "Done" : "Open"}</span></div>
+      <div class="titlerow"><div><h1 id="title">${esc(f.title || view.id)}</h1><p class="lede">${linkify(esc(lede))}</p></div><div class="facts">${facts}</div></div>${file}`;
+  }
 
   /* The form row decides the layout: a list of questions, or a board of boxes. */
   function layout() {
     const mode = view.form && view.form.view === "board" ? "board" : "list";
     const key = mode === "board" ? JSON.stringify([view.form.boxes || [], view.form.groups || []]) : "";
     if (mode === view.mode && key === view.boxesKey) return;
-    view.mode = mode; view.boxesKey = key; view.rendered = new Map();
+    view.mode = mode; view.boxesKey = key; view.rendered = new Map(); view.tokens = null;
     document.body.classList.toggle("wide", mode === "board");
-    $("expandall").hidden = $("collapseall").hidden = mode !== "board";
-    el.qs.innerHTML = "";
-    if (mode === "board") el.qs.appendChild(renderBoard(view.form.boxes || []));
+    const qs = $("questions"); qs.innerHTML = "";
+    if (mode === "board") qs.appendChild(renderBoard(view.form.boxes || []));
     sync();
   }
   function sync() {
-    if (!view.mode) return;
-    if (!view.loaded) { if (!isBoard()) el.qs.innerHTML = '<p class="hint">Loading questions…</p>'; return; }
+    const qsEl = $("questions"); if (!view.mode || !qsEl) return;
+    if (!view.loaded) return;
     const qs = ordered();
     if (!isBoard()) {
-      if (!qs.length) { el.qs.innerHTML = '<p class="hint">No questions yet. Claude adds them as rows; they appear here as soon as they are written.</p>'; view.rendered = new Map(); updateCount(); return; }
-      el.qs.querySelectorAll(":scope > .hint").forEach((n) => n.remove());
+      if (!qs.length) { qsEl.innerHTML = '<div class="card msg"><b>No questions yet.</b><p>Claude adds them as rows; they appear here as soon as they are written.</p></div>'; view.rendered = new Map(); paintAll(); return; }
+      qsEl.querySelectorAll(":scope > .msg").forEach((n) => n.remove());
     }
     const seen = new Set();
     qs.forEach((q, i) => {
       seen.add(q.id); const sig = JSON.stringify(q);
       let node = document.getElementById("q-" + q.id);
       if (!node || view.rendered.get(q.id) !== sig) {
+        const focusId = document.activeElement && node && node.contains(document.activeElement) ? document.activeElement.id : "";
         const fresh = isBoard() ? renderCard(q) : renderQuestion(q);
-        if (node) node.replaceWith(fresh); else (isBoard() ? el.qs.querySelector("[data-cards]") || el.qs : el.qs).appendChild(fresh);
+        if (node) node.replaceWith(fresh); else (isBoard() ? qsEl.querySelector("[data-cards]") || qsEl : qsEl).appendChild(fresh);
         node = fresh; view.rendered.set(q.id, sig); paintAnswer(q.id);
+        if (focusId) document.getElementById(focusId)?.focus();
       }
-      if (!isBoard()) { const want = el.qs.children[i]; if (want !== node) el.qs.insertBefore(node, want || null); }
+      if (!isBoard()) { const want = qsEl.children[i]; if (want !== node) qsEl.insertBefore(node, want || null); }
     });
-    el.qs.querySelectorAll("[data-qid]").forEach((n) => { if (!seen.has(n.dataset.qid)) { view.rendered.delete(n.dataset.qid); n.remove(); } });
-    paintCounts(); updateCount();
+    qsEl.querySelectorAll("[data-qid]").forEach((n) => { if (!seen.has(n.dataset.qid)) { view.rendered.delete(n.dataset.qid); n.remove(); } });
+    paintAll();
+  }
+  function paintAll() { paintCounts(); qsAll().forEach((q) => paintFresh(q.id)); applyFilter(); paintHead(); paintBar(); }
+  const qsAll = () => [...view.questions.values()];
+
+  /* ---------- "new since you looked": the viewer's own marks ---------- */
+  const qsig = (q) => { const s = JSON.stringify([q.text, q.ctx, q.kind, q.options, q.proposed, q.hint, q.outcomes]); let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
+  const marksKey = (id) => "qf:seen:" + id;
+  function loadMarks(id) {
+    try { view.marks = JSON.parse(localStorage.getItem(marksKey(id)) || "{}") || {}; } catch { view.marks = {}; }
+    if (!(db && uid)) { view.marksReady = true; baseline(); return; }
+    Promise.resolve().then(() => marksDoc(id).get()).then((d) => {
+      if (view.id !== id) return;
+      Object.assign(view.marks, (d && d.exists && d.data().marks) || {});
+    }).catch(() => {}).finally(() => { if (view.id === id) { view.marksReady = true; baseline(); paintAll(); } });
+  }
+  const marksDoc = (id) => db.collection("data/users/" + uid).doc("seen-" + id);
+  function saveMarks() {
+    const id = view.id, marks = Object.assign({}, view.marks);
+    try { localStorage.setItem(marksKey(id), JSON.stringify(marks)); } catch {}
+    try { if (db && uid) marksDoc(id).set({ marks }).catch(() => {}); } catch {}
+  }
+  /* The first visit is the baseline: nothing is "new" to someone who has never seen the form. */
+  function baseline() {
+    if (view.baselined || !view.marksReady || !view.loaded || !view.questions.size) return;
+    view.baselined = true;
+    if (!Object.keys(view.marks).length) { qsAll().forEach((q) => { view.marks[q.id] = qsig(q); }); saveMarks(); }
+  }
+  function freshness(qid) { const q = view.questions.get(qid); if (!q || !view.baselined) return ""; const m = view.marks[qid]; return !m ? "new" : (m !== qsig(q) ? "changed" : ""); }
+  function markSeen(ids) { let any = false; ids.forEach((qid) => { const q = view.questions.get(qid); if (q && view.marks[qid] !== qsig(q)) { view.marks[qid] = qsig(q); any = true; } }); if (any) { saveMarks(); ids.forEach(paintFresh); paintBar(); applyFilter(); } }
+  function paintFresh(qid) {
+    const node = document.getElementById("q-" + qid); if (!node) return;
+    const slot = node.querySelector(".qfresh"); if (!slot) return;
+    const f = freshness(qid);
+    node.classList.toggle("is-fresh", !!f);
+    slot.innerHTML = f ? `<button type="button" class="tag fresh" data-seen="${esc(qid)}" data-tip="${esc(f === "new" ? "Added since you last looked at this form. Press to mark it seen." : "Changed since you last looked at this form. Press to mark it seen.")}">${f === "new" ? "New" : "Changed"}</button>` : "";
+  }
+
+  /* ---------- the sticky bar: filters, progress, save state, Done, and a chip per question or box ---------- */
+  function counts() {
+    const qs = qsAll();
+    return { total: qs.length, ans: qs.filter((q) => answered(q.id)).length, need: missingNotes().length, fresh: qs.filter((q) => freshness(q.id)).length, moved: movedCount(), noted: notedCount() };
+  }
+  function saveHtml() {
+    const s = view.save, f = view.form || {};
+    if (s.state === "saving") return `<span class="save busy"><i></i>Saving…</span>`;
+    if (s.state === "dirty") return `<span class="save busy"><i></i>Unsaved changes</span>`;
+    if (s.state === "fail") return `<span class="save fail" data-tip="${esc(s.msg)}" tabindex="0"><i></i>Not saved${s.readonly ? "" : '<button type="button" data-act="retry">Retry</button>'}</span>`;
+    if (f.status === "done") return `<span class="save ok"><i></i>Done ${esc(clock(f.savedAt))}</span>`;
+    if (s.state === "ok") return `<span class="save ok"><i></i>Saved${s.at ? " " + esc(clock(s.at)) : ""}</span>`;
+    return `<span class="save"><i></i>Nothing saved yet</span>`;
+  }
+  function doneLabel() { return view.form && view.form.status === "done" ? "Done ✓" : "Done"; }
+  function paintBar() {
+    const bar = $("bar"); if (!bar || !view.form || !view.mode) return;
+    keepFocus(bar, () => paintBarInner(bar));
+  }
+  function paintBarInner(bar) {
+    const c = counts(), multi = c.total > 1;
+    const pct = c.total ? Math.round((isBoard() ? c.total : c.ans) / c.total * 100) : 0;
+    const f = view.filter;
+    let filters, progress, chips;
+    if (isBoard()) {
+      filters = [["all", "All", c.total], ["moved", "Moved", c.moved], ["noted", "With a note", c.noted]].concat(c.fresh ? [["fresh", "New or changed", c.fresh]] : []);
+      progress = "";
+      chips = boxes().map((b) => { const n = [...document.querySelectorAll(`[data-cards="${CSS.escape(b.k)}"] .fcard:not(.filtered)`)].length;
+        return `<a class="chip" href="#" data-jump="box-${esc(b.k)}" style="--tone:var(--${toneVar(b.tone)})" data-tip="${esc(stripMd(b.t) + (b.hint ? " — " + stripMd(b.hint) : "") + `. ${plural(n, "card")} here.`)}"><span class="sw" aria-hidden="true"></span>${esc(stripMd(b.t))}<span class="count">${n}</span></a>`; }).join("");
+    } else {
+      filters = [["all", "All", c.total], ["open", "Unanswered", c.total - c.ans]].concat(c.fresh ? [["fresh", "New or changed", c.fresh]] : []);
+      progress = `<span class="progress"><span class="num">Answered ${c.ans}/${c.total}</span><span class="meter" aria-hidden="true"><i style="width:${pct}%"></i></span></span>`;
+      chips = ordered().map((q) => {
+        const st = (view.answers[q.id]?.k || []).includes("X") && !(view.answers[q.id]?.note || "").trim() ? "need" : (answered(q.id) ? "ans" : "");
+        const fr = freshness(q.id), state = st === "need" ? "needs your own words for Other" : (st ? "answered " + answerText(q.id) : "not answered yet");
+        return `<a class="chip ${st}${fr ? " fresh" : ""}${!passes(q) ? " dim" : ""}" href="#" data-jump="q-${esc(q.id)}" data-tip="${esc(`${q.id}: ${qLabel(q)} — ${state}${fr ? ` (${fr} since you looked)` : ""}.`)}"><span class="st" aria-hidden="true"></span>${esc(q.id)}</a>`;
+      }).join("");
+    }
+    const notice = view.notice ? `<div class="barmsg${view.notice.crit ? " crit" : ""}"><span>${view.notice.html}</span>${view.notice.jump ? `<button type="button" data-jump="q-${esc(view.notice.jump)}">Go to the first one</button>` : ""}</div>` : "";
+    const showNext = !isBoard() && c.ans < c.total;
+    bar.innerHTML = `<div class="barrow">
+        ${multi ? `<div class="filters" role="group" aria-label="Show">${filters.map(([k, t, n]) => `<button type="button" class="pill" data-filter="${k}" aria-pressed="${f === k}">${t}<b>${n}</b></button>`).join("")}</div>` : ""}
+        <div class="tools">${progress}
+          ${showNext ? `<button type="button" class="btn" data-act="next" data-tip="Go to the next question you have not answered.">Next unanswered</button>` : ""}
+          ${isBoard() ? `<button type="button" class="btn wide-only" data-act="expand">Expand all</button><button type="button" class="btn wide-only" data-act="collapse">Collapse all</button>` : ""}
+          ${c.fresh ? `<button type="button" class="btn wide-only" data-act="allseen">Mark all seen</button>` : ""}
+          <span class="grow-sp"></span>${saveHtml()}
+          <button type="button" class="primary${view.form.status === "done" ? " is-done" : ""}" data-act="done" ${view.closing ? "disabled" : ""} data-tip="${esc(doneTip(c))}">${doneLabel()}</button></div></div>
+      ${notice}${multi || isBoard() ? `<nav class="chips" aria-label="${isBoard() ? "Boxes" : "Questions"}">${chips}</nav>` : ""}`;
+    barHeight(); paintBand(c);
+  }
+  function notify(n) { view.notice = n; if (n) $("live").textContent = n.html.replace(/<[^>]+>/g, ""); paintBar(); }
+  function doneTip(c) {
+    if (view.form && view.form.status === "done") return "Already done. Press again after a change to mark it done again.";
+    if (isBoard()) return "Saves where every card sits and marks the form done. Then tell Claude in chat.";
+    return c.ans < c.total ? `${c.total - c.ans} still unanswered; Done asks you to confirm. Then tell Claude in chat.` : "Every question is answered. Mark the form done, then tell Claude in chat.";
+  }
+  function paintBand(c) {
+    const band = $("band"); if (!band || !view.form) return;
+    const done = view.form.status === "done";
+    band.hidden = false;
+    band.innerHTML = done
+      ? `<b>Done ${esc(fmt(view.form.savedAt))}.</b><span>Tell Claude in chat that the form is done. A later change reopens the form, and you press Done again.</span><button type="button" class="primary is-done" data-act="done">Done ✓</button>`
+      : `<b>${isBoard() ? `${plural(c.total, "card")} sorted.` : `${c.ans} of ${c.total} answered.`}</b><span>${isBoard() ? "Done saves where every card sits." : "Unanswered questions stay open questions for Claude."} Press Done, then tell Claude in chat that the form is done.</span><button type="button" class="primary" data-act="done" ${view.closing ? "disabled" : ""}>Done</button>`;
+  }
+  const stripMd = (s) => String(s ?? "").replace(/[`*]/g, "");
+  const toneVar = (t) => ({ ink: "accent", accent: "high-fg", warn: "crit-fg", muted: "muted" }[t] || "accent");
+  function answerText(qid) { const a = view.answers[qid]; if (!a) return ""; const q = view.questions.get(qid); return q?.kind === "text" ? "in your words" : (a.k || []).join(", "); }
+
+  /* ---------- filters ---------- */
+  function passes(q) {
+    const f = view.filter, a = view.answers[q.id];
+    if (f === "all") return true;
+    if (f === "open") return !answered(q.id) || ((a?.k || []).includes("X") && !(a?.note || "").trim());
+    if (f === "fresh") return !!freshness(q.id);
+    if (f === "moved") return !!q.proposed?.k && boxOf(q.id) !== q.proposed.k;
+    if (f === "noted") return !!(a?.note || "").trim();
+    return true;
+  }
+  function applyFilter() {
+    qsAll().forEach((q) => document.getElementById("q-" + q.id)?.classList.toggle("filtered", !passes(q)));
+    const qsEl = $("questions"); if (!qsEl) return;
+    let empty = qsEl.querySelector(":scope > .filter-empty");
+    const none = view.filter !== "all" && view.questions.size && !qsAll().some(passes);
+    if (none && !isBoard()) { if (!empty) { empty = document.createElement("div"); empty.className = "card msg filter-empty"; qsEl.appendChild(empty); } empty.innerHTML = `<b>${view.filter === "open" ? "Every question is answered." : "Nothing here for this filter."}</b><p><button type="button" class="btn" data-filter="all">Show all questions</button></p>`; }
+    else if (empty) empty.remove();
+    if (isBoard()) paintCounts();
   }
 
   /* ---------- board ---------- */
@@ -407,7 +804,7 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
   const boxDef = (k) => boxes().find((b) => b.k === k);
   const grouped = () => boxes().some((b) => b.group || b.sink);
   /* With groups, a card stays in its group (its own `group`, else its proposed box's) or goes to a
-     sink box (Don't do). A card with no group at all may go anywhere. */
+     sink box. A card with no group at all may go anywhere. */
   const cardGroup = (q) => q.group || boxDef(q.proposed?.k)?.group || "";
   const allowed = (q, k) => {
     const box = boxDef(k); if (!q || !box) return false;
@@ -421,14 +818,15 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
     if (q?.proposed?.k && boxes().some((b) => b.k === q.proposed.k)) return q.proposed.k;
     return boxes()[0]?.k || "";
   }
-  const boxHtml = (x) => `<section class="box tone-${esc(x.tone || "ink")}${x.sink ? " sink" : ""}" data-box="${esc(x.k)}" aria-labelledby="box-${esc(x.k)}">
-      ${x.sink ? `<div class="sinkgrip" role="separator" aria-orientation="horizontal" tabindex="0" aria-label="Drag to resize ${esc(x.t)}"></div>` : ""}
-      <div class="boxhead"><h3 id="box-${esc(x.k)}"><span>${inline(x.t)}</span><span class="count" data-count="${esc(x.k)}">0</span></h3>${x.hint ? `<p>${inline(x.hint)}</p>` : ""}</div>
+  const movedCount = () => isBoard() ? qsAll().filter((q) => q.proposed?.k && boxOf(q.id) !== q.proposed.k).length : 0;
+  const notedCount = () => qsAll().filter((q) => (view.answers[q.id]?.note || "").trim()).length;
+  const boxHtml = (x) => `<section class="box tone-${esc(x.tone || "ink")}${x.sink ? " sink" : ""}" id="box-${esc(x.k)}" data-box="${esc(x.k)}" aria-labelledby="boxh-${esc(x.k)}">
+      ${x.sink ? `<div class="sinkgrip" role="separator" aria-orientation="horizontal" tabindex="0" aria-label="Resize ${esc(stripMd(x.t))}: arrow keys; double-click resets"></div>` : ""}
+      <div class="boxhead"><h3 id="boxh-${esc(x.k)}"><span>${inline(x.t)}</span><span class="count" data-count="${esc(x.k)}">0</span></h3>${x.hint ? `<p data-tip="${esc(stripMd(x.hint))}">${inline(x.hint)}</p>` : ""}</div>
       <div class="cards" data-cards="${esc(x.k)}"></div></section>`;
   function renderBoard(list) {
     const b = document.createElement("div");
     if (grouped()) {
-      /* Groups side by side, each group's boxes stacked; sink boxes take a full row below. */
       const defs = (view.form && view.form.groups) || [];
       const keys = [...new Set(list.filter((x) => !x.sink).map((x) => x.group || ""))];
       const groups = keys.map((k) => ({ k, t: "", hint: "", ...(defs.find((g) => g.k === k) || {}) }));
@@ -449,17 +847,22 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
     });
     return b;
   }
+  const CHEV = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   function renderCard(q) {
-    const c = document.createElement("article"); c.className = "card"; c.id = "q-" + q.id; c.dataset.qid = q.id; c.draggable = true; c.tabIndex = -1;
-    c.innerHTML = `<div class="chead"><span class="qid">${esc(q.id)}</span><h4 class="ctitle">${inline(q.text)}</h4>
-        <span class="cflag" aria-hidden="true"></span>
-        <button type="button" class="cexp" aria-expanded="false" aria-label="Show details of ${esc(q.id)}"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
+    const c = document.createElement("article"); c.className = "fcard"; c.id = "q-" + q.id; c.dataset.qid = q.id; c.draggable = true; c.tabIndex = -1;
+    c.setAttribute("aria-labelledby", "ct-" + q.id);
+    c.innerHTML = `<div class="chead"><span class="qid" tabindex="0" data-tip="${esc(`Card ${q.id}. Use it when you mention this card in chat.`)}">${esc(q.id)}</span><h4 class="ctitle" id="ct-${esc(q.id)}">${inline(q.text, q.id)}</h4>
+        <span class="cflags"><span class="qfresh"></span><span class="qstate"></span></span>
+        <button type="button" class="cexp" aria-expanded="false" aria-controls="cd-${esc(q.id)}" aria-label="Details of ${esc(qLabel(q))}">${CHEV}</button></div>
+      ${q.plain ? `<p class="plain">${inline(q.plain, q.id)}</p>` : ""}
       <div class="moves" role="group" aria-label="Move this card"></div>
-      <div class="cdetail"><div class="cin"><div class="cmain">
-        ${q.from ? `<p class="from">${inline(q.from)}</p>` : ""}
-        ${q.ctx ? `<div class="ctx">${md(q.ctx)}</div>` : ""}
+      <div class="cdetail" id="cd-${esc(q.id)}"><div class="cin"><div class="cmain">
+        ${q.from ? `<p class="from">${inline(q.from, q.id)}</p>` : ""}
+        ${q.ctx ? `<div class="ctx">${md(q.ctx, q.id)}</div>` : ""}
+        ${q.action ? `<p class="action"><b>Suggested action</b>${inline(q.action, q.id)}</p>` : ""}
+        ${refsHtml(q, "Refers to")}
         <button type="button" class="addnote">Add a note</button>
-        <div class="note cnote"><label for="${esc(q.id)}-note"><b>Note</b><span>Optional — a condition, a reason, what to change.</span></label>
+        <div class="note cnote"><label for="${esc(q.id)}-note"><b>Note</b><span>Optional — a condition, a reason, what to change.</span><span class="qsave" id="${esc(q.id)}-save" aria-live="polite"></span></label>
           <textarea id="${esc(q.id)}-note" rows="2"></textarea></div>
       </div><div class="cside">
         <p class="outcome"></p>
@@ -468,9 +871,9 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
     if (view.expanded.has(q.id)) setOpen(c, true);
     c.querySelector(".cexp").addEventListener("click", () => setOpen(c, !c.classList.contains("open")));
     c.querySelector(".addnote").addEventListener("click", () => { c.classList.add("noting"); c.querySelector("textarea").focus(); });
-    c.addEventListener("dragstart", (e) => { view.drag = q.id; c.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", q.id); } catch {}
-      el.qs.querySelectorAll(".box").forEach((b) => b.classList.toggle("no-drop", b.dataset.box !== boxOf(q.id) && !allowed(q, b.dataset.box))); });
-    c.addEventListener("dragend", () => { view.drag = null; c.classList.remove("dragging"); el.qs.querySelectorAll(".box.over, .box.no-drop").forEach((b) => b.classList.remove("over", "no-drop")); });
+    c.addEventListener("dragstart", (e) => { view.drag = q.id; c.classList.add("dragging"); hideTip(); e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", q.id); } catch {}
+      document.querySelectorAll(".box").forEach((b) => b.classList.toggle("no-drop", b.dataset.box !== boxOf(q.id) && !allowed(q, b.dataset.box))); });
+    c.addEventListener("dragend", () => { view.drag = null; c.classList.remove("dragging"); document.querySelectorAll(".box.over, .box.no-drop").forEach((b) => b.classList.remove("over", "no-drop")); });
     const ta = c.querySelector("textarea");
     ta.addEventListener("focus", () => { c.draggable = false; });
     ta.addEventListener("blur", () => { c.draggable = true; });
@@ -483,31 +886,33 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
     card.querySelector(".cexp")?.setAttribute("aria-expanded", String(open));
     if (open) view.expanded.add(card.dataset.qid); else view.expanded.delete(card.dataset.qid);
   }
-  function setAllOpen(open) { el.qs.querySelectorAll(".card").forEach((c) => setOpen(c, open)); }
+  function setAllOpen(open) { document.querySelectorAll(".fcard").forEach((c) => setOpen(c, open)); requestAnimationFrame(sizeSinks); }
   function paintCard(qid) {
     const node = document.getElementById("q-" + qid); const q = view.questions.get(qid); if (!node || !q) return;
     const k = boxOf(qid);
-    const list = [...el.qs.querySelectorAll("[data-cards]")].find((n) => n.dataset.cards === k);
+    const list = [...document.querySelectorAll("[data-cards]")].find((n) => n.dataset.cards === k);
     if (list && node.parentElement !== list) {
       const after = [...list.children].find((n) => (view.questions.get(n.dataset.qid)?.n ?? 0) > (q.n ?? 0));
       list.insertBefore(node, after || null);
     }
-    node.querySelector(".outcome").innerHTML = q.outcomes && q.outcomes[k] ? inline(q.outcomes[k]) : "";
-    const pk = q.proposed?.k; const why = q.proposed?.why ? " — " + inline(q.proposed.why) : "";
-    node.querySelector(".sugg").innerHTML = pk ? (pk === k ? `<b>Suggested here</b>${why}` : `<b>Suggested</b>${inline(boxLabel(pk))}${why}`) : "";
+    node.querySelector(".outcome").innerHTML = q.outcomes && q.outcomes[k] ? inline(q.outcomes[k], qid) : "";
+    const pk = q.proposed?.k; const why = q.proposed?.why ? " — " + inline(q.proposed.why, qid) : "";
+    node.querySelector(".sugg").innerHTML = pk ? (pk === k
+      ? `<span class="tag" tabindex="0" data-tip="Claude put the card in this box first. Leave it, or move it.">Suggested here</span>${why}`
+      : `<span class="tag" tabindex="0" data-tip="${esc(`You moved this card. Claude suggested ${stripMd(boxLabel(pk))}.`)}">Suggested: ${esc(stripMd(boxLabel(pk)))}</span>${why}`) : "";
     node.classList.toggle("moved", !!pk && pk !== k);
-    node.querySelector(".moves").innerHTML = boxes().filter((b) => b.k !== k && allowed(q, b.k)).map((b) => `<button type="button" class="move" data-to="${esc(b.k)}">→ ${inline(b.t)}</button>`).join("");
+    node.querySelector(".moves").innerHTML = boxes().filter((b) => b.k !== k && allowed(q, b.k)).map((b) => `<button type="button" class="move" data-to="${esc(b.k)}" aria-label="${esc(`Move ${qLabel(q)} to ${stripMd(b.t)}`)}">→ ${inline(b.t)}</button>`).join("");
     const ta = node.querySelector("textarea"); const note = view.answers[qid]?.note || "";
     if (document.activeElement !== ta) ta.value = note;
     node.classList.toggle("noting", !!note.trim() || node.classList.contains("noting"));
-    node.querySelector(".cflag").textContent = [pk && pk !== k ? "moved" : "", note.trim() ? "note" : ""].filter(Boolean).join(" · ");
-    paintCounts();
+    node.querySelector(".qstate").innerHTML = [pk && pk !== k ? `<span class="tag differs" tabindex="0" data-tip="${esc(`Moved from ${stripMd(boxLabel(pk))}, where Claude suggested it.`)}">moved</span>` : "", note.trim() ? `<span class="tag open" tabindex="0" data-tip="${esc("Your note: " + note.trim())}">note</span>` : ""].join("");
+    paintQsave(qid);
   }
   function place(qid, k, keepFocus) {
     const q = view.questions.get(qid); if (!allowed(q, k)) return;
     record(qid, [k], document.getElementById(qid + "-note")?.value ?? (view.answers[qid]?.note || ""));
-    paintCard(qid);
-    if (keepFocus) document.getElementById("q-" + qid)?.focus({ preventScroll: false });
+    paintCard(qid); paintCounts(); applyFilter(); paintHead(); paintBar();
+    if (keepFocus) { const n = document.getElementById("q-" + qid); n?.focus({ preventScroll: true }); n?.scrollIntoView({ block: "nearest", behavior: reduced() ? "auto" : "smooth" }); }
   }
   /* The sink row shows one row of cards and a quarter by default. On a wide window its top edge
      can be dragged; the chosen height is kept in this browser only. */
@@ -516,10 +921,10 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
   const readSinkHeight = () => { try { return parseInt(localStorage.getItem(SINK_KEY) || "", 10) || 0; } catch { return 0; } };
   const saveSinkHeight = (px) => { try { localStorage.setItem(SINK_KEY, String(px)); } catch {} };
   function sizeSinks() {
-    el.qs.querySelectorAll(".box.sink .cards").forEach((list) => {
+    document.querySelectorAll(".box.sink .cards").forEach((list) => {
       const chosen = WIDE.matches ? readSinkHeight() : 0;
       if (chosen) { list.style.setProperty("--sink-max", `${chosen}px`); return; }
-      const card = [...list.children].find((c) => !c.classList.contains("open")) || list.firstElementChild;
+      const card = [...list.children].find((c) => !c.classList.contains("open") && !c.classList.contains("filtered")) || list.firstElementChild;
       const h = card ? card.offsetHeight : 76;
       const gap = parseFloat(getComputedStyle(list).rowGap) || 10;
       list.style.setProperty("--sink-max", `${Math.round(h + gap + h / 4)}px`);
@@ -528,7 +933,7 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
   function bindSinkGrips(root) {
     root.querySelectorAll(".sinkgrip").forEach((grip) => {
       const list = grip.parentElement.querySelector(".cards");
-      const board = () => el.qs.getBoundingClientRect().height;
+      const board = () => ($("questions")?.getBoundingClientRect().height || 600);
       const clamp = (px) => Math.max(60, Math.min(Math.round(px), Math.round(board() - 220)));
       const set = (px) => { const v = clamp(px); list.style.setProperty("--sink-max", `${v}px`); saveSinkHeight(v); };
       let startY = 0, startH = 0;
@@ -553,38 +958,42 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
   function paintCounts() {
     if (!isBoard()) return;
     requestAnimationFrame(sizeSinks);
-    el.qs.querySelectorAll("[data-count]").forEach((c) => { const list = [...el.qs.querySelectorAll("[data-cards]")].find((n) => n.dataset.cards === c.dataset.count); c.textContent = String(list ? list.children.length : 0); });
+    document.querySelectorAll("[data-count]").forEach((c) => { const list = [...document.querySelectorAll("[data-cards]")].find((n) => n.dataset.cards === c.dataset.count); c.textContent = String(list ? list.querySelectorAll(".fcard:not(.filtered)").length : 0); });
   }
 
-  /* ---------- list ---------- */
+  /* ---------- question list ---------- */
+  function qShell(q, body) {
+    const s = document.createElement("section"); s.className = "card q"; s.id = "q-" + q.id; s.dataset.qid = q.id;
+    s.setAttribute("aria-labelledby", "qt-" + q.id);
+    s.innerHTML = `<div class="qhead"><span class="qid" tabindex="0" data-tip="${esc(`Question ${q.id} in the questions file. Use it when you mention this question in chat.`)}">${esc(q.id)}</span><h2 id="qt-${esc(q.id)}">${inline(q.text, q.id)}</h2>
+        <span class="qtags"><span class="qfresh"></span><span class="qstate"></span></span></div>
+      ${q.revNote ? `<p class="revnote">${inline(q.revNote, q.id)}</p>` : ""}
+      <div class="qbody">${q.ctx ? `<div class="ctx">${md(q.ctx, q.id)}</div>` : ""}${body}${refsHtml(q, "Refers to")}</div>`;
+    return s;
+  }
   function renderQuestion(q) {
     if (q.kind === "text") return renderText(q);
-    const s = document.createElement("section"); s.className = "q"; s.id = "q-" + q.id; s.dataset.qid = q.id;
     const multi = q.kind === "multi"; const type = multi ? "checkbox" : "radio";
-    const opts = (q.options || []).map((o) => `<label class="opt"><input type="${type}" name="${esc(q.id)}" value="${esc(o.k)}" id="${esc(q.id)}-${esc(o.k)}"><span><span class="optletter">${esc(o.k)}.</span>${inline(o.t)}</span></label>`).join("");
-    const other = q.other === false ? "" : `<label class="opt"><input type="${type}" name="${esc(q.id)}" value="X" id="${esc(q.id)}-X"><span><span class="optletter">X.</span>Other (please specify)</span></label>`;
-    const proposal = q.proposed && q.proposed.k ? `<div class="proposal"><p><b>Proposed</b>${esc(q.proposed.k)}. ${inline(q.proposed.why || "")}</p><button class="use" type="button" data-k="${esc(q.proposed.k)}">Choose ${esc(q.proposed.k)}</button></div>` : "";
-    s.innerHTML = `<div class="qhead"><span class="qid">${esc(q.id)}</span><h2>${inline(q.text)}</h2></div>
-      ${q.ctx ? `<div class="ctx">${md(q.ctx)}</div>` : ""}
-      ${q.hint || multi ? `<p class="hint">${inline(q.hint || "Select all that apply.")}</p>` : ""}
-      <div class="options">${opts}${other}</div>
-      <div class="note"><label for="${esc(q.id)}-note"><b>Note</b><span id="${esc(q.id)}-notelabel">Optional — a small change to an option, a condition, a reason. Required for Other.</span></label>
+    const pk = q.proposed && q.proposed.k;
+    const opts = (q.options || []).map((o) => `<label class="opt"><input type="${type}" name="${esc(q.id)}" value="${esc(o.k)}" id="${esc(q.id)}-${esc(o.k)}"><span><span class="optletter">${esc(o.k)}</span><span>${inline(o.t, q.id)}</span></span>${o.k === pk ? `<span class="tag ptag" style="background:var(--accent-soft);color:var(--accent)" data-tip="Claude’s proposal. It is chosen only if you press it.">proposed</span>` : ""}</label>`).join("");
+    const other = q.other === false ? "" : `<label class="opt"><input type="${type}" name="${esc(q.id)}" value="X" id="${esc(q.id)}-X"><span><span class="optletter">X</span><span>Other — your own answer, in the note below</span></span></label>`;
+    const proposal = pk ? `<div class="proposal"><p><span class="tag" tabindex="0" data-tip="Claude’s suggestion. Nothing is chosen until you press it.">Proposed ${esc(pk)}</span>${inline(q.proposed.why || "", q.id)}</p><button class="use" type="button" data-k="${esc(pk)}">Choose ${esc(pk)}</button></div>` : "";
+    const s = qShell(q, `${q.hint || multi ? `<p class="hint">${inline(q.hint || "Select all that apply.", q.id)}</p>` : ""}
+      <div class="options" role="${multi ? "group" : "radiogroup"}" aria-labelledby="qt-${esc(q.id)}">${opts}${other}</div>
+      <div class="note"><label for="${esc(q.id)}-note"><b>Note</b><span id="${esc(q.id)}-notelabel">Optional — a small change to an option, a condition, a reason. Required for Other.</span><span class="qsave" id="${esc(q.id)}-save" aria-live="polite"></span></label>
         <textarea id="${esc(q.id)}-note" rows="2"></textarea></div>
-      ${proposal}`;
-    s.querySelectorAll("input").forEach((i) => i.addEventListener("change", () => { if (!multi) { /* radio */ } collect(q.id); }));
+      ${proposal}`);
+    s.querySelectorAll("input").forEach((i) => i.addEventListener("change", () => collect(q.id)));
     s.querySelector("textarea").addEventListener("input", () => collect(q.id));
     s.querySelector(".use")?.addEventListener("click", (e) => { const inp = document.getElementById(q.id + "-" + e.currentTarget.dataset.k); if (inp) { if (!multi) s.querySelectorAll("input").forEach((i) => (i.checked = false)); inp.checked = true; collect(q.id); inp.focus(); } });
     return s;
   }
   function renderText(q) {
-    const s = document.createElement("section"); s.className = "q"; s.id = "q-" + q.id; s.dataset.qid = q.id;
-    const proposal = q.proposed && q.proposed.t ? `<div class="proposal"><p><b>Proposed</b>${inline(q.proposed.t)}</p><button class="use" type="button">Use this text</button></div>` : "";
-    s.innerHTML = `<div class="qhead"><span class="qid">${esc(q.id)}</span><h2>${inline(q.text)}</h2></div>
-      ${q.ctx ? `<div class="ctx">${md(q.ctx)}</div>` : ""}
-      ${q.hint ? `<p class="hint">${inline(q.hint)}</p>` : ""}
-      <div class="note"><label for="${esc(q.id)}-note"><b>Answer</b><span>In your own words.</span></label>
+    const proposal = q.proposed && q.proposed.t ? `<div class="proposal"><p><span class="tag" tabindex="0" data-tip="Claude’s suggested answer. It is used only if you press it.">Proposed</span>${inline(q.proposed.t, q.id)}</p><button class="use" type="button">Use this text</button></div>` : "";
+    const s = qShell(q, `${q.hint ? `<p class="hint">${inline(q.hint, q.id)}</p>` : ""}
+      <div class="note"><label for="${esc(q.id)}-note"><b>Answer</b><span>In your own words.</span><span class="qsave" id="${esc(q.id)}-save" aria-live="polite"></span></label>
         <textarea id="${esc(q.id)}-note" rows="3"></textarea></div>
-      ${proposal}`;
+      ${proposal}`);
     const ta = s.querySelector("textarea");
     ta.addEventListener("input", () => collect(q.id));
     s.querySelector(".use")?.addEventListener("click", () => { ta.value = q.proposed.t; collect(q.id); ta.focus(); });
@@ -597,12 +1006,30 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
     const a = view.answers[qid] || { k: [], note: "" };
     node.querySelectorAll("input").forEach((i) => (i.checked = (a.k || []).includes(i.value)));
     const ta = node.querySelector("textarea"); if (document.activeElement !== ta) ta.value = a.note || "";
-    flagNote(qid);
+    flagNote(qid); paintState(qid); paintQsave(qid);
   }
+  function paintState(qid) {
+    const node = document.getElementById("q-" + qid), q = view.questions.get(qid); if (!node || !q || isBoard()) return;
+    const a = view.answers[qid], need = needsNote(qid), ok = answered(qid);
+    const pk = q.proposed?.k, differs = ok && pk && q.kind !== "text" && !(a.k || []).includes(pk);
+    node.classList.toggle("is-ans", ok && !need);
+    node.querySelector(".qstate").innerHTML =
+      (differs ? `<span class="tag differs" tabindex="0" data-tip="${esc(`Your answer differs from Claude’s proposal (${pk}). That is fine; a note on why helps.`)}">not the proposal</span>` : "") +
+      (need ? `<span class="tag need" tabindex="0" data-tip="You chose Other: write your own answer in the note.">needs your words</span>`
+        : ok ? `<span class="tag ans" tabindex="0" data-tip="${esc(q.kind === "text" ? "Answered in your words." : `Answered ${(a.k || []).join(", ")}${(a.note || "").trim() ? ", with a note" : ""}.`)}">${q.kind === "text" ? "answered" : "answered " + esc((a.k || []).join(", "))}</span>`
+        : `<span class="tag open" tabindex="0" data-tip="Not answered yet. Left open, it stays an open question for Claude.">open</span>`);
+  }
+  function paintQsave(qid) {
+    const s = document.getElementById(qid + "-save"); if (!s) return;
+    const st = view.qstat[qid] || "";
+    s.className = "qsave" + (st === "Saved" ? " ok" : st === "Not saved" ? " fail" : "");
+    s.textContent = st;
+  }
+  const needsNote = (qid) => { const a = view.answers[qid]; return !!a && (a.k || []).includes("X") && !(a.note || "").trim(); };
   function flagNote(qid) {
     const node = document.getElementById("q-" + qid); if (!node || view.questions.get(qid)?.kind === "text") return;
-    const a = view.answers[qid]; const needs = !!a && (a.k || []).includes("X") && !(a.note || "").trim();
-    node.classList.toggle("needs-note", needs);
+    const a = view.answers[qid];
+    node.classList.toggle("needs-note", needsNote(qid));
     const lbl = document.getElementById(qid + "-notelabel"); if (lbl) lbl.textContent = (a && (a.k || []).includes("X")) ? "Your own words — required for Other." : "Optional — a small change to an option, a condition, a reason. Required for Other.";
   }
   function collect(qid) {
@@ -611,25 +1038,50 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
     const k = isBoard() ? [boxOf(qid)] : [...node.querySelectorAll("input:checked")].map((i) => i.value);
     record(qid, k, note);
   }
+
+  /* ---------- saving: debounced, with a visible state and retries that back off ---------- */
+  const LIVE = { saving: "Saving…", ok: "Saved", fail: "Not saved" };
+  function setSave(state, msg) {
+    const before = view.save.state;
+    view.save = { state, at: state === "ok" ? new Date().toISOString() : view.save.at, msg: msg || "", readonly: view.save.readonly };
+    if (state !== before && LIVE[state]) $("live").textContent = state === "fail" ? (msg || LIVE.fail) : LIVE[state];
+    paintBar();
+  }
+  function setQ(ids, text) { ids.forEach((qid) => { view.qstat[qid] = text; paintQsave(qid); }); }
   function record(qid, k, note) {
     view.answers[qid] = { k, note, at: new Date().toISOString() }; view.touched[qid] = Date.now(); view.pending[qid] = view.answers[qid];
-    view.confirmDone = false; flagNote(qid); updateCount(); setStatus("Unsaved changes…");
+    view.confirmDone = false; view.notice = null;
+    if (!isBoard()) { flagNote(qid); paintState(qid); }
+    markSeen([qid]); setQ([qid], "Unsaved"); setSave("dirty");
+    if (!isBoard()) { applyFilter(); paintHead(); }
     clearTimeout(view.timer); view.timer = setTimeout(flush, 450);
   }
   async function flush() {
     if (view.inflight || !db || !view.id || !Object.keys(view.pending).length) return;
-    const batch = view.pending; view.pending = {}; view.inflight = true; setStatus("Saving…");
-    const id = view.id;
+    const batch = view.pending; view.pending = {}; view.inflight = true; clearTimeout(view.retryTimer);
+    const id = view.id, ids = Object.keys(batch);
+    setQ(ids, "Saving…"); setSave("saving");
+    let failed = false;
     try {
       const patch = { answers: {} }; for (const [qid, a] of Object.entries(batch)) patch.answers[qid] = { k: a.k, note: a.note, at: a.at };
       /* An edit after Done reopens the form; a save that Done itself is waiting for never does. */
       if (view.form && view.form.status === "done" && !view.closing) patch.status = "open";
       await db.doc("forms/" + id).update(patch);
-      if (view.id === id && !Object.keys(view.pending).length) setStatus(`Saved ${fmt(new Date().toISOString())}`, "ok");
+      if (view.id === id) { view.retry = 0; setQ(ids.filter((q) => !view.pending[q]), "Saved"); if (!Object.keys(view.pending).length) setSave("ok"); }
     } catch (e) {
-      Object.assign(view.pending, batch);
-      setStatus(e && e.code === "invalid_argument" ? "You can view this form but not save to it. Ask the owner for Contributor access." : "Couldn’t save. Check your connection; it retries when you change something.", "warn");
-    } finally { view.inflight = false; if (Object.keys(view.pending).length) setTimeout(flush, 800); }
+      failed = true;
+      if (view.id !== id) return;
+      for (const [qid, a] of Object.entries(batch)) if (!view.pending[qid]) view.pending[qid] = a;
+      setQ(ids, "Not saved");
+      const readonly = e && e.code === "invalid_argument";
+      view.save.readonly = readonly;
+      setSave("fail", readonly ? "You can view this form but not save to it. Ask the owner for Contributor access." : "Couldn’t save. Check your connection; it tries again by itself, or press Retry.");
+      toast(readonly ? "You can view this form but not save to it." : "Couldn’t save your answer. It is kept here and sent again.");
+      if (!readonly) { view.retry = Math.min(view.retry + 1, 5); view.retryTimer = setTimeout(flush, 1000 * 2 ** view.retry); }
+    } finally {
+      view.inflight = false;
+      if (view.id === id && !failed && Object.keys(view.pending).length) flush();
+    }
   }
   function answered(qid) {
     const q = view.questions.get(qid); const a = view.answers[qid];
@@ -637,19 +1089,16 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
     if (q?.kind === "text") return !!(a?.note || "").trim();
     return !!(a?.k || []).length;
   }
-  function updateCount() {
-    const n = [...view.questions.keys()].filter(answered).length;
-    el.done.title = `${n} of ${view.questions.size} answered`;
-  }
-  function unanswered() { return [...view.questions.keys()].filter((qid) => !answered(qid)); }
-  function missingNotes() { return [...view.questions.keys()].filter((qid) => (view.answers[qid]?.k || []).includes("X") && !(view.answers[qid]?.note || "").trim()); }
+  function unanswered() { return ordered().map((q) => q.id).filter((qid) => !answered(qid)); }
+  function missingNotes() { return ordered().map((q) => q.id).filter(needsNote); }
+  const idList = (ids) => (ids.length > 4 ? ids.slice(0, 4) : ids).map((q) => idRef(q)).join(", ") + (ids.length > 4 ? ` and ${ids.length - 4} more` : "");
 
-  el.done.addEventListener("click", async () => {
-    if (!db || !view.id) return;
+  async function done() {
+    if (!db || !view.id || view.closing) return;
     const miss = missingNotes();
-    if (miss.length) { setStatus(`${miss.join(", ")}: write your own words for Other, or pick an option.`, "warn"); document.getElementById("q-" + miss[0])?.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+    if (miss.length) { notify({ crit: true, html: `${idList(miss)}: you chose Other — write your own words in the note, or pick an option.`, jump: miss[0] }); reveal("q-" + miss[0]); return; }
     const open = unanswered();
-    if (open.length && !view.confirmDone) { view.confirmDone = true; setStatus(`${open.length} unanswered (${open.join(", ")}) — they stay open questions for Claude. Press Done again to confirm.`, "warn"); return; }
+    if (open.length && !view.confirmDone) { view.confirmDone = true; notify({ html: `${plural(open.length, "question")} unanswered (${idList(open)}). They stay open questions for Claude. Press Done again to confirm.`, jump: open[0] }); return; }
     if (isBoard()) {
       /* A card left where it started is an answer too: write every card's box. */
       const now = new Date().toISOString();
@@ -658,28 +1107,74 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
         if (view.answers[qid]?.k?.[0] !== k) { view.answers[qid] = { k: [k], note: view.answers[qid]?.note || "", at: now }; view.pending[qid] = view.answers[qid]; }
       }
     }
-    el.done.disabled = true; clearTimeout(view.timer); view.closing = true;
+    clearTimeout(view.timer); clearTimeout(view.retryTimer); view.closing = true; view.notice = null; paintBar();
     try {
       /* Wait until every answer is saved: an autosave may be in flight, and more may be pending. */
       for (let i = 0; i < 100 && (view.inflight || Object.keys(view.pending).length); i++) {
         if (!view.inflight) await flush(); else await new Promise((r) => setTimeout(r, 100));
+        if (view.save.state === "fail") break;
       }
       if (view.inflight || Object.keys(view.pending).length) throw new Error("unsaved");
       await db.doc("forms/" + view.id).update({ status: "done", savedAt: new Date().toISOString() }); view.confirmDone = false;
-    } catch { setStatus("Couldn’t mark the form as done. Try again.", "warn"); }
-    finally { view.closing = false; el.done.disabled = false; }
-  });
+      toast("Marked as done. Tell Claude in chat that the form is done.");
+    } catch {
+      notify({ crit: true, html: "Couldn’t mark the form as done: some answers are not saved. Check your connection and press Done again." });
+    } finally { view.closing = false; paintBar(); }
+  }
 
-  $("expandall").addEventListener("click", () => setAllOpen(true));
-  $("collapseall").addEventListener("click", () => setAllOpen(false));
+  /* ---------- jumps land below the bar and flash ---------- */
+  function reveal(targetId) {
+    const node = document.getElementById(targetId); if (!node) return;
+    if (node.classList.contains("filtered")) { view.filter = "all"; applyFilter(); paintBar(); }
+    if (node.classList.contains("fcard") && !node.classList.contains("open")) setOpen(node, true);
+    node.scrollIntoView({ block: node.classList.contains("fcard") ? "center" : "start", behavior: reduced() ? "auto" : "smooth" });
+    node.classList.remove("flash"); void node.offsetWidth; node.classList.add("flash");
+    if (!node.hasAttribute("tabindex")) node.setAttribute("tabindex", "-1");
+    node.focus({ preventScroll: true });
+  }
+
+  /* ---------- events ---------- */
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("[data-tip]")) hideTip();
+    const home = e.target.closest("[data-home]");
+    if (home) { e.preventDefault(); history.pushState(null, "", location.pathname + location.search); route(); return; }
+    const jump = e.target.closest("[data-jump]");
+    if (jump) { e.preventDefault(); hideTip(); reveal(jump.dataset.jump); return; }
+    const off = e.target.closest("[data-off]");
+    if (off) {
+      e.preventDefault(); showTip(off);
+      const p = off.dataset.path;
+      if (p && navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(p).then(() => toast("That file isn’t in this document — its path is in the tooltip, and now on your clipboard."), () => toast("That source isn’t in this document — read the tooltip."));
+      else toast("That source isn’t in this document — read the tooltip.");
+      return;
+    }
+    const seen = e.target.closest("[data-seen]");
+    if (seen) { markSeen([seen.dataset.seen]); return; }
+    const fl = e.target.closest("[data-filter]");
+    if (fl) { view.filter = view.filter === fl.dataset.filter && fl.dataset.filter !== "all" ? "all" : fl.dataset.filter; applyFilter(); paintBar(); return; }
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (!act) {
+      const t = e.target.closest(".term[data-tip], .tag[data-tip], .qid[data-tip]");
+      if (t) showTip(t);
+      return;
+    }
+    if (act === "done") done();
+    else if (act === "retry") { view.retry = 0; flush(); }
+    else if (act === "next") { const open = unanswered(); const cur = ordered().findIndex((q) => { const n = document.getElementById("q-" + q.id); return n && n.getBoundingClientRect().top > (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--bar-h")) || 120) + 24; }); const after = ordered().slice(Math.max(0, cur)).map((q) => q.id).find((q) => open.includes(q)) || open[0]; if (after) reveal("q-" + after); }
+    else if (act === "expand") setAllOpen(true);
+    else if (act === "collapse") setAllOpen(false);
+    else if (act === "allseen") markSeen(qsAll().map((q) => q.id));
+  });
+  window.addEventListener("beforeunload", (e) => { if (Object.keys(view.pending).length || view.inflight) { flush(); e.preventDefault(); e.returnValue = ""; } });
 
   /* ---------- boot ---------- */
   function route() { const id = formId(); if (id) showForm(id); else showIndex(); }
   window.addEventListener("hashchange", route);
-  route();
   (async () => {
-    db = window.claude && typeof window.claude.use === "function" ? await window.claude.use("db") : null;
-    if (!db) { el.lede.textContent = "Sign in to claude.ai to see your forms."; el.list.innerHTML = ""; el.qs.innerHTML = ""; el.bar.hidden = true; return; }
+    const use = window.claude && typeof window.claude.use === "function" ? window.claude.use : null;
+    db = use ? await use("db").catch(() => null) : null;
+    if (!db) { app.innerHTML = '<div class="card msg"><b>Sign in to claude.ai to see your forms.</b><p>The forms are stored with the artifact, and only a signed-in viewer can read them.</p></div>'; return; }
+    try { const user = await use("user"); uid = user && typeof user.id === "function" ? await user.id() : null; } catch { uid = null; }
     route();
   })();
 })();
