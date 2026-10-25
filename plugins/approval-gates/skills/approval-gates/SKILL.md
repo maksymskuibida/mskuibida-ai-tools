@@ -15,10 +15,11 @@ restyle or edit a page per stage.
 ## 1. The artifact (once per developer)
 
 `Artifact` → `action: "list"` → the artifact titled **AI-DLC approval gates**. If the developer
-has none, publish `approval-gate.html` from this skill's directory once: `capabilities: {db: {}}`,
+has none, publish `approval-gate.html` from this skill's directory once: `capabilities: {db: {}, user: {}}`,
 `icon: "document"`, description "Read a stage's AI-DLC documents at its approval gate; notes come back
 to Claude." Reuse its URL for every gate from then on. After a plugin update, republish the page from
-this file to the same URL once: the rows stay.
+this file to the same URL once, with `capabilities: {db: {}, user: {}}` (the `user` capability keeps each
+viewer's read marks; an artifact published before 1.5.0 has only `db`): the rows stay.
 
 ## 2. At every gate
 
