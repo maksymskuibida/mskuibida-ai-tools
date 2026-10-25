@@ -254,6 +254,60 @@ class Triage(unittest.TestCase):
         self.assertEqual([o["label"] for o in findings.triage(doc)["questions"][0]["options"]], ["Fix", "Accept", "Open in form"])
 
 
+class Answers(unittest.TestCase):
+    """The summary of the developer's answers, one fixture per case."""
+
+    def setUp(self):
+        self.brief = findings.parse_brief(fixture("brief-open.txt"), "domain-design")
+
+    def test_fix_with_one_item_is_a_line(self):
+        doc = findings.parse_review(fixture("review-07.md"), "domain-design")
+        self.assertEqual(findings.answer_summary(doc, findings.picks_of(doc, "fix")) + "\n", fixture("answers-fix-one.md"))
+
+    def test_fix_with_several_items_is_a_list(self):
+        picks = findings.picks_of(self.brief, answers={"R-02": {"k": ["fix"], "note": ""}, "R-03": {"k": ["fix"], "note": ""}})
+        self.assertEqual(findings.answer_summary(self.brief, picks) + "\n", fixture("answers-fix-several.md"))
+
+    def test_accept_has_no_action_items(self):
+        picks = findings.picks_of(self.brief, answers={"R-02": {"k": ["accept"]}, "R-03": {"k": ["accept"], "note": ""}})
+        self.assertEqual(findings.answer_summary(self.brief, picks) + "\n", fixture("answers-accept.md"))
+
+    def test_reject_with_a_note_quotes_it_as_written(self):
+        note = "Checkout and expiry never run on the same cart:\nthe cart is locked while it checks out."
+        picks = findings.picks_of(self.brief, answers={"R-02": {"k": ["reject"], "note": note}, "R-03": {"k": ["accept"]}})
+        self.assertEqual(findings.answer_summary(self.brief, picks) + "\n", fixture("answers-reject-note.md"))
+
+    def test_a_model_suggestion_is_the_action(self):
+        findings.suggest(self.brief, {"R-03": "Use one name for the event. Rename it in the flow text."})
+        text = findings.answer_summary(self.brief, findings.picks_of(self.brief, "fix"))
+        self.assertTrue(text.endswith("### R-03: Fix\n#### Action items:\n- Use one name for the event.\n- Rename it in the flow text."))
+
+    def test_a_card_without_a_box_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "no box for R-03"):
+            findings.picks_of(self.brief, answers={"R-02": {"k": ["fix"]}, "R-03": {"k": []}})
+        with self.assertRaisesRegex(ValueError, "fix or accept"):
+            findings.picks_of(self.brief, "reject")
+
+    def test_answers_are_found_in_a_get_result(self):
+        got = {"doc": {"id": "x", "data": {"status": "done", "answers": {"R-02": {"k": ["fix"], "note": "n"}}}}}
+        self.assertEqual(findings.answers_in(got), {"R-02": {"k": ["fix"], "note": "n"}})
+        self.assertEqual(findings.answers_in(json.dumps(got)), {"R-02": {"k": ["fix"], "note": "n"}})
+        self.assertIsNone(findings.answers_in({"status": "done"}))
+
+    def test_cli_form_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, form = os.path.join(tmp, "f.json"), os.path.join(tmp, "form.json")
+            findings.dump(path, self.brief)
+            findings.dump(form, {"status": "done", "answers": {"R-02": {"k": ["accept"]}, "R-03": {"k": ["accept"]}}})
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                self.assertEqual(findings.main(["answers", "--findings", path, "--form", form]), 0)
+            self.assertEqual(out.getvalue(), fixture("answers-accept.md"))
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                self.assertEqual(findings.main(["answers", "--findings", path]), 1)  # nothing recorded beside it
+            self.assertIn("no recorded answer", err.getvalue())
+
+
 class Board(unittest.TestCase):
     NOW = datetime.datetime(2026, 1, 5, 10, 7, 59, tzinfo=datetime.timezone.utc)
 

@@ -71,6 +71,29 @@ approved and rejected reports and, for a code review, edits and `git commit|push
 
 ## 3. What each answer means
 
+**First, the summary of the answers.** As soon as the answer is known (Fix or Accept here, or the
+form read as done in § 4), run `FINDINGS answers --findings <file>` with no other arguments. It
+prints the developer's answers, finding by finding, from what the hook recorded:
+
+```
+## Review Findings: User Answer
+### R-02: Fix
+#### Action items:
+- State the winning event.
+- Add one line on what happens to reserved stock.
+#### User Note:
+Checkout wins.
+### R-03: Reject
+#### User Note:
+The name is deliberate.
+```
+
+Action items appear only where something will be done (Fix): one item as a line, several as a
+list. The note appears only where the developer wrote one, as they wrote it. Send the output in
+chat exactly as printed, before anything else. Until it has run, the hook refuses the gate, the
+approved and rejected reports and, for a code review, edits and `git commit|push`. It also checks
+that the output covers every finding with the recorded answer.
+
 **Fix**
 
 - AI-DLC: go on with the gate as the protocol requires. The awaiting-approval report may already
@@ -122,8 +145,9 @@ that skill's § 1 to publish it first.
    not done, say so and wait. If something is wrong in the form, fix the rows (the same batch sets
    the form's `status` back to `open`) and ask again. You never write `status: "done"`; the hook
    refuses it.
-4. Read the answers back: `answers[qid].k[0]` is the card's box, `note` the developer's words.
-   Show one line per card with its box and note ("Summary of your answers"), then:
+4. Read the answers back with `ArtifactData` `get` of `forms/<form id>` (the hook records the
+   answers from that result; `answers[qid].k[0]` is the card's box, `note` the developer's words).
+   Print and send the summary of the answers as in § 3, then:
    - **Fix** cards: as Fix above. The rejected report's `--reason` names these cards by id with
      their required action.
    - **Accept** cards: carried; on Approve the engine records them as accepted risks.

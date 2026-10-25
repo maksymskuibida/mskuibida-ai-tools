@@ -76,6 +76,10 @@ And always:
 - a triage question that offers Accept while a finding blocks, or leaves it out when none does;
 - after Fix, a rejected report whose `--reason` misses an open finding id;
 - after Open in form, the gate and the report until the form reads `status: "done"`;
+- once the answer is known (Fix or Accept, or the form done), the gate, the reports and, in a code
+  review, edits and commits until the summary of the answers has been printed with `findings.py
+  answers` ("## Review Findings: User Answer", one `### <id>: Fix|Accept|Reject` per finding, with
+  `#### Action items:` and `#### User Note:` where they apply) and matches the recorded answers;
 - an agent writing `status: "done"` on a findings form (only your press on Done does that).
 
 A refusal ends with how to release it. Type `/review-findings:release` to clear the guard for the
@@ -100,6 +104,7 @@ does not.
 findings.py parse --brief FILE | --review FILE | --report FILE [--stage SLUG] [--unit U]
 findings.py summary  --findings FILE
 findings.py question --findings FILE
+findings.py answers  --findings FILE [--choice fix|accept | --form FILE]   (the summary of the answers)
 findings.py dialog   --findings FILE | --session ID      (what the mod draws and asks, as JSON)
 findings.py suggest  --findings FILE --set JSON          (records the model's suggested actions)
 findings.py board    --findings FILE [--id ID] [--title T] [--project-dir D] --out DIR

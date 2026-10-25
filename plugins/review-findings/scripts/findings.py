@@ -17,6 +17,9 @@ Blocking is severity Critical or Major (AI-DLC), or verdict CONFIRMED (code revi
   dialog --findings FILE | --session ID
                             what the plugin's mod draws above the triage question and asks, as JSON (`--session`
                             reads the findings the guard saved for that session)
+  answers --findings FILE [--choice fix|accept | --form FILE]
+                            the summary of the developer's answers ("## Review Findings: User Answer"), from what the
+                            guard recorded for the session (or the given chat answer, or a done form's document)
   suggest --findings FILE --set JSON
                             record a model's suggested action ({"<id>": "…"}) on findings that have no required action
   question --findings FILE  the triage AskUserQuestion input (header Findings), as JSON
@@ -452,6 +455,98 @@ def triage(doc):
                            "options": options, "multiSelect": False}], "metadata": {"source": SOURCE}}
 
 
+# ---------------------------------------------------------------- the developer's answers
+
+ANSWERS_HEADING = "## Review Findings: User Answer"
+BOX_WORDS = {"fix": "Fix", "accept": "Accept", "reject": "Reject"}
+
+
+def sentences(text):
+    """A text's sentences, on one line each; a line break also ends one."""
+    out = []
+    for line in str(text or "").splitlines():
+        line = one_line(line)
+        out += [p for p in re.split(r"(?<=[.!?])\s+(?=[A-Z0-9`\"'(])", line) if p]
+    return out
+
+
+def action_items(item):
+    """What will be done for a finding the developer sorted into Fix, in plain words: the suggested action, one item
+    per sentence. With no suggested action, the finding itself is the thing to change."""
+    if item["suggested_by"] != "none" or item["scenario"]:
+        return sentences(item["suggested"])
+    return [f"Fix in {item['where']}: {item['title']}" if item["where"] else f"Fix: {item['title']}"]
+
+
+def answer_summary(doc, picks):
+    """The structured summary of the developer's answers, sent in chat as written:
+
+        ## Review Findings: User Answer
+        ### R-01: Fix
+        #### Action items:
+        <one item as a line, several as a bullet list>
+        #### User Note:
+        <the developer's note, as written>
+
+    `picks` is {finding id: (box, note)}, box fix, accept or reject. Action items only where something is done (Fix);
+    the note only where the developer wrote one."""
+    lines = [ANSWERS_HEADING]
+    for item in readable(doc):
+        box, note = picks[item["id"]]
+        lines.append(f"### {item['id']}: {BOX_WORDS[box]}")
+        if box == "fix":
+            items = action_items(item)
+            lines.append("#### Action items:")
+            lines += items if len(items) == 1 else [f"- {i}" for i in items]
+        note = str(note or "").strip()
+        if note:
+            lines += ["#### User Note:", note]
+    return "\n".join(lines)
+
+
+def picks_of(doc, choice=None, answers=None):
+    """{finding id: (box, note)} from a chat answer (`choice` fix or accept, the same for every finding) or a done
+    board form's `answers` ({qid: {k: [box], note}})."""
+    ids = [f["id"] for f in doc.get("findings") or []]
+    if choice:
+        if choice not in ("fix", "accept"):
+            raise ValueError(f"a chat answer is fix or accept, not {choice!r}")
+        return {i: (choice, "") for i in ids}
+    answers = answers or {}
+    out, missing = {}, []
+    for i in ids:
+        a = answers.get(i) if isinstance(answers.get(i), dict) else {}
+        box = (a.get("k") or [""])[0] if isinstance(a.get("k"), list) else ""
+        if box not in BOX_WORDS:
+            missing.append(i)
+            continue
+        out[i] = (box, a.get("note") or "")
+    if missing:
+        raise ValueError("the form has no box for " + ", ".join(missing) + ": read the form again (ArtifactData get "
+                         "of forms/<id>) once the developer pressed Done")
+    return out
+
+
+def answers_in(data):
+    """The `answers` map ({qid: {k, note}}) anywhere in a form document or an ArtifactData result, or None."""
+    if isinstance(data, dict):
+        found = data.get("answers")
+        if isinstance(found, dict) and all(isinstance(v, dict) for v in found.values()):
+            return found
+        data = list(data.values())
+    if isinstance(data, list):
+        for value in data:
+            found = answers_in(value)
+            if found is not None:
+                return found
+    if isinstance(data, str) and '"answers"' in data:
+        try:
+            return answers_in(json.loads(data))
+        except ValueError:
+            return None
+    return None
+
+
 # ---------------------------------------------------------------- the board
 
 def now_utc():
@@ -609,6 +704,25 @@ def state_dir():
     return os.environ.get("REVIEW_FINDINGS_DIR") or os.path.join(os.path.expanduser("~"), ".claude", "review-findings")
 
 
+def recorded(findings_file):
+    """(chat choice, form answers) the guard recorded beside a saved findings file (`<session>.json`)."""
+    state_file = re.sub(r"\.findings$", "", findings_file) + ".json"
+    try:
+        with open(state_file, encoding="utf-8") as f:
+            pend = (json.load(f) or {}).get("pending") or {}
+    except (OSError, ValueError):
+        raise ValueError("no recorded answer beside this findings file: pass --choice fix|accept or --form FILE") from None
+    if pend.get("answer") in ("fix", "accept"):
+        return pend["answer"], None
+    form = pend.get("form") or {}
+    if pend.get("answer") == "form" and form.get("done") and isinstance(form.get("answers"), dict):
+        return None, form["answers"]
+    if pend.get("answer") == "form":
+        raise ValueError("the form is not read as done yet: read forms/<id> with ArtifactData get once the developer "
+                         "pressed Done")
+    raise ValueError("the developer has not answered the Findings question yet")
+
+
 def session_findings(session):
     """Where the guard saves a session's pending findings (`<state dir>/<session>.findings`)."""
     sid = re.sub(r"[^A-Za-z0-9_.-]", "_", str(session or "default"))
@@ -643,6 +757,11 @@ def main(argv=None):
     p.add_argument("--unit")
     for name in ("summary", "question"):
         sub.add_parser(name).add_argument("--findings", required=True)
+    a = sub.add_parser("answers")
+    a.add_argument("--findings", required=True)
+    pick = a.add_mutually_exclusive_group()
+    pick.add_argument("--choice", choices=("fix", "accept"), help="the chat answer, for every finding")
+    pick.add_argument("--form", help="the done form's document (or the ArtifactData get result) as JSON")
     d = sub.add_parser("dialog")
     which = d.add_mutually_exclusive_group(required=True)
     which.add_argument("--findings")
@@ -673,6 +792,16 @@ def main(argv=None):
             if incomplete(doc):
                 raise ValueError(incomplete(doc))
             print(summary(doc))
+        elif args.cmd == "answers":
+            doc = load_findings(args.findings)
+            choice, answers = args.choice, None
+            if args.form:
+                answers = answers_in(json.loads(read(args.form)))
+                if answers is None:
+                    raise ValueError(f"{args.form} holds no form answers")
+            elif not choice:
+                choice, answers = recorded(args.findings)
+            print(answer_summary(doc, picks_of(doc, choice, answers)))
         elif args.cmd == "dialog":
             path = args.findings or session_findings(args.session)
             doc = load_findings(path)
