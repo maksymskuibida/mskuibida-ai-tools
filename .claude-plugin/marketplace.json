@@ -4,7 +4,7 @@
     "name": "Maksym Skuibida"
   },
   "description": "Maksym Skuibida's personal Claude Code tooling — small, opinionated plugins.",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "plugins": [
     {
       "name": "response-format",
@@ -70,6 +70,12 @@
       "name": "unit-claim",
       "source": "./plugins/unit-claim",
       "description": "For team AI-DLC Units: before a claim the agent sends its reasoning per design stage and asks one dialog (which design stages run, unit-end or per-stage rhythm, save the choice for you or the project); a hook refuses the claim until it is answered or saved, claims with the chosen rhythm, and skips left-out stages for that Unit only.",
+      "version": "0.1.0"
+    },
+    {
+      "name": "aidlc-patches",
+      "source": "./plugins/aidlc-patches",
+      "description": "For people who patch the AI-DLC engine in their own fork of awslabs/aidlc-workflows: investigate a bug to a failing test, check upstream first, keep the fork as an upstream release plus one commit per patch, release previews numbered from .101, pin projects to them, and send fixes upstream. Remembers your forks across plugin updates.",
       "version": "0.1.0"
     }
   ]
