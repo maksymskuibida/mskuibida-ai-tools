@@ -26,6 +26,7 @@ GRAPH = [
     {"slug": "units-generation", "name": "Units Generation", "phase": "inception"},
     {"slug": "functional-design", "name": "Functional Design", "phase": "construction"},
     {"slug": "build-and-test", "name": "Build and Test", "phase": "construction"},
+    {"slug": "ci-pipeline", "name": "CI Pipeline", "phase": "construction"},
 ]
 
 
@@ -55,6 +56,25 @@ class Base(unittest.TestCase):
         self.write("aidlc/spaces/default/intents/intents.json", json.dumps([{"dirName": INTENT, "uuid": UUID}]))
         self.write(".claude/tools/data/stage-graph.json", json.dumps(GRAPH))
         self.set_state("requirements-analysis")
+        # The judge is a script of the test's own: it logs the prompt it got and answers from the `verdict` file.
+        self.verdict = os.path.join(self.root, "verdict")
+        self.judge_log = os.path.join(self.root, "judge.log")
+        self.judge = os.path.join(self.root, "judge.sh")
+        with open(self.judge, "w", encoding="utf-8") as f:
+            f.write(f'#!/bin/sh\ncat >> "{self.judge_log}"\necho >> "{self.judge_log}"\ncat "{self.verdict}"\n')
+        os.chmod(self.judge, 0o755)
+        self.set_verdict(True)
+
+    def set_verdict(self, value):
+        with open(self.verdict, "w", encoding="utf-8") as f:
+            f.write("garbled" if value is None else json.dumps({"unit_session": value, "reason": "test"}))
+
+    def judge_calls(self):
+        try:
+            with open(self.judge_log, encoding="utf-8") as f:
+                return f.read().count("AI-DLC Unit's checkout")
+        except OSError:
+            return 0
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -93,6 +113,7 @@ class Base(unittest.TestCase):
         event = {"session_id": SID, "cwd": self.project, **event}
         env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_PROJECT_DIR", "CLAUDE_CODE_ENTRYPOINT")}
         env["AIDLC_SESSION_TITLES_DIR"] = self.states
+        env["AIDLC_SESSION_TITLES_JUDGE_CMD"] = self.judge
         if desktop:
             env["CLAUDE_CODE_ENTRYPOINT"] = "claude-desktop"
         done = subprocess.run([sys.executable, HOOK], input=json.dumps(event), capture_output=True, text=True,
@@ -104,7 +125,10 @@ class Base(unittest.TestCase):
         return self.run_hook({"hook_event_name": "UserPromptSubmit", "prompt": text}, desktop)
 
     def bash(self, command="aidlc engine orchestrate next"):
-        return self.run_hook({"hook_event_name": "PostToolUse", "tool_name": "Bash",
+        transcript = os.path.join(self.root, "session.jsonl")
+        with open(transcript, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"type": "user", "message": {"role": "user", "content": "/aidlc next"}}) + "\n")
+        return self.run_hook({"hook_event_name": "PostToolUse", "tool_name": "Bash", "transcript_path": transcript,
                               "tool_input": {"command": command}, "tool_response": {"stdout": ""}})
 
     def renamed(self, title, response="Session renamed.", failure=False):
@@ -139,9 +163,13 @@ class TitleTests(Base):
         self.claim("u4-day-navigation")
         self.assertEqual(self.title(), "u4-day-navigation — Functional Design")
 
-    def test_unit_stage_and_active_unit_from_the_state(self):
+    def test_per_unit_stage_outside_a_unit_checkout_names_the_phase(self):
         self.set_state("units-generation", unit_stage="functional-design", active_unit="u5-live-updates")
-        self.assertEqual(self.title(), "u5-live-updates — Functional Design")
+        self.assertEqual(self.title(), "Construction — Functional Design")
+
+    def test_per_unit_stage_without_a_claim_names_the_phase(self):
+        self.set_state("functional-design")
+        self.assertEqual(self.title(), "Construction — Functional Design")
 
     def test_claim_wins_over_the_shared_active_unit(self):
         self.set_state("units-generation", unit_stage="functional-design", active_unit="u5-live-updates")
@@ -157,10 +185,16 @@ class TitleTests(Base):
         self.set_state("build-and-test")
         self.claim("u2-blocks")
         self.assertEqual(self.title(), "Construction — Build and Test")
+        self.assertEqual(self.judge_calls(), 0)
 
-    def test_newer_directive_with_its_unit(self):
+    def test_ci_pipeline_names_the_phase(self):
+        self.set_state("ci-pipeline")
+        self.claim("u2-blocks")
+        self.assertEqual(self.title(), "Construction — CI Pipeline")
+
+    def test_directive_unit_alone_does_not_name_the_unit(self):
         self.set_directive("functional-design", unit="u3-notes")
-        self.assertEqual(self.title(), "u3-notes — Functional Design")
+        self.assertEqual(self.title(), "Construction — Functional Design")
 
     def test_older_directive_is_ignored(self):
         self.set_directive("functional-design", unit="u3-notes", newer=False)
@@ -177,6 +211,85 @@ class TitleTests(Base):
     def test_no_title_without_a_stage(self):
         self.write(os.path.relpath(os.path.join(self.intent_dir, "aidlc-state.md"), self.project), "# empty\n")
         self.assertIsNone(self.title())
+
+
+class JudgeTests(Base):
+    """A claimed checkout is titled by its Unit only when a Haiku judge calls the session a Unit session."""
+
+    def setUp(self):
+        super().setUp()
+        self.bind()
+        self.set_state("functional-design")
+        self.claim("u4-day-navigation")
+
+    def test_unit_session_gets_the_unit_title(self):
+        self.assertEqual(self.title_of(self.prompt("write the functional design")),
+                         "u4-day-navigation — Functional Design")
+
+    def test_judge_gets_the_unit_the_stage_and_the_prompt(self):
+        self.prompt("rename the build script")
+        with open(self.judge_log, encoding="utf-8") as f:
+            seen = f.read()
+        for text in ("u4-day-navigation", "functional-design", "rename the build script"):
+            self.assertIn(text, seen)
+
+    def test_workspace_session_keeps_its_title(self):
+        self.set_verdict(False)
+        self.assertIsNone(self.prompt("fix the lint config in the workspace"))
+        self.assertIsNone(self.bash())
+        self.assertIsNone(self.stop())
+
+    def test_verdict_is_asked_once_per_unit(self):
+        self.prompt("go")
+        self.prompt("go on")
+        self.bash()
+        self.assertEqual(self.judge_calls(), 1)
+
+    def test_new_unit_is_judged_again(self):
+        self.prompt("go")
+        self.claim("u5-live-updates")
+        self.assertEqual(self.title_of(self.prompt("next")), "u5-live-updates — Functional Design")
+        self.assertEqual(self.judge_calls(), 2)
+
+    def test_no_prompt_yet_means_no_title_and_no_judge(self):
+        out = self.run_hook({"hook_event_name": "SessionStart"})
+        self.assertIsNone(out)
+        self.assertEqual(self.judge_calls(), 0)
+
+    def test_transcript_prompts_reach_the_judge(self):
+        path = os.path.join(self.root, "transcript.jsonl")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"type": "user", "message": {"role": "user", "content": "tidy the plugin folder"}}) + "\n")
+        self.run_hook({"hook_event_name": "PostToolUse", "tool_name": "Bash", "transcript_path": path,
+                       "tool_input": {"command": "aidlc engine orchestrate next"}})
+        with open(self.judge_log, encoding="utf-8") as f:
+            self.assertIn("tidy the plugin folder", f.read())
+
+    def test_judge_that_cannot_answer_counts_as_a_unit_session_and_is_retried_later(self):
+        self.set_verdict(None)
+        self.assertEqual(self.title_of(self.prompt("go")), "u4-day-navigation — Functional Design")
+        self.assertIsNone(self.prompt("again"))  # same title, not asked again yet
+        self.assertEqual(self.judge_calls(), 1)
+        path = os.path.join(self.states, SID + ".json")
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        data["judged"]["at"] -= 3600
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        self.set_verdict(False)
+        self.prompt("later")
+        self.assertEqual(self.judge_calls(), 2)
+
+    def test_missing_judge_counts_as_a_unit_session(self):
+        os.remove(self.judge)
+        self.assertEqual(self.title_of(self.prompt("go")), "u4-day-navigation — Functional Design")
+
+    def test_judge_session_itself_is_not_titled(self):
+        event = {"session_id": SID, "cwd": self.project, "hook_event_name": "UserPromptSubmit", "prompt": "x"}
+        env = {**os.environ, "AIDLC_SESSION_TITLES_DIR": self.states, "AIDLC_SESSION_TITLES_JUDGING": "1"}
+        done = subprocess.run([sys.executable, HOOK], input=json.dumps(event), capture_output=True, text=True,
+                              env=env, cwd=self.root, timeout=30)
+        self.assertEqual((done.returncode, done.stdout), (0, ""))
 
 
 class SessionTests(Base):

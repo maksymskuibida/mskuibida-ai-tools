@@ -3,8 +3,8 @@
 
 The title, separated by an em dash:
 
-  - working on a Construction Unit:  `<unit> — <stage>`    e.g. `u4-day-navigation — Functional Design`
-  - any other AI-DLC work:           `<phase> — <stage>`   e.g. `Inception — Requirements Analysis`
+  - in a Unit's checkout, on a per-Unit stage:  `<unit> — <stage>`    e.g. `u4-day-navigation — Functional Design`
+  - any other AI-DLC work:                     `<phase> — <stage>`   e.g. `Construction — Functional Design`
 
 What the session is on is read from the project, never from the assistant: the intent this session is bound to
 (aidlc/.aidlc-sessions/<session>.binding.json), else the space's active-intent cursor, else its one live intent; the
@@ -34,6 +34,8 @@ import contextlib
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -44,6 +46,10 @@ except ImportError:  # no advisory locks on this platform: the unique temp file 
     fcntl = None
 
 STALE_DAYS = 14  # another session's state file untouched for this long is removed when a state is saved
+JUDGE_RETRY_SECONDS = 600  # after a judge that could not answer, wait this long before asking again
+JUDGE_TIMEOUT_SECONDS = 60
+JUDGING_ENV = "AIDLC_SESSION_TITLES_JUDGING"  # set in the judge's own process so its hooks do nothing
+JUDGE_CMD_ENV = "AIDLC_SESSION_TITLES_JUDGE_CMD"  # replaces `claude -p --model haiku …`; reads the prompt on stdin
 SEPARATOR = " — "
 RENAME_TOOL = "mcp__ccd_session_mgmt__set_session_title"
 # The stages that run once per Unit; on any other the title names the phase.
@@ -73,9 +79,10 @@ def state_path(event):
 def blank():
     """`aidlc`: the session runs the workflow. `emitted`: the title last handed to the harness. `applied`: the title
     the desktop app last confirmed. `asked`, `declined`, `blocked`: the title the assistant was last told to set,
-    refused, or was stopped for."""
+    refused, or was stopped for. `judged`: the Haiku verdict on whether the session is a Unit session,
+    {"unit", "verdict" (true, false, or null when the judge could not answer), "at"}."""
     return {"aidlc": False, "emitted": None, "applied": None, "asked": None, "declined": None, "blocked": None,
-            "updated": time.time()}
+            "judged": None, "updated": time.time()}
 
 
 def load(event):
@@ -90,6 +97,10 @@ def load(event):
         for key in ("emitted", "applied", "asked", "declined", "blocked"):
             if isinstance(data.get(key), str):
                 state[key] = data[key]
+        judged = data.get("judged")
+        if isinstance(judged, dict) and isinstance(judged.get("unit"), str) and isinstance(judged.get("at"), (int, float)):
+            state["judged"] = {"unit": judged["unit"], "verdict": judged.get("verdict") if isinstance(
+                judged.get("verdict"), bool) else None, "at": judged["at"]}
     return state
 
 
@@ -335,32 +346,118 @@ def titled(slug):
     return " ".join(word.capitalize() for word in re.split(r"[-_\s]+", slug) if word)
 
 
-def expected_title(project, session_id):
-    """The title the session should carry, or None when the project does not say what it is on."""
-    selected = selected_intent(project, session_id)
+def user_prompts(event, limit=4, width=600):
+    """The session's first user prompts (from its transcript) and the one being submitted, each cut to `width`."""
+    prompts = []
+    for line in (read_text(str(event.get("transcript_path") or "")) or "").splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        message = row.get("message") if isinstance(row, dict) and row.get("type") == "user" else None
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, list):
+            content = " ".join(str(b.get("text") or "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+        if isinstance(content, str) and content.strip() and not content.lstrip().startswith("<"):
+            prompts.append(content.strip()[:width])
+        if len(prompts) >= limit:
+            break
+    current = str(event.get("prompt") or "").strip()
+    if current and current[:width] not in prompts:
+        prompts.append(current[:width])
+    return prompts
+
+
+def branch_of(project):
+    try:
+        done = subprocess.run(["git", "-C", project, "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True,
+                              text=True, timeout=5)
+        return done.stdout.strip() if done.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def judge_prompt(project, unit, stage, prompts):
+    shown = "\n".join(f"{n}. {text}" for n, text in enumerate(prompts, 1))
+    return (
+        "You classify one Claude Code session that runs inside an AI-DLC Unit's checkout (a git worktree claimed for "
+        f"the Unit `{unit}`).\n\n"
+        "A UNIT SESSION works on that Unit itself: its stages (functional design, NFR requirements/design, "
+        "infrastructure design, code generation), its code, its plan, its approval gates, or runs `aidlc` engine/unit "
+        "commands for it.\n"
+        "NOT A UNIT SESSION: a session that was merely started from the Unit's branch or checkout to change something "
+        "else - the workspace, tooling, plugins, config, CI, docs or another project - and does not advance the Unit.\n\n"
+        f"Checkout: {project}\nBranch: {branch_of(project) or 'unknown'}\nClaimed Unit: {unit}\nWorkflow stage: {stage}\n"
+        f"The session's first prompts:\n{shown}\n\n"
+        "If the prompts are only a bare /aidlc command or say nothing against the Unit, it is a Unit session.\n"
+        'Reply with one line of JSON and nothing else: {"unit_session": true|false, "reason": "<short>"}')
+
+
+def ask_judge(prompt):
+    """True/False from the judge, None when it cannot answer."""
+    if os.environ.get(JUDGING_ENV):
+        return None
+    command = os.environ.get(JUDGE_CMD_ENV)
+    command = [command] if command else ([shutil.which("claude"), "-p", "--model", "haiku", "--no-session-persistence",
+                                          "--disable-slash-commands", "--tools", ""] if shutil.which("claude") else None)
+    if not command:
+        return None
+    try:
+        done = subprocess.run(command, input=prompt, capture_output=True, text=True, timeout=JUDGE_TIMEOUT_SECONDS,
+                              env={**os.environ, JUDGING_ENV: "1"}, cwd=tempfile.gettempdir())
+    except (OSError, subprocess.SubprocessError):
+        return None
+    found = re.search(r"\{[^{}]*\"unit_session\"[^{}]*\}", done.stdout or "")
+    try:
+        verdict = json.loads(found.group(0)).get("unit_session") if found else None
+    except ValueError:
+        return None
+    return verdict if isinstance(verdict, bool) else None
+
+
+def is_unit_session(event, state, project, unit, stage):
+    """Whether the session in a claimed Unit's checkout works on the Unit: True, False, or None while it has no prompt
+    to be judged by. The verdict is kept in the state per Unit; one the judge could not give is retried later."""
+    judged = state["judged"]
+    if judged and judged["unit"] == unit and (judged["verdict"] is not None
+                                              or time.time() - judged["at"] < JUDGE_RETRY_SECONDS):
+        return judged["verdict"] is not False
+    prompts = user_prompts(event)
+    if not prompts:
+        return None
+    verdict = ask_judge(judge_prompt(project, unit, stage, prompts))
+    state["judged"] = {"unit": unit, "verdict": verdict, "at": time.time()}
+    return verdict is not False
+
+
+def expected_title(event, state, project):
+    """The title the session should carry, or None when the project does not say what it is on or the session is
+    not a Unit session in a Unit's checkout."""
+    selected = selected_intent(project, str(event.get("session_id") or ""))
     if not selected:
         return None
     space, intent = selected
     intent_dir = os.path.dirname(state_file(project, space, intent))
     text = read_text(state_file(project, space, intent)) or ""
-    stage, directive_unit = step(intent_dir, text)
+    stage, _ = step(intent_dir, text)
     if not stage:
         return None
     name, phase = stage_graph(project).get(stage, ("", ""))
     stage_name = name or titled(stage)
     if stage in PER_UNIT_STAGES:
-        active = field(text, "Active Unit")
-        unit = (claimed_unit(project, space, intent_uuid(project, space, intent)) or directive_unit
-                or (active if UNIT_NAME.match(active) else ""))
+        unit = claimed_unit(project, space, intent_uuid(project, space, intent))
         if unit:
+            session = is_unit_session(event, state, project, unit, stage)
+            if session is None or session is False:
+                return None
             return unit + SEPARATOR + stage_name
     phase = phase or phase_in_state(text, stage)
     return (titled(phase) + SEPARATOR + stage_name) if phase else None
 
 
-def title_for(event):
+def title_for(event, state):
     for project in projects(event):
-        title = expected_title(project, str(event.get("session_id") or ""))
+        title = expected_title(event, state, project)
         if title:
             return title
     return None
@@ -424,7 +521,7 @@ def on_prompt(event, state):
         if not (AIDLC_PROMPT.match(prompt) or bound_here(event)):
             return False
         state["aidlc"] = changed = True
-    title = title_for(event)
+    title = title_for(event, state)
     if not title or title == state["emitted"]:
         return changed
     state["emitted"] = title
@@ -451,7 +548,7 @@ def on_tool(event, state):
         state["aidlc"] = changed = True
     if not state["aidlc"] or not in_desktop():
         return changed
-    title = title_for(event)
+    title = title_for(event, state)
     if not title or title in (state["applied"], state["asked"], state["declined"]):
         return changed
     state["asked"] = title
@@ -463,7 +560,7 @@ def on_stop(event, state):
     """Refuse the end of the turn once per title while the desktop title is behind."""
     if not state["aidlc"] or not in_desktop() or event.get("stop_hook_active"):
         return False
-    title = title_for(event)
+    title = title_for(event, state)
     if not title or title in (state["applied"], state["declined"], state["blocked"]):
         return False
     state["blocked"] = title
@@ -476,8 +573,8 @@ def main():
         event = json.load(sys.stdin)
     except ValueError:
         return 0
-    if not isinstance(event, dict) or event.get("agent_id"):
-        return 0  # a subagent cannot rename the session it runs in
+    if not isinstance(event, dict) or event.get("agent_id") or os.environ.get(JUDGING_ENV):
+        return 0  # a subagent cannot rename the session it runs in; the judge's own session is not a session to title
     name = event.get("hook_event_name")
     handler = {"UserPromptSubmit": on_prompt, "SessionStart": on_prompt, "PostToolUse": on_tool,
                "PostToolUseFailure": on_tool, "Stop": on_stop}.get(name)
@@ -486,7 +583,8 @@ def main():
     try:
         with state_lock(event):
             state = load(event)
-            if handler(event, state):
+            before = json.dumps(state["judged"])
+            if handler(event, state) | (json.dumps(state["judged"]) != before):
                 save(event, state)
     except Exception:  # never break the call this hook sits beside
         return 0
