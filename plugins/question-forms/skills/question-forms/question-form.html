@@ -61,13 +61,15 @@
       in `group` (card field), else it may go to any box.
     forms/<id>/questions/<qid>       {n, text, ctx?, kind: "card", from?, group?, proposed: {k: "<box k>", why?},
                                       outcomes?: {"<box k>": "what happens when the card sits here"},
-                                      plain?, action?, refs?}
+                                      plain?, action?, detail?, refs?}
       text is the card's short title; from is one line on who asked for what. A card starts
       in its proposed box. On a grouped board the group alone decides where it can go, and
       outcomes only describes; on a board without groups, outcomes (when present) limits the
       boxes offered to its keys and the proposed box.
       plain?: what the card means in plain words, shown on the card under its title.
       action?: the suggested action, shown in the card's details. refs?: as for questions.
+      detail?: ctx without what plain and action say; shown in place of ctx when present, so a
+        card that carries plain and action does not say them twice. ctx stays for older pages.
 
   What the page writes (the only thing an agent reads back, one `get` of forms/<id>):
 
@@ -858,7 +860,7 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
       <div class="moves" role="group" aria-label="Move this card"></div>
       <div class="cdetail" id="cd-${esc(q.id)}"><div class="cin"><div class="cmain">
         ${q.from ? `<p class="from">${inline(q.from, q.id)}</p>` : ""}
-        ${q.ctx ? `<div class="ctx">${md(q.ctx, q.id)}</div>` : ""}
+        ${(q.detail || q.ctx) ? `<div class="ctx">${md(q.detail || q.ctx, q.id)}</div>` : ""}
         ${q.action ? `<p class="action"><b>Suggested action</b>${inline(q.action, q.id)}</p>` : ""}
         ${refsHtml(q, "Refers to")}
         <button type="button" class="addnote">Add a note</button>

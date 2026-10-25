@@ -111,12 +111,12 @@ agent proposes and can be moved by button or drag.
   board fills the screen; then each box scrolls on its own. Cards show their id, title and move
   buttons; details open per card or all at once from the bar.
 - `forms/<id>/questions/<qid>` per card — `{n, text, ctx?, kind: "card", from?, group?, proposed:
-  {k, why?}, outcomes?: {<box k>: "…"}, plain?, action?, refs?}`; `group` is needed only when the proposed box is a sink. `text` is a short title a person understands without
+  {k, why?}, outcomes?: {<box k>: "…"}, plain?, action?, detail?, refs?}`; `group` is needed only when the proposed box is a sink. `text` is a short title a person understands without
   knowing the IDs (not "AC 3 of US2.1", but "Guests can't tell which dish is vegan"); `from` one
   line on who asked for what; `outcomes` says what happens when the card sits in each box. A
   card's optional `plain` says what it means in plain words (shown on the card under the
-  title), `action` the suggested action (shown in its details), and `refs` what it refers to
-  (§ 2). A card's `ctx` follows the § 2 rule: paragraphs and `- ` bullets with **bold** lead-ins, never
+  title), `action` the suggested action (shown in its details), `detail` the `ctx` without those
+  two (shown instead of `ctx` when present), and `refs` what it refers to (§ 2). A card's `ctx` follows the § 2 rule: paragraphs and `- ` bullets with **bold** lead-ins, never
   one run-on paragraph; `text`, `from`, `outcomes`, `plain`, `action` and `proposed.why` take the inline subset only. On a
   grouped board the group alone decides where a card can go; on a board without groups,
   `outcomes` also limits the boxes offered to its keys (plus the proposed box).
