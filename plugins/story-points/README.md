@@ -98,7 +98,14 @@ a corner mark: an amber sparkle for an AI suggestion, a blue person for a develo
 scale shows as an extra dashed card. The developer's pick turns blue with the person mark; pressing the AI's
 number keeps it as theirs. A sticky bar jumps to any Unit, counts developer estimates against AI suggestions,
 filters to the Units still without a developer estimate, and shows whether the picks are saved, with Retry when
-a save fails. Every id, badge and term explains itself in a tooltip, and each viewer can mark Units read.
+a save fails. Every badge and term explains itself in a tooltip, and each viewer can mark Units read.
+
+Every id on the page (U, US, AC, FR, NFR, BR, C, E, ADR and every other kind the project's documents
+define) is a link with a tooltip saying what it is and which document defines it, found the same way on
+every AI-DLC page by the shared [aidlc-ids](../../shared/aidlc-ids/README.md) piece: a Unit of the review
+jumps to its card, an id defined elsewhere is dotted and says so on a click, and one no document defines is
+dashed. The skill runs `scripts/aidlc_ids.py sync` and `refs` over the text it writes, and stores the map
+with the review.
 
 The skill sends the link, then, as a separate message, asks for `form is done` (in the Claude desktop
 app, a single suggested reply button). Once the developer has pressed Done in the form and sent that,

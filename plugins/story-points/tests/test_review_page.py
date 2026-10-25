@@ -44,23 +44,38 @@ def text_of(html):
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
 class ReviewPageTest(unittest.TestCase):
-    def test_dependency_in_the_review_is_a_live_link_by_title(self):
-        c = card(render({}), "U2")
-        self.assertIn('href="#u-U1" data-jump="u-U1"', c)
-        self.assertIn(">Guests sign in with email</a>", c)
-
-    def test_sources_outside_the_page_are_links_with_their_text_in_the_tooltip(self):
-        c = card(render({}), "U2")
-        self.assertRegex(c, r'class="ref out" href="#" data-missing="1" data-tip="Unit U9: Fraud screening\.[^"]*">Fraud screening</a>')
-        self.assertRegex(c, r'data-tip="Story US-2\.1: Pay by card — As a guest I pay with a saved card\.[^"]*">Pay by card</a>')
-        self.assertIn(">FR-4</a>", c)  # a bare id is all that is known
-
-    def test_ids_in_prose_become_links_labelled_by_title(self):
+    def test_every_unit_card_is_the_anchor_for_its_id(self):
         html = render({})
-        prose = re.search(r'<div class="ctx">(.*?)</div>', card(html, "U2"), re.S).group(1)
-        self.assertNotRegex(text_of(prose), r"\bU[12]\b|US-2\.1")
-        self.assertIn("<strong>refunds</strong>", prose)
-        self.assertIn('data-jump="u-U2" data-tip="Unit U2 · api-billing. Jump to its card.">Guests pay by card at checkout</a> reads', card(html, "U1"))
+        for u in ("U1", "U2", "U3"):
+            self.assertRegex(card(html, u), r'^<section [^>]*data-aidlc-id="%s"' % u)
+
+    def test_references_show_the_id_then_the_title_in_words(self):
+        c = card(render({}), "U2")
+        self.assertIn('<span class="ref"><span class="rid">U1</span><span>Guests sign in with email</span></span>', c)
+        self.assertIn('<span class="ref"><span class="rid">U9</span><span>Fraud screening</span></span>', c)
+        self.assertIn('<span class="ref"><span class="rid">US-2.1</span><span>Pay by card</span></span>', c)
+        self.assertIn('<span class="ref"><span class="rid">FR-4</span></span>', c)  # a bare id is all that is known
+
+    def test_ids_are_left_as_text_for_the_shared_linker(self):
+        """The page has no id matcher of its own: AidlcIds (shared/aidlc-ids) links every id in the DOM."""
+        prose = re.search(r'<div class="ctx">(.*?)</div>', card(render({}), "U2"), re.S).group(1)
+        self.assertEqual(prose, "<p>Covers US-2.1 and <strong>refunds</strong>; waits on U9.</p>")
+        self.assertNotIn("<a", prose)
+        script = PAGE.read_text().split("/* RENDER-START", 1)[1].split("/* RENDER-END */", 1)[0]
+        self.assertNotIn("U\\\\d+", script)
+
+    def test_the_id_map_keeps_the_documents_definitions_and_fills_in_from_the_rows(self):
+        review = dict(REVIEW, ids={"U1": {"kind": "Unit", "title": "auth", "text": "Sign-in by code", "doc": "inception/unit-of-work.md", "line": 4},
+                                   "BR1.2": {"kind": "Business rule", "title": "Codes expire", "text": "", "doc": "x.md", "line": 9}})
+        script = PAGE.read_text().split("/* RENDER-START: no DOM below, until RENDER-END */", 1)[1].split("/* RENDER-END */", 1)[0]
+        js = script + "\nprocess.stdout.write(JSON.stringify(PointsView.idMap(%s, %s)));" % (json.dumps(review), json.dumps(UNITS))
+        ids = json.loads(subprocess.run(["node", "-e", js], capture_output=True, text=True, check=True).stdout)
+        self.assertEqual(ids["U1"]["text"], "Sign-in by code")  # the document's definition wins
+        self.assertIn("BR1.2", ids)
+        self.assertEqual(ids["U2"]["title"], "Guests pay by card at checkout")
+        self.assertEqual(ids["U9"]["title"], "Fraud screening")
+        self.assertEqual(ids["US-2.1"]["kind"], "Story")
+        self.assertNotIn("FR-4", ids)  # nothing known: the page shows it as not defined
 
     def test_counts_and_filter_for_units_without_a_developer_estimate(self):
         html = render({"filter": "need"})
@@ -96,7 +111,7 @@ class ReviewPageTest(unittest.TestCase):
         html = subprocess.run(["node", "-e", js], capture_output=True, text=True, check=True).stdout
         self.assertIn('class="pt is-ai off"', html)
         self.assertIn("or split the Unit", html)
-        self.assertIn('data-missing="1"', html)
+        self.assertIn('<span class="rid">U7</span>', html)
 
 
 if __name__ == "__main__":
