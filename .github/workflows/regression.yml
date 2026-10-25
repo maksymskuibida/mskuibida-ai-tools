@@ -102,6 +102,7 @@ jobs:
           claude plugin validate plugins/approval-gates
           claude plugin validate plugins/review-findings
           claude plugin validate plugins/aidlc-session-titles
+          claude plugin validate plugins/unit-claim
           claude plugin validate plugins/aidlc-patches
 
       - name: Test story-points
@@ -109,12 +110,17 @@ jobs:
         run: python3 -m unittest discover -s plugins/story-points/tests
 
       - name: Test approval-gates
-        # Python hook and bundle script with a unittest suite.
+        # Python hook, bundle scripts and the gate-bundle contract with a unittest suite; the unit page's renderer runs
+        # under the Node set up above. The real-records class skips here (the Dayboard checkout is not on the runner).
         run: python3 -m unittest discover -s plugins/approval-gates/tests
 
       - name: Test review-findings
         # Python hook and findings parser with a unittest suite.
         run: python3 -m unittest discover -s plugins/review-findings/tests
+
+      - name: Test unit-claim
+        # Python hook and choice script with a unittest suite.
+        run: python3 -m unittest discover -s plugins/unit-claim/tests
 
       - name: Test aidlc-session-titles
         # Python hook with a unittest suite.

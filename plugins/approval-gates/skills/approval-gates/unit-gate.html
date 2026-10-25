@@ -1,0 +1,761 @@
+<title>AI-DLC unit approvals</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<!--
+  AI-DLC unit approvals — the one template for the two pages of a Unit claimed with the unit-end rhythm:
+  the plan approval (every design stage, read once) and the unit-end approval (what was built).
+
+  Published ONCE per developer as a private Artifact with the `db` and `user` capabilities
+  (capabilities: {db: {}, user: {}}, icon "checklist"); never regenerated per Unit. Every page is a row
+  INSIDE this artifact, written by the agent with the ArtifactData tool (SKILL.md next to this file;
+  scripts/unit_bundle.py builds it). The page renders whatever the row says, live.
+
+  Data contract (what the agent writes — always a NEW row, a fresh id per presentation):
+
+    bundles/<id>   {bundle, page: "plan"|"unit-end", unit, intent, title, createdAt (ISO), status: "open"}
+      bundle: a gate bundle, as contract/gate-bundle.schema.json and contract/README.md define it.
+      id:     the bundle's id, <intent>-<unit>-<page>-v<revision>-<YYYYMMDDTHHMM>.
+
+  What the page writes:
+
+    bundles/<id>.notes[<row anchor>] = "text"          a note to the agent on a row or a step (step-<n>)
+    bundles/<id>.picks[<row anchor>] = "do"|"leave"    the person's lean on a suggestion row
+    data/users/<viewer>/reads-<intent>--<unit>--<page>  {marks: {<row anchor or step key>: <revision read>}}
+      Read marks are the viewer's own (localStorage when the user capability is not served), set only with the row's
+      read dot (opening a row does not mark it). A row is read when its mark is at least the row's revision, so on a
+      new revision only the rows marked with it turn unread.
+
+  Notes and picks reach the agent only when the person answers in chat; the decision itself is given in chat.
+  Link to a page: <artifact url>#<id>. No hash: the list of pages.
+
+  The render functions between RENDER-START and RENDER-END use no DOM, so tests render a bundle under Node.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one reading column. A header card with the Unit's facts and its revisions; a sticky bar (switch, filters,
+   expand and collapse, read progress, section chips); then the sections, each a card of one-line rows that open. */
+:root {
+  --bg: #F5F6F8; --surface: #FFFFFF; --raised: #F8F9FB; --fg: #171A21; --fg-2: #3D4350; --muted: #5A6170;
+  --line: #E4E7EC; --line-soft: #EEF0F3; --control: #D5D9E0; --hover: #F7F8FA;
+  --accent: #2F49C4; --accent-strong: #1E3399; --accent-soft: #EEF1FB; --accent-tint: #F4F6FE;
+  --crit-bg: #FDE4E4; --crit-fg: #9B1C1C; --high-bg: #FDEAD7; --high-fg: #8A3B00;
+  --med-bg: #E3ECFB; --med-fg: #1E4A9A; --low-bg: #EEF0F3; --low-fg: #4A5160;
+  --core-bg: #171A21; --core-fg: #FFFFFF; --main-bg: #DDE1E8; --main-fg: #171A21; --minor-bg: #F5F6F8; --minor-fg: #4A5160;
+  --ok-bg: #E6F4EA; --ok-fg: #1F6B36; --warn-bg: #FFF4DB; --warn-fg: #7A4B00; --warn-dot: #B26B00;
+  --r2-tint: #F8F5FE; --r2-bg: #EDE5FC; --r2-fg: #5B2FA8; --r3-tint: #F1FAF8; --r3-bg: #DCF2EE; --r3-fg: #0F665F;
+  --r4-tint: #FFF8EC; --r4-bg: #FCEBCB; --r4-fg: #8A5A00; --r5-tint: #FDF3F7; --r5-bg: #F9DCE8; --r5-fg: #9B2C5C;
+  --band-bg: #171A21; --band-fg: #FFFFFF; --band-muted: #C9CDD6; --tip-bg: #171A21; --tip-fg: #FFFFFF;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --bar-h: 120px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #111318; --surface: #1A1D24; --raised: #20232B; --fg: #E6E8EE; --fg-2: #C3C8D2; --muted: #9AA1AF;
+  --line: #2A2E38; --line-soft: #22262F; --control: #3A3F4B; --hover: #20242C;
+  --accent: #8FA2FF; --accent-strong: #B5C2FF; --accent-soft: #222B4D; --accent-tint: #1B2035;
+  --crit-bg: #3D1D1D; --crit-fg: #F4A4A4; --high-bg: #3A2614; --high-fg: #F2B27A;
+  --med-bg: #1C2A45; --med-fg: #9DBBF2; --low-bg: #262A33; --low-fg: #AEB4C0;
+  --core-bg: #E6E8EE; --core-fg: #111318; --main-bg: #343946; --main-fg: #E6E8EE; --minor-bg: #20232B; --minor-fg: #AEB4C0;
+  --ok-bg: #183024; --ok-fg: #8FD3A6; --warn-bg: #3A2C12; --warn-fg: #F0C36B; --warn-dot: #F0A93B;
+  --r2-tint: #1E1A2B; --r2-bg: #2E2547; --r2-fg: #C7B1F5; --r3-tint: #15221F; --r3-bg: #1A3833; --r3-fg: #86DACB;
+  --r4-tint: #241E12; --r4-bg: #3D3016; --r4-fg: #F0C36B; --r5-tint: #26161D; --r5-bg: #45212F; --r5-fg: #F2A2C2;
+  --band-bg: #E6E8EE; --band-fg: #111318; --band-muted: #3D4350; --tip-bg: #E6E8EE; --tip-fg: #111318;
+  color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #111318; --surface: #1A1D24; --raised: #20232B; --fg: #E6E8EE; --fg-2: #C3C8D2; --muted: #9AA1AF;
+  --line: #2A2E38; --line-soft: #22262F; --control: #3A3F4B; --hover: #20242C;
+  --accent: #8FA2FF; --accent-strong: #B5C2FF; --accent-soft: #222B4D; --accent-tint: #1B2035;
+  --crit-bg: #3D1D1D; --crit-fg: #F4A4A4; --high-bg: #3A2614; --high-fg: #F2B27A;
+  --med-bg: #1C2A45; --med-fg: #9DBBF2; --low-bg: #262A33; --low-fg: #AEB4C0;
+  --core-bg: #E6E8EE; --core-fg: #111318; --main-bg: #343946; --main-fg: #E6E8EE; --minor-bg: #20232B; --minor-fg: #AEB4C0;
+  --ok-bg: #183024; --ok-fg: #8FD3A6; --warn-bg: #3A2C12; --warn-fg: #F0C36B; --warn-dot: #F0A93B;
+  --r2-tint: #1E1A2B; --r2-bg: #2E2547; --r2-fg: #C7B1F5; --r3-tint: #15221F; --r3-bg: #1A3833; --r3-fg: #86DACB;
+  --r4-tint: #241E12; --r4-bg: #3D3016; --r4-fg: #F0C36B; --r5-tint: #26161D; --r5-bg: #45212F; --r5-fg: #F2A2C2;
+  --band-bg: #E6E8EE; --band-fg: #111318; --band-muted: #3D4350; --tip-bg: #E6E8EE; --tip-fg: #111318;
+  color-scheme: dark }
+
+* { box-sizing: border-box; }
+html { overflow-x: hidden; }
+body { background: var(--bg); color: var(--fg); font: 14px/1.5 var(--body); margin: 0; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+[hidden] { display: none !important; }
+a { color: var(--accent); }
+a:hover { color: var(--accent-strong); }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, a:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mono { font-family: var(--mono); }
+.num { font-variant-numeric: tabular-nums; }
+#app { display: flex; flex-direction: column; gap: 16px; }
+.wrap { width: 100%; max-width: 1180px; margin: 0 auto; padding-block: 24px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
+
+/* header */
+.head { display: flex; flex-direction: column; gap: 14px; padding: 20px 24px; }
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--muted); font-size: 13px; }
+.crumbs a { color: inherit; text-decoration: none; } .crumbs a:hover { text-decoration: underline; }
+.status { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 2px 10px; border-radius: 13px; background: var(--warn-bg); color: var(--warn-fg); font-weight: 500; }
+.status i { width: 7px; height: 7px; border-radius: 4px; background: var(--warn-dot); }
+.titlerow { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px 32px; }
+.titlerow > div:first-child { flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.25; text-wrap: balance; overflow-wrap: anywhere; }
+.lede { margin: 0; color: var(--fg-2); line-height: 1.55; max-width: 76ch; }
+.facts { display: flex; flex-wrap: wrap; gap: 10px; }
+.fact { display: flex; flex-direction: column; gap: 2px; padding: 8px 14px; border-radius: 8px; background: var(--bg); min-width: 108px; }
+.fact span { font-size: 12px; color: var(--muted); } .fact b { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.revs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border-radius: 8px; background: var(--raised); }
+.revs .lbl { font-size: 13px; color: var(--fg-2); }
+.revs .v1 { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.sw { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.revbtn { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px; border-radius: 14px; border: 1px solid var(--control); background: var(--surface); font-size: 12px; font-weight: 500; }
+.revs .hint { font-size: 12px; color: var(--muted); }
+
+/* sticky bar */
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 8; display: flex; flex-direction: column; gap: 10px; padding: 10px 14px; background: color-mix(in srgb, var(--surface) 96%, transparent); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 2px 8px rgba(23, 26, 33, .06); backdrop-filter: blur(6px); }
+.barrow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.seg { display: inline-flex; padding: 3px; border-radius: 8px; background: var(--line-soft); }
+.seg button { height: 30px; padding: 0 14px; border: 0; border-radius: 6px; background: transparent; font-weight: 500; }
+.seg button[aria-pressed="true"] { background: var(--surface); box-shadow: 0 1px 2px rgba(23, 26, 33, .12); }
+.filters { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.pill { height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid var(--control); background: var(--surface); font-weight: 500; }
+.pill[aria-pressed="true"] { background: var(--fg); color: var(--surface); border-color: var(--fg); }
+.tools { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.progress { display: inline-flex; align-items: center; gap: 10px; font-size: 13px; color: var(--fg-2); }
+.meter { width: 100px; height: 6px; border-radius: 3px; background: var(--line-soft); overflow: hidden; display: block; }
+.meter i { display: block; height: 6px; background: var(--accent); }
+.btn { height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--control); background: var(--surface); }
+.btn:hover, .pill:hover, .revbtn:hover { border-color: var(--accent); }
+.chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
+.chip { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border-radius: 16px; border: 1px solid var(--control); background: var(--surface); color: var(--fg); text-decoration: none; font-size: 13px; white-space: nowrap; }
+.chip:hover { border-color: var(--accent); color: var(--fg); }
+.chip .count { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.tag { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
+
+/* sections and rows */
+main { display: flex; flex-direction: column; gap: 16px; }
+section.card { overflow: hidden; scroll-margin-top: calc(var(--bar-h) + 16px); }
+.sechead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-height: 52px; padding: 6px 16px 6px 8px; }
+.sechead:hover, .rowhead:hover { background: var(--hover); }
+.twist { flex: none; width: 32px; height: 32px; border: 0; border-radius: 6px; background: transparent; display: inline-flex; align-items: center; justify-content: center; }
+.twist svg { transition: transform .12s; } .twist[aria-expanded="true"] svg { transform: rotate(90deg); }
+h2 { flex: 1 1 240px; min-width: 0; margin: 0; font-size: 15px; font-weight: 600; }
+h2 button { width: 100%; min-height: 36px; border: 0; padding: 0; background: transparent; text-align: left; font-weight: 600; }
+h2 .hint { margin-left: 8px; font-weight: 400; font-size: 13px; color: var(--muted); }
+.counts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.lc { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+.lc b { font-family: var(--mono); font-weight: 500; }
+.shown { margin-left: 4px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.secbody { border-top: 1px solid var(--line); }
+.empty { margin: 0; padding: 14px 16px; color: var(--muted); }
+.asapproved { margin: 0; padding: 14px 16px; display: flex; align-items: center; gap: 10px; color: var(--ok-fg); font-weight: 500; }
+.row { border-bottom: 1px solid var(--line-soft); scroll-margin-top: calc(var(--bar-h) + 16px); }
+.row:last-child { border-bottom: 0; }
+.rowhead { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px 0 8px; }
+.rid { flex: none; width: 64px; font-family: var(--mono); font-size: 12px; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rtitle { flex: 1; min-width: 0; height: 36px; border: 0; padding: 0; background: transparent; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; color: var(--fg); }
+.row.read .rtitle, .step.read .rtitle { font-weight: 400; color: var(--muted); }
+.look { flex: none; font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 4px; border: 1px solid var(--accent); color: var(--accent); white-space: nowrap; }
+.where { flex: none; width: 104px; font-size: 12px; color: var(--muted); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.where.path { font-family: var(--mono); width: 150px; }
+.lab { flex: none; width: 66px; text-align: center; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; padding: 3px 0; border-radius: 4px; }
+.layer { flex: none; width: 66px; text-align: center; font-size: 11px; font-weight: 500; padding: 3px 0; border-radius: 4px; }
+.dot { flex: none; width: 32px; height: 32px; border: 0; border-radius: 6px; background: transparent; display: inline-flex; align-items: center; justify-content: center; }
+.dot i { width: 10px; height: 10px; border-radius: 5px; background: var(--accent); border: 2px solid var(--accent); }
+.read > .rowhead .dot i { background: transparent; border-color: var(--control); }
+.rowbody { display: flex; flex-direction: column; gap: 10px; padding: 2px 16px 16px 114px; }
+.rowbody > * { max-width: 780px; }
+.rowbody p { margin: 0; line-height: 1.55; color: var(--fg); }
+.revnote { padding: 8px 10px; border-radius: 6px; font-size: 13px; line-height: 1.5; }
+.refs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.refs > span { font-size: 12px; color: var(--muted); }
+.ref { position: relative; display: inline-flex; align-items: center; min-height: 24px; padding: 0 7px; border-radius: 5px; background: var(--accent-soft); color: var(--accent); font-family: var(--mono); font-size: 12px; text-decoration: none; white-space: nowrap; }
+.ref:hover { color: var(--accent-strong); filter: brightness(.97); }
+.ref::after { content: attr(data-tip); position: absolute; left: 0; bottom: calc(100% + 6px); width: max-content; max-width: min(340px, 80vw); white-space: normal; padding: 8px 10px; border-radius: 6px; background: var(--tip-bg); color: var(--tip-fg); font-family: var(--body); font-size: 12px; line-height: 1.45; opacity: 0; pointer-events: none; transition: opacity .12s; z-index: 6; }
+.ref:hover::after, .ref:focus-visible::after { opacity: 1; }
+.covered { font-size: 12px; padding: 2px 8px; border-radius: 4px; }
+.notebox { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.notebox label { flex: 1 1 300px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.notebox textarea { width: 100%; resize: vertical; padding: 8px 10px; border: 1px solid var(--control); border-radius: 6px; font: inherit; font-size: 13px; color: var(--fg); background: var(--surface); }
+.notestat { font-size: 12px; color: var(--muted); min-height: 18px; }
+.picks { display: inline-flex; gap: 6px; }
+.picks button { height: 34px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--control); background: var(--surface); font-weight: 500; }
+.picks button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.subs { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; line-height: 1.5; }
+.subs li { padding: 1px 4px; border-radius: 4px; }
+.subs .sv { margin-left: 8px; font-size: 11px; font-weight: 600; }
+.qgroup .rowhead { font-weight: 500; }
+.qs { display: flex; flex-direction: column; padding: 0 16px 12px 50px; }
+.q { display: flex; align-items: center; gap: 12px; min-height: 36px; border-top: 1px solid var(--line-soft); scroll-margin-top: calc(var(--bar-h) + 16px); }
+.q .qid { flex: none; width: 30px; font-family: var(--mono); font-size: 12px; color: var(--fg-2); }
+.q .ans { flex: none; min-width: 24px; height: 22px; padding: 0 6px; border-radius: 5px; background: var(--line-soft); font-family: var(--mono); font-size: 12px; font-weight: 500; display: inline-flex; align-items: center; justify-content: center; }
+.q .qt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.q .prop { flex: none; font-size: 12px; color: var(--warn-fg); }
+.differ { flex: none; font-size: 12px; padding: 2px 8px; border-radius: 4px; background: var(--warn-bg); color: var(--warn-fg); }
+.flash { animation: flash 1.6s ease-out; }
+@keyframes flash { 0% { background: var(--accent-soft); } 100% { background: transparent; } }
+
+/* the map of how the pieces connect */
+.mapwrap { padding: 14px 16px; border-bottom: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 10px; }
+.mapwrap > span { font-size: 13px; color: var(--muted); }
+.mapscroll { overflow-x: auto; }
+.map { position: relative; }
+.map svg { position: absolute; inset: 0; overflow: visible; }
+.node { position: absolute; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--control); background: var(--surface); color: var(--fg); text-decoration: none; overflow: hidden; }
+.node b { font-weight: 500; font-size: 13px; line-height: 1.3; }
+.node small { font-size: 12px; color: var(--muted); line-height: 1.3; }
+.node.core { background: var(--core-bg); color: var(--core-fg); border-color: var(--core-bg); } .node.core small { color: var(--core-fg); opacity: .8; }
+.node.minor { background: var(--raised); }
+.node.existing { border-style: dashed; background: transparent; }
+.node:hover { border-color: var(--accent); color: inherit; }
+.map .edge { stroke: var(--muted); stroke-width: 1.4; fill: none; }
+.map .edgelabel { fill: var(--muted); font: 11px var(--body); }
+
+/* the design, folded, and the list of pages */
+.design .drow { display: flex; align-items: center; gap: 12px; min-height: 34px; border-top: 1px solid var(--line-soft); }
+.design .drows { display: flex; flex-direction: column; padding: 0 16px 14px 50px; }
+.design .dt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.band { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 14px 18px; border-radius: 12px; background: var(--band-bg); color: var(--band-fg); }
+.band span { color: var(--band-muted); } .band b { font-weight: 500; } .band .end { margin-left: auto; font-family: var(--mono); font-size: 12px; }
+.list h2 { padding: 16px 16px 4px; }
+.lrow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 10px 16px; border-top: 1px solid var(--line-soft); color: var(--fg); text-decoration: none; }
+.lrow:hover { background: var(--hover); color: var(--fg); }
+.lrow b { font-weight: 500; } .lrow small { color: var(--muted); }
+.lrow .end { margin-left: auto; }
+.msg { padding: 28px 24px; display: flex; flex-direction: column; gap: 6px; }
+.msg p { margin: 0; color: var(--fg-2); max-width: 70ch; }
+#toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--tip-bg); color: var(--tip-fg); padding: 8px 14px; border-radius: 8px; font-size: 13px; z-index: 20; }
+
+@media (max-width: 767px) {
+  .head { padding: 16px; }
+  .where, .hint, .layer.wide, .wide { display: none; }
+  .rowbody { padding-left: 16px; }
+  .qs, .design .drows { padding-left: 16px; }
+  .rid { width: 52px; }
+  .tools { margin-left: 0; }
+  .meter { width: 64px; }
+}
+</style>
+
+<div class="wrap">
+  <div id="app"><div class="card msg"><b>Loading…</b><p>The page fills in as soon as the stored row answers.</p></div></div>
+</div>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+
+<script>
+/* RENDER-START: no DOM below, until RENDER-END */
+var GateView = (function () {
+  "use strict";
+  var RANK = { critical: 0, high: 1, core: 1, medium: 2, main: 2, low: 3, minor: 3 };
+  var SEVERITY = ["critical", "high", "medium", "low"];
+  var WEIGHTS = ["core", "main", "minor"];
+  var LABEL_TONE = { critical: "crit", high: "high", medium: "med", low: "low", core: "core", main: "main", minor: "minor" };
+  var LAYER_TONE = { setup: "low", tests: "ok", data: "r2", logic: "med", api: "r3", UI: "high", infra: "warn", checks: "low", docs: "low", other: "low" };
+  var LAYER_ORDER = ["UI", "api", "logic", "data", "infra", "tests", "setup", "checks", "docs", "other"];
+  var PLAN_RANK = 1.5;
+
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function anchor(id) { return String(id).replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, ""); }
+  function tone(name) { return "background:var(--" + name + "-bg);color:var(--" + name + "-fg)"; }
+  function revTone(v) { var n = ((Math.max(2, v) - 2) % 4) + 2; return "r" + n; }
+  function plural(n, one, many) { n = +n || 0; return n + " " + (n === 1 ? one : (many || one + "s")); }
+  function int(n) { return (+n || 0) | 0; }
+  /* Only in-page anchors and http(s) addresses become links: a bundle is data, never a script. */
+  function safeHref(u) { u = String(u || ""); return /^#[A-Za-z0-9._-]*$/.test(u) || /^https?:\/\//i.test(u) ? u : "#"; }
+  function stepKey(st) { return st.source && st.source.key ? String(st.source.key) : "step:" + int(st.n); }
+  var CHEVRON = '<svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14"><path d="M5 3l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>';
+
+  function score(rows) {
+    if (!rows.length) return [9, 0, 0];
+    var top = Math.min.apply(null, rows.map(function (r) { return RANK[r.label] == null ? 3 : RANK[r.label]; }));
+    return [top, -rows.filter(function (r) { return r.lookFirst; }).length, -rows.filter(function (r) { return RANK[r.label] === top; }).length];
+  }
+  function cmp(a, b) { for (var i = 0; i < a.length; i++) { if (a[i] !== b[i]) return a[i] - b[i]; } return 0; }
+  function sortRows(rows) {
+    return rows.map(function (r, i) { return [r, i]; }).sort(function (x, y) {
+      var a = x[0], b = y[0];
+      return ((RANK[a.label] == null ? 3 : RANK[a.label]) - (RANK[b.label] == null ? 3 : RANK[b.label])) || ((b.lookFirst ? 1 : 0) - (a.lookFirst ? 1 : 0)) || (x[1] - y[1]);
+    }).map(function (p) { return p[0]; });
+  }
+  /* The contract's order (contract/README.md, "Order"): sections by importance, the code plan below any critical or high
+     section and above the rest, tests after every other section, then the answers, and on the unit-end page the design. */
+  function order(bundle) {
+    var ranked = [], tests = [];
+    (bundle.sections || []).forEach(function (s, i) { (s.kind === "tests" ? tests : ranked).push({ key: s.key, score: score(s.rows || []), i: i }); });
+    if (bundle.plan) ranked.push({ key: "plan", score: [PLAN_RANK, 0, 0], i: -1 });
+    var by = function (a, b) { return cmp(a.score, b.score) || (a.i - b.i); };
+    var keys = ranked.sort(by).map(function (x) { return x.key; }).concat(tests.sort(by).map(function (x) { return x.key; }));
+    if ((bundle.answers || []).length) keys.push("answers");
+    if (bundle.design) keys.push("design");
+    return keys;
+  }
+
+  /* ---------- state helpers ---------- */
+  function revOf(item) { return item.rev || 1; }
+  function isRead(st, key, item) { return (st.read[key] || 0) >= revOf(item); }
+  function isOpen(st, key) { var o = st.open[key]; return o === undefined ? st.mode === "full" : o; }
+  function secOpen(st, key, dflt) { var o = st.sec[key]; return o === undefined ? dflt : o; }
+  function passes(st, item, key, isStep) {
+    var f = st.filter;
+    if (f === "all") return true;
+    if (f === "unread") return !isRead(st, key, item);
+    if (/^v\d+$/.test(f)) { var v = +f.slice(1); return item.rev === v || (isStep && (item.subs || []).some(function (s) { return s.rev === v; })); }
+    if (isStep) return false;
+    if (f === "look") return !!item.lookFirst;
+    if (f === "top") return item.label === "critical" || item.label === "high" || item.label === "core";
+    return true;
+  }
+  /* key: the read mark's key (a row's anchor; a step's source, so a renumbered step keeps its mark); anchor: the jump target. */
+  function itemsOf(bundle) {
+    var out = [];
+    (bundle.sections || []).forEach(function (s) { (s.rows || []).forEach(function (r) { out.push({ key: anchor(r.id), anchor: anchor(r.id), item: r }); }); });
+    ((bundle.plan || {}).steps || []).forEach(function (st) { out.push({ key: stepKey(st), anchor: "step-" + int(st.n), item: st }); });
+    return out;
+  }
+  function revisionsIn(bundle) {
+    var seen = {};
+    itemsOf(bundle).forEach(function (x) { if (x.item.rev) seen[x.item.rev] = (seen[x.item.rev] || 0) + 1; });
+    return seen;
+  }
+
+  /* ---------- pieces ---------- */
+  function labelChip(label, count) { return '<span class="lc" style="' + tone(LABEL_TONE[label] || "low") + '">' + esc(label) + "<b>" + count + "</b></span>"; }
+  function revBadge(item, extra) {
+    if (!item.rev) return "";
+    var t = revTone(item.rev);
+    return '<span class="tag' + (extra || "") + '" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">v' + int(item.rev) + " " + (item.revKind === "new" ? "new" : "changed") + "</span>";
+  }
+  function refHtml(ref, bundle) {
+    var t = String(ref.target || ""), href = "#", data = "";
+    if (t.charAt(0) === "#") { href = safeHref(t); data = ' data-jump="' + esc(href.slice(1)) + '"'; }
+    else if (/^https?:\/\//i.test(t)) href = t;
+    else if (t.indexOf("path:") === 0) {
+      var path = t.slice(5), base = ((bundle.header || {}).links || {}).records;
+      if (base && /^https?:\/\//i.test(base)) href = base.replace(/\/?$/, "/") + path.replace(/#.*/, "");
+      else data = ' data-path="' + esc(path) + '"';
+    }
+    var ext = /^https?:\/\//.test(href) ? ' target="_blank" rel="noopener"' : "";
+    return '<a class="ref" href="' + esc(href) + '"' + ext + data + ' data-tip="' + esc(ref.tip) + '" aria-label="' + esc(ref.label + ": " + ref.tip) + '">' + esc(ref.label) + "</a>";
+  }
+  function noteBox(st, key, placeholder, suggestion) {
+    var note = st.notes[key] || "", pick = st.picks[key];
+    var picks = suggestion ? '<div class="picks" role="group" aria-label="Suggestion"><button type="button" data-act="pick" data-key="' + esc(key) + '" data-val="do" aria-pressed="' + (pick === "do") + '">Do it</button><button type="button" data-act="pick" data-key="' + esc(key) + '" data-val="leave" aria-pressed="' + (pick === "leave") + '">Leave it</button></div>' : "";
+    return '<div class="notebox"><label for="nt-' + esc(key) + '">Note to the agent<textarea id="nt-' + esc(key) + '" rows="2" data-note="' + esc(key) + '" placeholder="' + esc(placeholder) + '">' + esc(note) + '</textarea><span class="notestat" id="ns-' + esc(key) + '">' + esc(st.noteStat[key] || "") + "</span></label>" + picks + "</div>";
+  }
+
+  function rowHtml(st, bundle, sec, r) {
+    var key = anchor(r.id), open = isOpen(st, key), read = isRead(st, key, r);
+    var t = r.rev ? revTone(r.rev) : null;
+    var bg = t ? "background:var(--" + t + "-tint)" : (r.lookFirst ? "background:var(--accent-tint)" : "");
+    var head = '<div class="rowhead">' +
+      '<button type="button" class="twist" data-act="row" data-key="' + esc(key) + '" aria-expanded="' + open + '" aria-label="' + (open ? "Collapse " : "Expand ") + esc(r.id) + '">' + CHEVRON + "</button>" +
+      '<span class="rid" title="' + esc(r.id) + '">' + esc(r.id) + "</span>" +
+      '<button type="button" class="rtitle" data-act="row" data-key="' + esc(key) + '" title="' + esc(r.title) + '">' + esc(r.title) + "</button>" +
+      revBadge(r) + (r.lookFirst ? '<span class="look">look first</span>' : "") +
+      (r.where ? '<span class="where' + (r.whereIsPath ? " path" : "") + '" title="' + esc(r.where) + '">' + esc(r.where) + "</span>" : "") +
+      '<span class="lab" style="' + tone(LABEL_TONE[r.label] || "low") + '">' + esc(r.label) + "</span>" +
+      '<button type="button" class="dot" data-act="read" data-key="' + esc(key) + '" aria-label="Mark ' + esc(r.id) + (read ? " unread" : " read") + '" title="Mark ' + (read ? "unread" : "read") + '"><i></i></button></div>';
+    var body = "";
+    if (open) {
+      var refs = (r.refs || []).map(function (x) { return refHtml(x, bundle); }).join("");
+      var cov = r.coveredBy ? '<span class="covered" style="' + tone(r.coveredBy.settled ? "ok" : "warn") + '">' + esc(r.coveredBy.text) + "</span>" : "";
+      body = '<div class="rowbody">' +
+        (r.rev && r.revNote ? '<p class="revnote" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">' + esc(r.revNote) + "</p>" : "") +
+        "<p>" + esc(r.body) + "</p>" +
+        (refs || cov ? '<div class="refs">' + (refs && sec.refsLabel ? "<span>" + esc(sec.refsLabel) + "</span>" : "") + refs + cov + "</div>" : "") +
+        noteBox(st, key, "Only if something should change", r.suggestion) + "</div>";
+    }
+    return '<div class="row' + (read ? " read" : "") + '" id="' + esc(key) + '" style="' + bg + '">' + head + body + "</div>";
+  }
+
+  function sectionHead(key, title, hint, open, right) {
+    return '<div class="sechead"><button type="button" class="twist" data-act="sec" data-key="' + esc(key) + '" aria-expanded="' + open + '" aria-label="' + (open ? "Collapse " : "Expand ") + esc(title) + '">' + CHEVRON + "</button>" +
+      '<h2><button type="button" data-act="sec" data-key="' + esc(key) + '">' + esc(title) + (hint ? ' <span class="hint">' + esc(hint) + "</span>" : "") + "</button></h2>" +
+      '<div class="counts">' + right + "</div></div>";
+  }
+
+  function labelCounts(rows, kinds) {
+    return kinds.map(function (k) { var n = rows.filter(function (r) { return r.label === k; }).length; return n ? labelChip(k, n) : ""; }).join("") +
+      Object.keys(rows.reduce(function (m, r) { if (r.rev) m[r.rev] = 1; return m; }, {})).sort().map(function (v) {
+        var n = rows.filter(function (r) { return r.rev === +v; }).length, t = revTone(+v);
+        return '<span class="lc" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">v' + int(v) + "<b>" + n + "</b></span>";
+      }).join("");
+  }
+
+  function mapHtml(m) {
+    var nodes = m.nodes || [], edges = m.edges || [], layer = {}, i, changed = true, guard = 0;
+    nodes.forEach(function (n) { layer[n.id] = 0; });
+    while (changed && guard++ < 50) {
+      changed = false;
+      edges.forEach(function (e) { if (layer[e.from] != null && layer[e.to] != null && layer[e.to] < layer[e.from] + 1 && layer[e.from] < nodes.length) { layer[e.to] = layer[e.from] + 1; changed = true; } });
+    }
+    var cols = {}, W = 196, H = 64, GX = 56, GY = 18;
+    nodes.forEach(function (n) { (cols[layer[n.id]] = cols[layer[n.id]] || []).push(n); });
+    var pos = {}, maxRows = 0, ncols = 0;
+    Object.keys(cols).forEach(function (c) { cols[c].forEach(function (n, r) { pos[n.id] = { x: +c * (W + GX), y: r * (H + GY) }; }); maxRows = Math.max(maxRows, cols[c].length); ncols = Math.max(ncols, +c + 1); });
+    var width = ncols * W + (ncols - 1) * GX, height = maxRows * H + (maxRows - 1) * GY;
+    var lines = edges.map(function (e) {
+      var a = pos[e.from], b = pos[e.to]; if (!a || !b) return "";
+      var x1 = a.x + W, y1 = a.y + H / 2, x2 = b.x, y2 = b.y + H / 2;
+      if (b.x <= a.x) { x1 = a.x + W / 2; y1 = a.y + H; x2 = b.x + W / 2; y2 = b.y; }
+      var mx = (x1 + x2) / 2;
+      var d = b.x > a.x ? "M" + x1 + " " + y1 + " C" + mx + " " + y1 + " " + mx + " " + y2 + " " + (x2 - 6) + " " + y2 : "M" + x1 + " " + y1 + " L" + x2 + " " + (y2 - 6);
+      return '<path class="edge" d="' + d + '" marker-end="url(#arrow)"></path>' + (e.label ? '<text class="edgelabel" x="' + (mx) + '" y="' + ((y1 + y2) / 2 - 6) + '" text-anchor="middle">' + esc(e.label) + "</text>" : "");
+    }).join("");
+    var boxes = nodes.map(function (n) {
+      var p = pos[n.id], tag = n.target ? "a" : "div";
+      var nt = n.target ? safeHref(n.target) : "";
+      return "<" + tag + ' class="node ' + esc(n.weight) + '"' + (n.target ? ' href="' + esc(nt) + '" data-jump="' + esc(nt.slice(1)) + '"' : "") + ' style="left:' + p.x + "px;top:" + p.y + "px;width:" + W + "px;height:" + H + 'px"><b>' + esc(n.title) + "</b>" + (n.note ? "<small>" + esc(n.note) + "</small>" : "") + "</" + tag + ">";
+    }).join("");
+    return '<div class="mapwrap"><span>' + esc(m.caption || "How the pieces connect: dark boxes matter most; dashed ones already existed.") + '</span><div class="mapscroll"><div class="map" style="width:' + width + "px;height:" + height + 'px">' +
+      '<svg width="' + width + '" height="' + height + '" aria-hidden="true"><defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--muted)"></path></marker></defs>' + lines + "</svg>" + boxes + "</div></div></div>";
+  }
+
+  function sectionHtml(st, bundle, s) {
+    var rows = sortRows(s.rows || []), kinds = s.kind === "built" ? WEIGHTS : SEVERITY;
+    var shownRows = rows.filter(function (r) { return passes(st, r, anchor(r.id), false); });
+    var open = secOpen(st, s.key, true);
+    var right = labelCounts(rows, kinds) + '<span class="shown">' + (st.filter === "all" ? rows.length : shownRows.length + "/" + rows.length) + "</span>";
+    var body = "";
+    if (open) {
+      body = '<div class="secbody">' + (s.map && st.filter === "all" ? mapHtml(s.map) : "") +
+        (s.asApproved ? '<p class="asapproved">The design stays as approved.</p>' : "") +
+        (!s.asApproved && !shownRows.length ? '<p class="empty">' + (rows.length ? "Nothing here for this filter." : "Nothing in this section.") + "</p>" : "") +
+        shownRows.map(function (r) { return rowHtml(st, bundle, s, r); }).join("") + "</div>";
+    }
+    return '<section class="card" id="' + esc(s.key) + '" data-sec="' + esc(s.key) + '">' + sectionHead(s.key, s.title, s.hint, open, right) + body + "</section>";
+  }
+
+  function stepHtml(st, bundle, step) {
+    var key = "step-" + int(step.n), open = isOpen(st, key), read = isRead(st, stepKey(step), step), t = step.rev ? revTone(step.rev) : null;
+    var lt = LAYER_TONE[step.layer] || "low";
+    var head = '<div class="rowhead"><button type="button" class="twist" data-act="row" data-key="' + key + '" aria-expanded="' + open + '" aria-label="' + (open ? "Collapse" : "Expand") + " step " + int(step.n) + '">' + CHEVRON + "</button>" +
+      '<span class="rid">Step ' + int(step.n) + "</span>" +
+      '<button type="button" class="rtitle" data-act="row" data-key="' + key + '" title="' + esc(step.title) + '">' + esc(step.title) + "</button>" + revBadge(step) +
+      '<span class="layer" style="' + tone(lt) + '">' + esc(step.layer) + "</span>" +
+      '<span class="where num">' + plural(step.files, "file") + "</span>" +
+      '<span class="where wide">' + ((step.implements || []).length ? plural(step.implements.length, "design pt", "design pts") : "") + "</span>" +
+      '<button type="button" class="dot" data-act="read" data-key="' + key + '" aria-label="Mark step ' + int(step.n) + (read ? " unread" : " read") + '"><i></i></button></div>';
+    var body = "";
+    if (open) {
+      body = '<div class="rowbody">' + (step.rev && step.revNote ? '<p class="revnote" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">' + esc(step.revNote) + "</p>" : "") +
+        '<ol class="subs">' + (step.subs || []).map(function (s) {
+          if (!s.rev) return "<li>" + esc(s.text) + "</li>";
+          var u = revTone(s.rev);
+          return '<li style="background:var(--' + u + '-bg)">' + esc(s.text) + '<span class="sv" style="color:var(--' + u + '-fg)">v' + int(s.rev) + "</span></li>";
+        }).join("") + "</ol>" +
+        ((step.implements || []).length ? '<div class="refs"><span>Implements</span>' + step.implements.map(function (x) { return refHtml(x, bundle); }).join("") + "</div>" : "") +
+        noteBox(st, key, "Only if this step should change", false) + "</div>";
+    }
+    return '<div class="row step' + (read ? " read" : "") + '" id="' + key + '" style="' + (t ? "background:var(--" + t + "-tint)" : "") + '">' + head + body + "</div>";
+  }
+
+  function planHtml(st, bundle) {
+    var p = bundle.plan, steps = p.steps || [], open = secOpen(st, "plan", true);
+    var shown = steps.filter(function (s) { return passes(st, s, stepKey(s), true); });
+    var layers = LAYER_ORDER.map(function (l) {
+      var n = steps.filter(function (s) { return s.layer === l; }).length;
+      return n ? '<span class="lc" style="' + tone(LAYER_TONE[l]) + ';text-transform:none">' + esc(l) + "<b>" + n + "</b></span>" : "";
+    }).join("");
+    var revs = Object.keys(steps.reduce(function (m, s) { if (s.rev) m[s.rev] = 1; return m; }, {})).sort().map(function (v) {
+      var t = revTone(+v); return '<span class="lc" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">v' + int(v) + "<b>" + steps.filter(function (s) { return s.rev === +v; }).length + "</b></span>";
+    }).join("");
+    var right = layers + revs + '<span class="shown">' + (st.filter === "all" ? steps.length : shown.length + "/" + steps.length) + "</span>";
+    var body = open ? '<div class="secbody">' + (shown.length ? shown.map(function (s) { return stepHtml(st, bundle, s); }).join("") : '<p class="empty">' + (/^(look|top)$/.test(st.filter) ? "Steps carry no label; switch to All to read them." : "Nothing here for this filter.") + "</p>") + "</div>" : "";
+    return '<section class="card" id="plan" data-sec="plan">' + sectionHead("plan", p.title || "Code plan", p.hint || "", open, right) + body + "</section>";
+  }
+
+  function answersHtml(st, bundle) {
+    var groups = bundle.answers || [], open = secOpen(st, "answers", true);
+    var total = 0, differ = 0;
+    groups.forEach(function (g) { (g.questions || []).forEach(function (q) { total++; if (q.proposed && q.answer.charAt(0) !== q.proposed.charAt(0)) differ++; }); });
+    var right = (differ ? '<span class="lc" style="' + tone("warn") + '">differs from proposal<b>' + differ + "</b></span>" : "") + '<span class="shown">' + plural(groups.length, "file") + " · " + total + "</span>";
+    var body = "";
+    if (open) {
+      body = '<div class="secbody">' + groups.map(function (g) {
+        var gk = "ans-" + g.key, go = !!st.open[gk];
+        var d = (g.questions || []).filter(function (q) { return q.proposed && q.answer.charAt(0) !== q.proposed.charAt(0); }).length;
+        return '<div class="row qgroup" id="' + esc(g.key) + '"><div class="rowhead"><button type="button" class="twist" data-act="group" data-key="' + esc(gk) + '" aria-expanded="' + go + '" aria-label="' + (go ? "Collapse " : "Expand ") + esc(g.title) + ' answers">' + CHEVRON + "</button>" +
+          '<button type="button" class="rtitle" data-act="group" data-key="' + esc(gk) + '" title="' + esc(g.file) + '">' + esc(g.title) + "</button>" +
+          (d ? '<span class="differ">' + d + " differ" + (d === 1 ? "s" : "") + " from the proposal</span>" : "") +
+          '<span class="shown">' + plural((g.questions || []).length, "answer") + "</span></div>" +
+          (go ? '<div class="qs">' + (g.questions || []).map(function (q) {
+            var df = q.proposed && q.answer.charAt(0) !== q.proposed.charAt(0);
+            return '<div class="q" id="' + esc(q.anchor) + '"><span class="qid">' + esc(q.id) + '</span><span class="ans" title="' + esc(q.answer) + '">' + esc(q.answer.length > 3 ? q.answer.slice(0, 1) + "…" : q.answer) + '</span><span class="qt" title="' + esc(q.text + (q.answer.length > 3 ? " — " + q.answer : "")) + '">' + esc(q.text) + "</span>" + (df ? '<span class="prop">proposed ' + esc(q.proposed) + "</span>" : "") + "</div>";
+          }).join("") + "</div>" : "") + "</div>";
+      }).join("") + "</div>";
+    }
+    return '<section class="card" id="answers" data-sec="answers">' + sectionHead("answers", "Your answers", "kept for reference; Q links land here", open, right) + body + "</section>";
+  }
+
+  function designHtml(st, bundle) {
+    var d = bundle.design, open = secOpen(st, "design", false), rows = d.rows || [];
+    var link = d.bundle ? '<a href="#' + esc(d.bundle) + '" data-nav="' + esc(d.bundle) + '" style="margin-top:10px;font-size:13px">Open the full plan-approval page</a>' : (d.url ? '<a href="' + esc(safeHref(d.url)) + '" target="_blank" rel="noopener">Open the full plan-approval page</a>' : "");
+    var body = open ? '<div class="drows">' + rows.map(function (r) {
+      return '<div class="drow"><span class="rid">' + esc(r.id) + '</span><span class="dt" title="' + esc(r.title) + '">' + esc(r.title) + '</span><span class="lab" style="' + tone(LABEL_TONE[r.label] || "low") + '">' + esc(r.label) + "</span></div>";
+    }).join("") + link + "</div>" : "";
+    return '<section class="card design" id="design" data-sec="design">' + sectionHead("design", "The design you approved", "same view as at plan approval · you have seen it", open, '<span class="shown">' + esc(d.counts || plural(rows.length, "row")) + "</span>") + body + "</section>";
+  }
+
+  function headerHtml(st, bundle) {
+    var h = bundle.header || {}, revs = revisionsIn(bundle);
+    var crumbs = '<div class="crumbs"><a href="#" data-nav="">All pages</a><span aria-hidden="true">/</span><span>' + esc(h.project) + '</span><span aria-hidden="true">/</span><span>' + esc(h.intentName || h.intent) + '</span><span aria-hidden="true">/</span><span class="mono">' + esc(h.unit) + "</span>" +
+      '<span class="status"><i aria-hidden="true"></i>' + esc(h.status) + "</span></div>";
+    var facts = (h.facts || []).map(function (f) { return '<div class="fact"><span>' + esc(f.label) + "</span><b>" + esc(f.value) + "</b>" + (f.note ? "<span>" + esc(f.note) + "</span>" : "") + "</div>"; }).join("");
+    var revRow = "";
+    if ((h.revision || 1) > 1) {
+      var first = (h.revisions || [])[0] || { note: "first draft" };
+      revRow = '<div class="revs"><span class="lbl">Revisions:</span><span class="v1"><span class="sw" style="background:var(--control)"></span>v1 ' + esc(first.note) + "</span>" +
+        (h.revisions || []).slice(1).map(function (r) {
+          var rn = int(r.n), t = revTone(rn), on = st.filter === "v" + rn, n = revs[rn] || 0;
+          return '<button type="button" class="revbtn" data-act="filter" data-val="' + (on ? "all" : "v" + rn) + '" aria-pressed="' + on + '" title="' + esc(r.note) + '" style="color:var(--' + t + "-fg);" + (on ? "background:var(--" + t + "-bg);border-color:var(--" + t + "-fg)" : "") + '"><span class="sw" style="background:var(--' + t + '-fg)"></span>v' + rn + " · " + plural(n, "change") + (rn === int(h.revision) ? " (current)" : "") + "</button>";
+        }).join("") + '<span class="hint">Changed rows carry their version; press one to see only its changes.</span></div>';
+    }
+    return '<header class="card head">' + crumbs + '<div class="titlerow"><div><h1>' + esc(h.title) + '</h1><p class="lede">' + esc(h.lede) + "</p></div>" + (facts ? '<div class="facts">' + facts + "</div>" : "") + "</div>" + revRow + "</header>";
+  }
+
+  function chipFor(st, bundle, key) {
+    var short, count = "", top = "", rev = "";
+    if (key === "plan") {
+      var steps = bundle.plan.steps || []; short = "Plan";
+      count = steps.filter(function (s) { return !isRead(st, stepKey(s), s); }).length + "/" + steps.length;
+    } else if (key === "answers") { short = "Answers"; count = String((bundle.answers || []).reduce(function (n, g) { return n + (g.questions || []).length; }, 0)); }
+    else if (key === "design") { short = "Approved design"; count = String((bundle.design.rows || []).length); }
+    else {
+      var s = (bundle.sections || []).filter(function (x) { return x.key === key; })[0], rows = s.rows || [];
+      short = s.short; count = rows.filter(function (r) { return !isRead(st, anchor(r.id), r); }).length + "/" + rows.length;
+      var lab = rows.some(function (r) { return r.label === "critical"; }) ? "critical" : (rows.some(function (r) { return r.label === "high"; }) ? "high" : "");
+      if (lab) top = '<span class="tag" style="' + tone(LABEL_TONE[lab]) + '">' + lab + "</span>";
+      var mx = Math.max.apply(null, [0].concat(rows.map(function (r) { return r.rev || 0; })));
+      if (mx) { var t = revTone(mx); rev = '<span class="tag" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">v' + int(mx) + " ·" + rows.filter(function (r) { return r.rev; }).length + "</span>"; }
+    }
+    if (key === "plan") {
+      var smx = Math.max.apply(null, [0].concat((bundle.plan.steps || []).map(function (s) { return s.rev || 0; })));
+      if (smx) { var u = revTone(smx); rev = '<span class="tag" style="background:var(--' + u + "-bg);color:var(--" + u + '-fg)">v' + int(smx) + " ·" + bundle.plan.steps.filter(function (s) { return s.rev; }).length + "</span>"; }
+    }
+    return '<a class="chip" href="#' + esc(key) + '" data-jump="' + esc(key) + '">' + esc(short) + rev + top + '<span class="count">' + esc(count) + "</span></a>";
+  }
+
+  function barHtml(st, bundle, keys) {
+    var items = itemsOf(bundle), read = items.filter(function (x) { return isRead(st, x.key, x.item); }).length;
+    var pct = items.length ? Math.round(read / items.length * 100) : 100;
+    var unitEnd = bundle.page === "unit-end";
+    var filters = [["all", "All"], ["look", "Look first"], ["unread", "Unread"], ["top", unitEnd ? "High and core" : "High and critical"]];
+    return '<div class="bar" id="bar"><div class="barrow">' +
+      '<div class="seg" role="group" aria-label="Detail"><button type="button" data-act="mode" data-val="summary" aria-pressed="' + (st.mode === "summary") + '">Summary</button><button type="button" data-act="mode" data-val="full" aria-pressed="' + (st.mode === "full") + '">Full</button></div>' +
+      '<div class="filters" role="group" aria-label="Show">' + filters.map(function (f) { return '<button type="button" class="pill" data-act="filter" data-val="' + f[0] + '" aria-pressed="' + (st.filter === f[0]) + '">' + f[1] + "</button>"; }).join("") + "</div>" +
+      '<div class="tools"><span class="progress"><span class="num">Read ' + read + "/" + items.length + '</span><span class="meter" aria-hidden="true"><i style="width:' + pct + '%"></i></span></span>' +
+      '<button type="button" class="btn" data-act="expand">Expand all</button><button type="button" class="btn" data-act="collapse">Collapse all</button><button type="button" class="btn wide" data-act="allread">Mark all read</button></div></div>' +
+      '<nav class="chips" aria-label="Sections">' + keys.map(function (k) { return chipFor(st, bundle, k); }).join("") + "</nav></div>";
+  }
+
+  function footerHtml(st, bundle) {
+    var h = bundle.header || {}, items = itemsOf(bundle), read = items.filter(function (x) { return isRead(st, x.key, x.item); }).length;
+    var lead = bundle.page === "plan" ? "Approve the plan or ask for changes in chat." : "Approve the Unit or ask for changes in chat.";
+    var rest = h.footer || (bundle.page === "plan" ? "Notes you leave on rows go to the agent with your answer." : "Asking for changes here sends the Unit’s stages back for review; the code plan is the cheaper place to push back.");
+    return '<footer class="band"><b>' + esc(lead) + "</b><span>" + esc(rest) + '</span><span class="end num">read ' + read + "/" + items.length + "</span></footer>";
+  }
+
+  /* The whole page for one bundle. st: {mode, filter, open, sec, read, notes, picks, noteStat}. */
+  function render(bundle, st) {
+    st = Object.assign({ mode: "summary", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {} }, st || {});
+    var keys = order(bundle), parts = {};
+    (bundle.sections || []).forEach(function (s) { parts[s.key] = sectionHtml(st, bundle, s); });
+    if (bundle.plan) parts.plan = planHtml(st, bundle);
+    if ((bundle.answers || []).length) parts.answers = answersHtml(st, bundle);
+    if (bundle.design) parts.design = designHtml(st, bundle);
+    return headerHtml(st, bundle) + barHtml(st, bundle, keys) + "<main>" + keys.map(function (k) { return parts[k]; }).join("") + footerHtml(st, bundle) + "</main>";
+  }
+
+  function listHtml(rows) {
+    if (!rows.length) return '<div class="card msg"><b>No pages yet.</b><p>The agent adds one here at a Unit’s plan approval and at its unit-end approval, and gives you its link, which ends in # and the page’s id.</p></div>';
+    var groups = {};
+    rows.forEach(function (r) { var k = (r.intent || "") + " · " + (r.unit || ""); (groups[k] = groups[k] || []).push(r); });
+    return '<header class="card head"><div class="crumbs"><span>AI-DLC</span></div><h1>Unit approvals</h1><p class="lede">One page at each Unit’s plan approval and one at its end. Read here; answer in chat.</p></header>' +
+      Object.keys(groups).map(function (k) {
+        return '<section class="card list"><h2>' + esc(k) + "</h2>" + groups[k].map(function (r) {
+          var b = r.bundle || {}, h = b.header || {};
+          return '<a class="lrow" href="#' + esc(r.id) + '" data-nav="' + esc(r.id) + '"><b>' + esc(r.title || h.title || r.id) + "</b><small>" + esc(r.page === "plan" ? "Plan approval" : "Unit end") + " · v" + int(h.revision || 1) + " · " + esc(String(r.createdAt || "").replace("T", " ").replace(/:\d\d(\.\d+)?Z$/, " UTC")) + '</small><span class="end lc" style="' + tone(r.status === "open" ? "warn" : "low") + '">' + esc(r.status || "") + "</span></a>";
+        }).join("") + "</section>";
+      }).join("");
+  }
+
+  return { render: render, listHtml: listHtml, order: order, sortRows: sortRows, anchor: anchor, itemsOf: itemsOf, isRead: isRead, esc: esc };
+})();
+if (typeof module !== "undefined") module.exports = GateView;
+/* RENDER-END */
+</script>
+<script>
+(function () {
+  "use strict";
+  var app = document.getElementById("app"), toastEl = document.getElementById("toast");
+  var db = null, user = null, uid = null;
+  var view = { id: "", row: null, bundle: null, unsub: [], st: null, readKey: "", saving: false, unsaved: false, timer: 0 };
+
+  function freshState() { return { mode: "summary", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {} }; }
+  function toast(text) { toastEl.textContent = text; toastEl.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(function () { toastEl.hidden = true; }, 2400); }
+  function teardown() {
+    if (view.unsaved) flush();  /* sends the pending note of the page being left; flush reads the id before it awaits */
+    clearTimeout(view.timer);
+    view.unsub.forEach(function (u) { try { u(); } catch (e) { /* already gone */ } }); view.unsub = [];
+    view.unsaved = false; view.saving = false;
+  }
+  function pageId() { var h = decodeURIComponent(location.hash.slice(1)); return /-(plan|unit-end)-v\d+-\d{8}T\d{4}$/.test(h) ? h : ""; }
+  function barHeight() { var b = document.getElementById("bar"); if (b) document.documentElement.style.setProperty("--bar-h", b.offsetHeight + "px"); }
+
+  function paint() {
+    if (!view.bundle) return;
+    var y = window.scrollY, active = document.activeElement, focusKey = active && (active.dataset.note || null);
+    app.innerHTML = GateView.render(view.bundle, view.st);
+    barHeight();
+    window.scrollTo(0, y);
+    if (focusKey) { var t = document.getElementById("nt-" + focusKey); if (t) { t.focus(); t.selectionStart = t.selectionEnd = t.value.length; } }
+  }
+
+  /* ---------- read marks: the viewer's own ---------- */
+  function localKey() { return "unit-gates:reads:" + view.readKey; }
+  function loadLocalReads() { try { return JSON.parse(localStorage.getItem(localKey()) || "{}") || {}; } catch (e) { return {}; } }
+  function saveReads() {
+    var marks = Object.assign({}, view.st.read);
+    try { localStorage.setItem(localKey(), JSON.stringify(marks)); } catch (e) { /* storage refused: the db copy still holds */ }
+    try { if (db && uid) readsDoc().set({ marks: marks }).catch(function () { /* kept locally */ }); } catch (e) { /* kept locally */ }
+  }
+  /* data/users/<viewer> is the viewer's own collection; the marks of one page are one document in it. */
+  function readsDoc() { return db.collection("data/users/" + uid).doc("reads-" + view.readKey); }
+  function markRead(keys, rev) { keys.forEach(function (k) { view.st.read[k] = Math.max(view.st.read[k] || 0, rev); }); saveReads(); }
+
+  /* ---------- notes and picks: on the row, read by the agent with the chat answer ---------- */
+  function queueSave() { view.unsaved = true; clearTimeout(view.timer); view.timer = setTimeout(flush, 700); }
+  function setStat(key, text) { view.st.noteStat[key] = text; var s = document.getElementById("ns-" + key); if (s) s.textContent = text; }
+  async function flush() {
+    clearTimeout(view.timer);
+    if (view.saving || !view.unsaved || !db || !view.id) return;
+    var id = view.id, st = view.st;
+    view.saving = true; view.unsaved = false;
+    var notes = Object.assign({}, st.notes), picks = Object.assign({}, st.picks);
+    Object.keys(notes).forEach(function (k) { if (st.noteStat[k] === "Unsaved") setStat(k, "Saving…"); });
+    var ok = true;
+    try {
+      await db.doc("bundles/" + id).update({ notes: notes, picks: picks });
+      if (view.id === id) Object.keys(notes).forEach(function (k) { if (/^Sav/.test(st.noteStat[k] || "")) setStat(k, "Saved"); });
+    } catch (e) {
+      ok = false;
+      if (view.id === id) { view.unsaved = true; Object.keys(notes).forEach(function (k) { if (/^Sav/.test(st.noteStat[k] || "")) setStat(k, "Not saved"); }); }
+      toast(e && e.code === "invalid_argument" ? "You can read this page but not save notes to it." : "Couldn’t save your note. It is sent again when you type.");
+    }
+    if (view.id === id) {
+      view.saving = false;
+      if (ok && view.unsaved) flush();  /* typed while the save was on its way; a failure waits for the next keystroke */
+    }
+  }
+
+  /* ---------- jumps land below the bar ---------- */
+  function reveal(target) {
+    var st = view.st, b = view.bundle;
+    if (!b || !target) return;
+    var secKeys = (b.sections || []).map(function (s) { return s.key; }).concat(["plan", "answers", "design"]);
+    if (secKeys.indexOf(target) >= 0) st.sec[target] = true;
+    (b.sections || []).forEach(function (s) { (s.rows || []).forEach(function (r) { if (GateView.anchor(r.id) === target) { st.sec[s.key] = true; st.open[target] = true; } }); });
+    if (/^step-\d+$/.test(target)) { st.sec.plan = true; st.open[target] = true; }
+    (b.answers || []).forEach(function (g) {
+      if (g.key === target) st.sec.answers = true;
+      (g.questions || []).forEach(function (q) { if (q.anchor === target) { st.sec.answers = true; st.open["ans-" + g.key] = true; } });
+    });
+    if (st.filter !== "all") st.filter = "all";
+    paint();
+    var el = document.getElementById(target);
+    if (el) { el.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); }
+  }
+
+  /* ---------- events ---------- */
+  app.addEventListener("click", function (e) {
+    var nav = e.target.closest("[data-nav]");
+    if (nav) { e.preventDefault(); var to = nav.dataset.nav; if (to) location.hash = to; else history.pushState(null, "", location.pathname + location.search), route(); return; }
+    var jump = e.target.closest("[data-jump]");
+    if (jump) { e.preventDefault(); reveal(jump.dataset.jump); return; }
+    var path = e.target.closest("[data-path]");
+    if (path) {
+      e.preventDefault();
+      var p = path.dataset.path;
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(p).then(function () { toast("Path copied: " + p); }, function () { toast(p); });
+      else toast(p);
+      return;
+    }
+    var btn = e.target.closest("[data-act]");
+    if (!btn || !view.st) return;
+    var st = view.st, act = btn.dataset.act, key = btn.dataset.key, val = btn.dataset.val, rev = view.bundle.header.revision || 1;
+    if (act === "row") {
+      var now = !(st.open[key] === undefined ? st.mode === "full" : st.open[key]);
+      st.open[key] = now;
+      /* opening a row only opens it: the read dot is the one thing that marks a row read */
+    } else if (act === "sec") {
+      var dflt = key === "design" ? false : true;
+      st.sec[key] = !(st.sec[key] === undefined ? dflt : st.sec[key]);
+    } else if (act === "group") st.open[key] = !st.open[key];
+    else if (act === "read") {
+      var it = GateView.itemsOf(view.bundle).filter(function (x) { return x.anchor === key; })[0];
+      if (it) { var r = it.item.rev || 1; if (GateView.isRead(st, it.key, it.item)) { st.read[it.key] = r - 1; saveReads(); } else markRead([it.key], r); }
+    } else if (act === "mode") { st.mode = val; st.open = {}; st.sec = {}; }
+    else if (act === "filter") { st.filter = val; st.sec = {}; }
+    else if (act === "expand" || act === "collapse") {
+      var on = act === "expand";
+      GateView.order(view.bundle).forEach(function (k) { st.sec[k] = on; });
+      GateView.itemsOf(view.bundle).forEach(function (x) { st.open[x.anchor] = on; });
+      (view.bundle.answers || []).forEach(function (g) { st.open["ans-" + g.key] = on; });
+    } else if (act === "allread") markRead(GateView.itemsOf(view.bundle).map(function (x) { return x.key; }), rev);
+    else if (act === "pick") { st.picks[key] = st.picks[key] === val ? "" : val; queueSave(); }
+    paint();
+  });
+  app.addEventListener("input", function (e) {
+    var key = e.target.dataset && e.target.dataset.note;
+    if (!key || !view.st) return;
+    view.st.notes[key] = e.target.value; setStat(key, "Unsaved"); queueSave();
+  });
+  window.addEventListener("resize", barHeight);
+
+  /* ---------- views ---------- */
+  function showList() {
+    teardown(); view.id = ""; view.bundle = null;
+    if (!db) return;
+    view.unsub.push(db.collection("bundles").orderBy("createdAt", "desc").limit(100).onSnapshot(function (snap) {
+      app.innerHTML = GateView.listHtml(snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); }));
+    }, function () { app.innerHTML = '<div class="card msg"><b>Couldn’t load the pages.</b><p>Reload the page.</p></div>'; }));
+  }
+  function showPage(id) {
+    teardown(); view.id = id; view.bundle = null; view.st = freshState();
+    if (!db) return;
+    app.innerHTML = '<div class="card msg"><b>Loading this page…</b></div>';
+    view.unsub.push(db.doc("bundles/" + id).onSnapshot(function (snap) {
+      if (!snap.exists) {
+        app.innerHTML = '<div class="card msg"><b>Waiting for this page</b><p>Nothing is stored under this id yet. The agent writes the page just before it asks you, and this view fills in when it lands. If nothing happens, check the link the agent gave you.</p><p><a href="#" data-nav="">All pages</a></p></div>';
+        return;
+      }
+      var row = snap.data(), first = !view.bundle;
+      view.row = row; view.bundle = row.bundle || null;
+      if (!view.bundle) { app.innerHTML = '<div class="card msg"><b>This row holds no page.</b><p>Ask the agent to build it again.</p></div>'; return; }
+      if (view.bundle.schema !== "aidlc-gate-bundle/1") { app.innerHTML = '<div class="card msg"><b>This page is newer than this view.</b><p>It uses ' + GateView.esc(view.bundle.schema) + '. Ask the agent to republish the unit approvals page from the plugin.</p></div>'; return; }
+      if (first) {
+        view.readKey = [row.intent || view.bundle.header.intent, row.unit || view.bundle.header.unit, view.bundle.page].join("--");
+        view.st.read = loadLocalReads();
+        if (db && uid) Promise.resolve().then(function () { return readsDoc().get(); }).then(function (d) {
+          var marks = d && d.exists ? (d.data().marks || {}) : {};
+          Object.keys(marks).forEach(function (k) { view.st.read[k] = Math.max(view.st.read[k] || 0, marks[k] || 0); });
+          paint();
+        }).catch(function () { /* local marks only */ });
+      }
+      if (!view.unsaved && !view.saving) { view.st.notes = Object.assign({}, row.notes || {}); view.st.picks = Object.assign({}, row.picks || {}); }
+      document.title = (view.bundle.header.title || "Unit approval") + " · AI-DLC unit approvals";
+      paint();
+    }, function () { app.innerHTML = '<div class="card msg"><b>Couldn’t load this page.</b><p>Reload the page.</p></div>'; }));
+  }
+  function route() { var id = pageId(); if (id) showPage(id); else showList(); }
+  window.addEventListener("hashchange", function () { if (pageId() || !location.hash) route(); });
+
+  (async function boot() {
+    var use = window.claude && typeof window.claude.use === "function" ? window.claude.use : null;
+    db = use ? await use("db") : null;
+    if (!db) { app.innerHTML = '<div class="card msg"><b>Sign in to claude.ai to read this page.</b><p>The pages are stored with the artifact, and only a signed-in viewer can read them.</p></div>'; return; }
+    try { user = await use("user"); uid = user && typeof user.id === "function" ? await user.id() : null; } catch (e) { uid = null; }
+    route();
+  })();
+})();
+</script>

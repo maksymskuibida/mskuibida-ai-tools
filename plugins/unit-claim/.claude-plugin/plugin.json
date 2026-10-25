@@ -1,0 +1,9 @@
+{
+  "name": "unit-claim",
+  "displayName": "Unit claim",
+  "version": "0.1.0",
+  "description": "Before a team AI-DLC Unit is claimed, the agent sends its reasoning per design stage and asks one dialog: which design stages run, the approval rhythm (unit-end or per-stage), and whether to save the choice. A hook refuses the claim until it is answered or a choice is saved, claims with the chosen rhythm, and skips the left-out stages for that Unit only.",
+  "author": {
+    "name": "Maksym Skuibida"
+  }
+}
