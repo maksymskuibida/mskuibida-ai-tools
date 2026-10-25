@@ -29,6 +29,7 @@ Blocking is severity Critical or Major (AI-DLC), or verdict CONFIRMED (code revi
 
 import argparse
 import datetime
+import importlib.util
 import json
 import os
 import re
@@ -525,8 +526,44 @@ def card(item, f, code, reviewer=""):
     }
 
 
-def board(doc, fid, title, out_dir, now=None):
-    """Write forms.json, cards/<qid>.json and writes.json for one ArtifactData batch; returns a summary dict."""
+def ids_lib():
+    """The shared id map (aidlc_ids.py beside this file, a copy of shared/aidlc-ids/aidlc_ids.py), or None."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aidlc_ids.py")
+    spec = importlib.util.spec_from_file_location("aidlc_ids", path)
+    if spec is None or not os.path.isfile(path):
+        return None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def card_text(c):
+    """Every text a card shows, for the ids it mentions."""
+    refs = " ".join(f"{r.get('label', '')} {r.get('tip', '')}" for r in c.get("refs") or [])
+    return "\n".join(str(c.get(k) or "") for k in ("text", "plain", "action", "ctx", "detail", "from")) + "\n" + refs
+
+
+def ids_for(doc, cards, project_dir):
+    """The form's `ids` map ({id: {kind, title, text, doc, line}}) for the ids the cards mention, from the project's
+    id map (synced first), each defined nearest the reviewed document; ({}, why) when there is none."""
+    lib = ids_lib()
+    if lib is None:
+        return {}, "aidlc_ids.py is missing"
+    project = lib.project_dir(project_dir or None)
+    folder = lib.intent_dir(project)
+    if not folder or not os.path.isdir(folder):
+        return {}, "no active AI-DLC intent"
+    lib.sync(folder)
+    near = []
+    if doc.get("artifact"):
+        art = doc["artifact"] if os.path.isabs(doc["artifact"]) else os.path.join(project, doc["artifact"])
+        near += [art, os.path.dirname(art)]
+    return lib.refs(folder, "\n\n".join(card_text(c) for c in cards), near), ""
+
+
+def board(doc, fid, title, out_dir, now=None, project_dir=""):
+    """Write forms.json, cards/<qid>.json and writes.json for one ArtifactData batch; returns a summary dict.
+    The form's `ids` maps every id the cards mention to its definition, for the page's tooltips and links."""
     if not doc.get("findings"):
         raise ValueError("there are no open findings, so there is nothing to sort")
     if incomplete(doc):
@@ -540,15 +577,24 @@ def board(doc, fid, title, out_dir, now=None):
         row["stage"] = doc["stage_name"]
     if doc.get("artifact"):
         row["file"] = doc["artifact"]
+    cards = [(f["id"], card(item, f, code, doc.get("reviewer", ""))) for item, f in zip(readable(doc), doc["findings"])]
+    try:
+        ids, why = ids_for(doc, [c for _, c in cards], project_dir)
+    except Exception as exc:  # noqa: BLE001 - the board is written without tooltips rather than not at all
+        ids, why = {}, f"the id map could not be read ({exc})"
+    if ids:
+        row["ids"] = ids
     writes = [{"op": "set", "collection": "forms", "doc_id": fid, "file_path": os.path.join(out, "forms.json")}]
     dump(os.path.join(out, "forms.json"), row)
-    for item, f in zip(readable(doc), doc["findings"]):
-        name = re.sub(r"[^A-Za-z0-9._-]", "_", f["id"])
-        path = os.path.join(out, "cards", name + ".json")
-        dump(path, card(item, f, code, doc.get("reviewer", "")))
-        writes.append({"op": "set", "collection": f"forms/{fid}/questions", "doc_id": f["id"], "file_path": path})
+    for qid, c in cards:
+        path = os.path.join(out, "cards", re.sub(r"[^A-Za-z0-9._-]", "_", qid) + ".json")
+        dump(path, c)
+        writes.append({"op": "set", "collection": f"forms/{fid}/questions", "doc_id": qid, "file_path": path})
     dump(os.path.join(out, "writes.json"), writes, indent=2)
-    return {"id": fid, "cards": len(doc["findings"]), "writes": os.path.join(out, "writes.json")}
+    result = {"id": fid, "cards": len(cards), "writes": os.path.join(out, "writes.json"), "ids": len(ids)}
+    if why:
+        result["ids_note"] = why
+    return result
 
 
 def dump(path, data, indent=2):
@@ -650,7 +696,7 @@ def main(argv=None):
             doc = load_findings(args.findings)
             code = doc.get("source") == "code-review"
             title = args.title or "Review findings · " + ("code review" if code else doc.get("stage_name") or doc.get("stage") or "review")
-            result = board(doc, args.id or form_id(doc, args.project_dir), title, args.out)
+            result = board(doc, args.id or form_id(doc, args.project_dir), title, args.out, project_dir=args.project_dir)
             print(json.dumps(result))
     except (OSError, ValueError) as why:
         print(f"findings.py: {why}", file=sys.stderr)

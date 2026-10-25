@@ -107,7 +107,12 @@ that skill's § 1 to publish it first.
    in Fix when it blocks and in Accept when it does not. Its details say, in plain words, what is
    wrong, the suggested action and where; the card also carries them apart (`plain`, `action`,
    `detail`), with `refs` (what the finding points at, `{label, tip, target}`, a live link when the
-   target is `#<qid>` of another card) for the page (question-forms § 5).
+   target is `#<qid>` of another card) for the page (question-forms § 5). In an AI-DLC project,
+   `board` also syncs the project's id map (`aidlc_ids.py sync`) and writes the form's `ids`: the
+   definition of every id the cards mention (US, AC, FR, NFR, BR, Q, U, C, E, ADR, R, …), nearest the
+   reviewed document, so the page shows each one as a link with a tooltip. Its output says how many
+   (`"ids": n`), and `ids_note` why there are none. Write ids as they are in the cards' text; never
+   paste them into a sentence that plain words can say.
 2. Write the rows with **one** `ArtifactData` `batch` whose `writes` are the array in
    `writes.json`, as it is (new rows: no `if_version`).
 3. Send the form check, as `question-forms` § 5b A says: `AskUserQuestion`, header `Form`, question

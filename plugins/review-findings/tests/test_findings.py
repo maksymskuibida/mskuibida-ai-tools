@@ -260,6 +260,10 @@ class Board(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
+        ids_dir = tempfile.TemporaryDirectory()  # the shared id map is kept out of the real ~/.claude
+        self.addCleanup(ids_dir.cleanup)
+        os.environ["AIDLC_IDS_DIR"] = ids_dir.name
+        self.addCleanup(os.environ.pop, "AIDLC_IDS_DIR", None)
         self.doc = findings.parse_brief(fixture("brief-open.txt"), "domain-design")
         self.fid = "260101-demo-shop-domain-design-findings-20260105t1007"
 
@@ -344,6 +348,37 @@ class Board(unittest.TestCase):
         self.assertEqual(card["proposed"]["k"], "fix")
         self.assertNotIn("stage", form)
 
+    def test_ids_the_cards_mention_get_the_forms_ids_map(self):
+        project = os.path.join(self.tmp.name, "project")
+        intent = os.path.join(project, "aidlc", "spaces", "default", "intents", "260101-demo-shop")
+        stage = os.path.join(intent, "inception", "domain-design")
+        os.makedirs(stage)
+        for path, text in ((os.path.join(project, "aidlc", "active-space"), "default\n"),
+                           (os.path.join(project, "aidlc", "spaces", "default", "intents", "active-intent"), "260101-demo-shop\n"),
+                           (os.path.join(intent, "inception", "requirements.md"),
+                            "# Requirements\n\n### FR1.4 — Cart totals\nThe cart shows its total with tax.\n"),
+                           (os.path.join(stage, "domain-model.md"), "# Domain model\n\n## Cart aggregate\n")):
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+        doc = dict(self.doc, artifact=os.path.relpath(os.path.join(stage, "domain-model.md"), project))
+        doc["findings"] = [dict(doc["findings"][0], finding="The rule breaks FR1.4 and FR9.9. " + doc["findings"][0]["finding"])]
+        out = os.path.join(self.tmp.name, "board")
+        result = findings.board(doc, self.fid, "t", out, now=self.NOW, project_dir=project)
+        with open(os.path.join(out, "forms.json"), encoding="utf-8") as f:
+            form = json.load(f)
+        self.assertEqual(result["ids"], 1)
+        self.assertEqual(set(form["ids"]), {"FR1.4"})  # FR9.9 is defined nowhere: the page shows it as not defined
+        self.assertEqual((form["ids"]["FR1.4"]["kind"], form["ids"]["FR1.4"]["title"]), ("Functional requirement", "Cart totals"))
+        self.assertEqual(form["ids"]["FR1.4"]["doc"], os.path.join("inception", "requirements.md"))
+
+    def test_outside_an_aidlc_project_the_form_has_no_ids(self):
+        empty = os.path.join(self.tmp.name, "plain")
+        os.makedirs(empty)
+        result = findings.board(self.doc, self.fid, "t", os.path.join(self.tmp.name, "b"), now=self.NOW, project_dir=empty)
+        self.assertEqual((result["ids"], result["ids_note"]), (0, "no active AI-DLC intent"))
+        with open(os.path.join(self.tmp.name, "b", "forms.json"), encoding="utf-8") as f:
+            self.assertNotIn("ids", json.load(f))
+
     def test_no_findings_is_an_error(self):
         with self.assertRaises(ValueError):
             findings.board({"source": "aidlc", "findings": []}, "x", "t", self.tmp.name)
@@ -359,6 +394,12 @@ class Board(unittest.TestCase):
 
 
 class Cli(unittest.TestCase):
+    def setUp(self):
+        ids_dir = tempfile.TemporaryDirectory()  # `board` syncs the shared id map: keep it out of the real ~/.claude
+        self.addCleanup(ids_dir.cleanup)
+        os.environ["AIDLC_IDS_DIR"] = ids_dir.name
+        self.addCleanup(os.environ.pop, "AIDLC_IDS_DIR", None)
+
     def run_cli(self, *argv):
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):

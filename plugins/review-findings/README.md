@@ -18,6 +18,7 @@ Two sources, nothing else in this version:
 skills/review-findings/SKILL.md   the procedure: the summary, the question, what each answer means, the board form
 skills/release/SKILL.md           /review-findings:release
 scripts/findings.py               parses a brief, a review-NN.md or a ReportFindings input; renders the summary and the board rows
+scripts/aidlc_ids.py              the shared id map (copy of shared/aidlc-ids/aidlc_ids.py): the board's ids tooltips
 hooks/findings_guard.py           the guard (PreToolUse, PostToolUse, UserPromptSubmit)
 hooks/register.tsx                the mod: builds the question from the saved findings and draws them above the dialog
 ```
@@ -119,7 +120,14 @@ two) and `refs` for a page that draws them apart:
 
 A `#<qid>` target is another card of the same form, a live link; a `doc:`, `path:` or `finding:`
 target is something the form does not hold (a document section, a file, a finding closed before
-this round), and `tip` is all that is known of it. The form id is
+this round), and `tip` is all that is known of it.
+
+In an AI-DLC project `board` also writes the form's `ids`, `{id: {kind, title, text, doc, line}}`
+for every id the cards mention, from the project's shared id map (`scripts/aidlc_ids.py`, a copy of
+`shared/aidlc-ids/aidlc_ids.py`; `scripts/sync-shared.py` keeps it the same). It syncs the map first
+and picks each id's definition nearest the reviewed document. The page draws every such id as a link
+with a tooltip; an id no document defines is shown as not defined. Outside an AI-DLC project the form
+has no `ids`, and the output's `ids_note` says why. The form id is
 `<intent>-<stage>[-<unit>]-findings-<YYYYMMDDTHHMM>`, or `code-review-<YYYYMMDDTHHMM>`.
 
 ## Install
