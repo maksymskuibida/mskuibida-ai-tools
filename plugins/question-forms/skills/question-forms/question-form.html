@@ -19,6 +19,14 @@
       terms?: {"NFR": "plain-language meaning", …} — words and abbreviations that get a tooltip
         wherever they appear in the form's text (whole words, case as written). The page knows a
         few common ones itself (AC, API, CI, MVP, NFR, PR, SSO, UI, UX …); terms adds or overrides.
+      ids?: {"FR1.5": "the requirement in one plain line", "ADR-013": {t: "…", target: "path:<repo path>"}, …}
+        — the ids of the intent's documents that the form's text mentions. Every such id is drawn as a
+        link with a tooltip; the page recognises FR, NFR, BR, US, AC, ADR, C, U and WF ids by itself
+        (FR8.9a, US15.1, AC15.1.2, ADR-013, C21, U5) and names their kind, and ids gives the text the
+        tooltip shows and, with target, where the link goes. Any key works, so other kinds of ids can
+        be listed too.
+      records?: "https://github.com/<owner>/<repo>/blob/<branch>/" — the repository's web address at
+        the branch. With it, path: targets, file paths in `code` and the questions file are real links.
     forms/<id>/questions/<qid>       {n: 1, text, ctx?, kind: "single"|"multi",
                                       options: [{k: "A", t: "…"}], other?: false,
                                       proposed?: {k: "A", why: "…"}, hint?, refs?, revNote?}
@@ -303,7 +311,10 @@ section.q.needs-note .note label { color: var(--crit-fg); }
 .cards { display: grid; gap: 10px; padding: 12px; align-content: start; min-height: 72px; }
 .cards:empty { border: 1px dashed var(--control); border-radius: 8px; margin: 12px; padding: 0; }
 .fcard { container-type: inline-size; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 8px; min-width: 0; scroll-margin-top: calc(var(--bar-h) + 16px); }
-.fcard[draggable="true"] { cursor: grab; }
+/* Only the handle drags, so the card's text can be selected and copied. */
+.cgrip { flex: none; align-self: center; display: grid; place-items: center; width: 18px; height: 28px; margin-left: -6px; border-radius: 4px; color: var(--muted); cursor: grab; }
+.cgrip:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.cgrip:active { cursor: grabbing; }
 .fcard.dragging { opacity: .45; }
 .fcard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .fcard.filtered { display: none; }
@@ -458,6 +469,10 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
     "AI-DLC": "AI-driven development life cycle: the staged way this project is planned, designed and built with an agent.",
   };
 
+  /* Ids from the intent's documents (FR1.5, NFR2, BR3, US2.1, AC15.1.2, ADR-013, C21, U5, WF2). The page knows
+     each kind; a form's `ids` gives an id its own text and target. */
+  const ID_KINDS = { FR: "Functional requirement", NFR: "Non-functional requirement", BR: "Business rule", US: "User story", AC: "Acceptance criterion", ADR: "Architecture decision", C: "Component", U: "Unit", WF: "Workflow" };
+  const ID_RE = "(?:NFR|ADR|FR|BR|US|AC|WF|C|U)-?\\d+(?:\\.\\d+)*[a-z]?";
   let db = null, uid = null;
   const view = {
     id: "", unsub: [], form: null, mode: "", boxesKey: "", loaded: false, rendered: new Map(), drag: null,
@@ -497,10 +512,12 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
     if (view.tokens) return view.tokens;
     const ids = [...view.questions.keys()];
     const terms = Object.assign({}, TERMS, (view.form && typeof view.form.terms === "object" && view.form.terms) || {});
-    const words = [...new Set([...ids, ...Object.keys(terms)])].filter(Boolean).sort((a, b) => b.length - a.length).map((w) => reEsc(esc(w)));
+    const docIds = (view.form && view.form.ids && typeof view.form.ids === "object") ? view.form.ids : {};
+    const words = [...new Set([...ids, ...Object.keys(docIds), ...Object.keys(terms)])].filter(Boolean).sort((a, b) => b.length - a.length).map((w) => reEsc(esc(w)));
     if (!isBoard()) words.push("Q\\d+");
-    const re = words.length ? new RegExp(`(?<![\\w-])(${words.join("|")})(?![\\w-])`, "g") : null;
-    view.tokens = { re, ids: new Set(ids), terms };
+    words.push(ID_RE);
+    const re = new RegExp(`(?<![\\w-])(${words.join("|")})(?![\\w-])`, "g");
+    view.tokens = { re, ids: new Set(ids), terms, docIds, idRe: new RegExp(`^${ID_RE}$`) };
     return view.tokens;
   }
   const qLabel = (q) => q ? (q.text || "").replace(/[`*]/g, "") : "";
@@ -513,17 +530,27 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
     }
     return `<a class="ref off" href="#" data-off="1" data-tip="${esc(`Question ${id} is not in this form; it may be in an earlier questions file.`)}">${esc(id)}</a>`;
   }
+  /* An id from the intent's documents: its text from the form's `ids` when given, else its kind. */
+  function docIdRef(id) {
+    const d = tokens().docIds[id], entry = typeof d === "string" ? { t: d } : (d || {});
+    const kind = ID_KINDS[(id.match(/^[A-Z]+/) || [""])[0]] || "";
+    const what = entry.t ? `${kind ? kind + " " : ""}${id}: ${entry.t}` : `${kind || "Id"} ${id}, from the intent’s documents.`;
+    return refHtml({ label: id, tip: what, target: entry.target || "", raw: true });
+  }
   function linkify(html, self) {
     const t = tokens(); if (!t.re) return html;
     /* only text between tags: never inside an attribute or a tag name */
     return html.replace(/(<[^>]+>)|([^<]+)/g, (m, tag, text) => tag ? tag : text.replace(t.re, (w) => {
       const raw = w.replace(/&amp;/g, "&");
-      if (t.ids.has(raw) || /^Q\d+$/.test(raw)) return idRef(raw, self);
+      if (t.ids.has(raw) || (/^Q\d+$/.test(raw) && !t.docIds[raw])) return idRef(raw, self);
+      if (Object.prototype.hasOwnProperty.call(t.docIds, raw) || t.idRe.test(raw)) return docIdRef(raw);
       const tip = t.terms[raw]; return tip ? `<span class="term" tabindex="0" data-tip="${esc(raw + ": " + tip)}">${w}</span>` : w;
     }));
   }
   const PATH = /^(?:[\w.@~-]+\/)+[\w.@~-]+\/?$|^[\w-]+\.(?:md|mdx|ts|tsx|js|jsx|mjs|py|swift|kt|go|rs|rb|java|yml|yaml|json|toml|html|css|scss|sh|sql|csv|txt)$/;
   function code(t) {
+    const url = PATH.test(t) && t.includes("/") ? recordsUrl(t) : "";
+    if (url) return `<a class="ref code" href="${esc(url)}" target="_blank" rel="noopener" data-tip="${esc(`A file in the repository: ${t}. Opens on the code host.`)}">${esc(t)}</a>`;
     if (PATH.test(t) && !/^https?:/.test(t)) return `<a class="ref code off" href="#" data-off="1" data-path="${esc(t)}" data-tip="${esc(`A file in the repository: ${t}. It isn't part of this page.`)}">${esc(t)}</a>`;
     return `<code>${esc(t)}</code>`;
   }
@@ -551,8 +578,17 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
     }
     if (/^https?:\/\//i.test(target)) return `<a class="ref" href="${esc(target)}" target="_blank" rel="noopener" data-tip="${esc((tip || target) + " Opens in a new tab.")}">${esc(label)}</a>`;
     const path = target.indexOf("path:") === 0 ? target.slice(5) : "";
+    const url = path && recordsUrl(path);
+    if (url) return `<a class="ref" href="${esc(url)}" target="_blank" rel="noopener" data-tip="${esc((tip || `A file in the repository: ${path}.`) + " Opens on the code host.")}">${esc(label)}</a>`;
     if (!tip) tip = path ? `A file in the repository: ${path}.` : label;
     return `<a class="ref off" href="#" data-off="1"${path ? ` data-path="${esc(path)}"` : ""} data-tip="${esc(tip + " Not part of this page.")}">${esc(label)}</a>`;
+  }
+  /* forms/<id>.records: the repository's web address at the branch (https://github.com/o/r/blob/main/); with it a
+     repo path becomes a real link. */
+  function recordsUrl(path) {
+    const base = view.form && view.form.records;
+    if (!base || !/^https:\/\//i.test(base)) return "";
+    return base.replace(/\/?$/, "/") + String(path).replace(/^\/+/, "").split("#")[0].split("/").map(encodeURIComponent).join("/") + (String(path).includes("#") ? "#" + encodeURIComponent(String(path).split("#")[1]) : "");
   }
   const refsHtml = (q, lead) => Array.isArray(q.refs) && q.refs.length ? `<div class="refs"><span>${esc(lead)}</span>${q.refs.map(refHtml).join("")}</div>` : "";
 
@@ -634,7 +670,7 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
     const f = view.form, head = $("head"); if (!f || !head) return;
     const done = f.status === "done", n = view.questions.size, a = [...view.questions.keys()].filter(answered).length;
     const lede = f.intro || (f.view === "board"
-      ? "Each card starts in the box Claude suggests. Move it with its buttons or by dragging; Done saves where every card sits."
+      ? "Each card starts in the box Claude suggests. Move it with its buttons or by dragging its handle (⠿); Done saves where every card sits."
       : "Nothing is pre-selected. Pick an option or write your own; a note is optional unless you choose Other. Answers save as you go.");
     const facts = isBoard()
       ? `<div class="fact"><span>Cards</span><b>${n}</b></div><div class="fact"><span>Moved</span><b>${movedCount()}</b></div><div class="fact"><span>With a note</span><b>${notedCount()}</b></div>`
@@ -856,9 +892,9 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
   }
   const CHEV = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   function renderCard(q) {
-    const c = document.createElement("article"); c.className = "fcard"; c.id = "q-" + q.id; c.dataset.qid = q.id; c.draggable = true; c.tabIndex = -1;
+    const c = document.createElement("article"); c.className = "fcard"; c.id = "q-" + q.id; c.dataset.qid = q.id; c.tabIndex = -1;
     c.setAttribute("aria-labelledby", "ct-" + q.id);
-    c.innerHTML = `<div class="chead"><span class="qid" tabindex="0" data-tip="${esc(`Card ${q.id}. Use it when you mention this card in chat.`)}">${esc(q.id)}</span><h4 class="ctitle" id="ct-${esc(q.id)}">${inline(q.text, q.id)}</h4>
+    c.innerHTML = `<div class="chead"><span class="cgrip" draggable="true" data-tip="Drag to another box; the move buttons do the same." aria-hidden="true"><svg viewBox="0 0 10 16" width="10" height="16"><g fill="currentColor"><circle cx="2.5" cy="3" r="1.4"/><circle cx="7.5" cy="3" r="1.4"/><circle cx="2.5" cy="8" r="1.4"/><circle cx="7.5" cy="8" r="1.4"/><circle cx="2.5" cy="13" r="1.4"/><circle cx="7.5" cy="13" r="1.4"/></g></svg></span><span class="qid" tabindex="0" data-tip="${esc(`Card ${q.id}. Use it when you mention this card in chat.`)}">${esc(q.id)}</span><h4 class="ctitle" id="ct-${esc(q.id)}">${inline(q.text, q.id)}</h4>
         <span class="cflags"><span class="qfresh"></span><span class="qstate"></span></span>
         <button type="button" class="cexp" aria-expanded="false" aria-controls="cd-${esc(q.id)}" aria-label="Details of ${esc(qLabel(q))}">${CHEV}</button></div>
       ${q.plain ? `<p class="plain">${inline(q.plain, q.id)}</p>` : ""}
@@ -878,12 +914,13 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
     if (view.expanded.has(q.id)) setOpen(c, true);
     c.querySelector(".cexp").addEventListener("click", () => setOpen(c, !c.classList.contains("open")));
     c.querySelector(".addnote").addEventListener("click", () => { c.classList.add("noting"); c.querySelector("textarea").focus(); });
-    c.addEventListener("dragstart", (e) => { view.drag = q.id; c.classList.add("dragging"); hideTip(); e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", q.id); } catch {}
+    /* The drag starts on the handle but carries the whole card's image. */
+    const grip = c.querySelector(".cgrip");
+    grip.addEventListener("dragstart", (e) => { view.drag = q.id; c.classList.add("dragging"); hideTip(); e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", q.id); } catch {}
+      try { const r = c.getBoundingClientRect(); e.dataTransfer.setDragImage(c, e.clientX - r.left, e.clientY - r.top); } catch {}
       document.querySelectorAll(".box").forEach((b) => b.classList.toggle("no-drop", b.dataset.box !== boxOf(q.id) && !allowed(q, b.dataset.box))); });
-    c.addEventListener("dragend", () => { view.drag = null; c.classList.remove("dragging"); document.querySelectorAll(".box.over, .box.no-drop").forEach((b) => b.classList.remove("over", "no-drop")); });
+    grip.addEventListener("dragend", () => { view.drag = null; c.classList.remove("dragging"); document.querySelectorAll(".box.over, .box.no-drop").forEach((b) => b.classList.remove("over", "no-drop")); });
     const ta = c.querySelector("textarea");
-    ta.addEventListener("focus", () => { c.draggable = false; });
-    ta.addEventListener("blur", () => { c.draggable = true; });
     ta.addEventListener("input", () => collect(q.id));
     c.querySelector(".moves").addEventListener("click", (e) => { const to = e.target.closest(".move")?.dataset.to; if (to) place(q.id, to, true); });
     return c;

@@ -66,6 +66,15 @@ badges, and links. None of it needs extra rows; these optional fields make it be
   tooltip wherever they appear. The page knows common ones (AC, API, CI, MVP, NFR, PR, SSO, UI …);
   add the project's own (a Unit name, a domain word).
 - `revNote` on a question — one line on why a follow-up was added or a question changed.
+- `ids: {"<id>": "<one plain line>" | {t, target}}` on the form — **every** id of the intent's
+  documents that the form's text mentions (`FR1.5`, `NFR2`, `BR3`, `US2.1`, `AC15.1.2`, `ADR-013`,
+  `C21`, `U5`, …), with its text in one plain line, copied from the document that defines it, and
+  `target: "path:<repo path>#<heading anchor>"` where it is defined. The page draws every id as a
+  link with a tooltip anyway; without `ids` the tooltip only names the id's kind. Write `ids` in
+  the same batch as the questions, and add to it when a changed question mentions a new id.
+- `records: "https://github.com/<owner>/<repo>/blob/<branch>/"` on the form, when the repository is
+  on a code host — `path:` targets, file paths in `` `code` `` and the questions file then open
+  there. Leave it out for a repository with no web address.
 
 Ids of other questions in the form's text (`Q5`, `R-06`) become links by themselves, and a
 `` `code` `` span that is a file path becomes a file link; write them as you would anyway. In
@@ -99,7 +108,8 @@ One `ArtifactData` `get` of `forms/<id>`. `answers[qid]` is `{k: [letters], note
 When the developer has to sort items rather than answer questions — a pull request review, on both
 sides (`pr-review` plugin: `review-pr` for the reviewer, `address-review` for the author, both followed by § 5b; `self-review` for the author's own AI review pass, a Fix now / Dismiss board that gets the form check of § 5b A and is not part of the flow guard) — the form is a board: 2–4 boxes
 side by side on a wide page, stacked on a narrow one, each item a card that starts in the box the
-agent proposes and can be moved by button or drag.
+agent proposes and can be moved by its buttons or by dragging its handle; the rest of the card is
+plain text that can be selected and copied.
 
 - `forms/<id>` adds `view: "board"` and `boxes: [{k, t, hint?, tone?, group?, sink?}]`; `tone` is
   `ink`, `accent`, `warn` or `muted`. The box labels are data, written by the skill that opens the
