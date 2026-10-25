@@ -51,9 +51,14 @@ var AidlcIds = (function () {
     var prefixes = {};
     Object.keys(ids).forEach(function (k) { prefixes[prefix(k)] = true; });
     Object.keys(KINDS).forEach(function (k) { prefixes[k] = true; });
+    // Keys of the page's own map that are not id-shaped (a form's q1, a card's f-3) are linked by their exact text.
+    var own = Object.keys(ids).filter(function (k) { return !/^[A-Z]/.test(k) && /^[\w.-]+$/.test(k); })
+      .sort(function (a, b) { return b.length - a.length; })
+      .map(function (k) { return k.replace(/[.-]/g, "\\$&"); });
+    var OWN = own.length ? new RegExp("(^|[^\\w-])(" + own.join("|") + ")(?![\\w-])", "g") : null;
     var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode: function (n) {
-        if (!n.nodeValue || !/[A-Z]-?\d/.test(n.nodeValue)) return NodeFilter.FILTER_REJECT;
+        if (!n.nodeValue || !(OWN ? /\d/ : /[A-Z]-?\d/).test(n.nodeValue)) return NodeFilter.FILTER_REJECT;
         var p = n.parentElement;
         return p && !p.closest(SKIP) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
       }
@@ -62,11 +67,19 @@ var AidlcIds = (function () {
     while (walker.nextNode()) nodes.push(walker.currentNode);
     nodes.forEach(function (node) {
       var text = node.nodeValue, last = 0, frag = null, m;
-      var own = node.parentElement.closest("[data-aidlc-id]");
-      ID.lastIndex = 0;
-      while ((m = ID.exec(text))) {
-        var word = m[2], start = m.index + m[1].length;
-        if (!isId(word, ids, prefixes) || (own && own.getAttribute("data-aidlc-id") === word)) continue;
+      var self = node.parentElement.closest("[data-aidlc-id]");
+      var found = [];
+      [ID, OWN].forEach(function (re) {
+        if (!re) return;
+        re.lastIndex = 0;
+        while ((m = re.exec(text))) found.push({ word: m[2], start: m.index + m[1].length, own: re === OWN });
+      });
+      found.sort(function (a, b) { return a.start - b.start; });
+      for (var i = 0; i < found.length; i++) {
+        var word = found[i].word, start = found[i].start;
+        if (start < last) continue;
+        if (!found[i].own && !isId(word, ids, prefixes)) continue;
+        if (self && self.getAttribute("data-aidlc-id") === word) continue;
         frag = frag || document.createDocumentFragment();
         frag.appendChild(document.createTextNode(text.slice(last, start)));
         var a = document.createElement("a");
