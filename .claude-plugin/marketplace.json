@@ -77,6 +77,12 @@
       "source": "./plugins/aidlc-patches",
       "description": "For people who patch the AI-DLC engine in their own fork of awslabs/aidlc-workflows: investigate a bug to a failing test, check upstream first, keep the fork as an upstream release plus one commit per patch, release previews numbered from .101, pin projects to them, and send fixes upstream. Remembers your forks across plugin updates.",
       "version": "0.1.0"
+    },
+    {
+      "name": "aidlc-ids",
+      "source": "./plugins/aidlc-ids",
+      "description": "For AI-DLC projects: keeps the project's own id map (US, AC, FR, NFR, BR, Q, U, C, E, ADR, R and the rest), outside the project; /aidlc-ids:sync builds or refreshes it without a model turn, and the plugins' pages read it so every id they show is a link with a tooltip.",
+      "version": "0.1.0"
     }
   ]
 }
