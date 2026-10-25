@@ -19,14 +19,14 @@
       terms?: {"NFR": "plain-language meaning", …} — words and abbreviations that get a tooltip
         wherever they appear in the form's text (whole words, case as written). The page knows a
         few common ones itself (AC, API, CI, MVP, NFR, PR, SSO, UI, UX …); terms adds or overrides.
-      ids?: {"FR1.5": "the requirement in one plain line", "ADR-013": {t: "…", target: "path:<repo path>"}, …}
-        — the ids of the intent's documents that the form's text mentions. Every such id is drawn as a
-        link with a tooltip; the page recognises FR, NFR, BR, US, AC, ADR, C, U and WF ids by itself
-        (FR8.9a, US15.1, AC15.1.2, ADR-013, C21, U5) and names their kind, and ids gives the text the
-        tooltip shows and, with target, where the link goes. Any key works, so other kinds of ids can
-        be listed too.
+      ids?: {"<id>": {kind, title, text, doc, line}} — what each id the form's text mentions is: the output
+        of the shared `aidlc_ids.py refs` (shared/aidlc-ids/README.md is its contract). The shared AidlcIds
+        script links every id in the page with a tooltip: a live jump when the id is a question or card on
+        this page (each carries data-aidlc-id), dotted when it is defined elsewhere, dashed when no
+        document defines it — a form without ids still gets every id-shaped word linked, as not defined.
       records?: "https://github.com/<owner>/<repo>/blob/<branch>/" — the repository's web address at
-        the branch. With it, path: targets, file paths in `code` and the questions file are real links.
+        the branch. With it, refs' path: targets, file paths in `code` and the questions file are real links
+        (ids keep the shared tooltip and toast).
     forms/<id>/questions/<qid>       {n: 1, text, ctx?, kind: "single"|"multi",
                                       options: [{k: "A", t: "…"}], other?: false,
                                       proposed?: {k: "A", why: "…"}, hint?, refs?, revNote?}
@@ -50,10 +50,9 @@
       title, stage, file, intro, refs[].label/tip — plain text.
       Not rendered: •, –, numbered or nested lists, headings, links, _italic_; they show as
       literal text. A sentence before a list needs a blank line, or the list stays plain lines.
-      Linked by the page itself: an id of another question or card of this form written in any
-      rendered text (Q5, R-06) becomes a live link to it; on a question list, a Q<n> that is not
-      in this form is shown as a link that says so. A `code` span that is a file path is shown as
-      a file link (the file is not in this page). Terms get a tooltip.
+      Linked by the page itself: every id in any rendered text (Q5, R-06, FR1.4, US2.1 …) becomes a
+      link with a tooltip (the shared AidlcIds script, from `ids`). A `code` span that is a file path
+      is shown as a file link. Terms get a tooltip.
 
     Text question — no options, only a text field (no Other):
     forms/<id>/questions/<qid>       {n, text, ctx?, kind: "text", hint?, proposed?: {t: "…"}, refs?}
@@ -429,6 +428,19 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
   .meter { width: 64px; }
   .wide-only { display: none; }
 }
+/* aidlc-ids.css:begin */
+/* Shared: the canonical copy is shared/aidlc-ids/aidlc-ids.css; scripts/sync-shared.py copies it into every page.
+   It uses the page's own tokens: --accent, --muted, --tip-bg (each page defines them). */
+a.aidlc-id { color: var(--accent, currentColor); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; cursor: pointer; white-space: nowrap; font-variant-numeric: tabular-nums; }
+a.aidlc-id:hover, a.aidlc-id:focus-visible { text-decoration-thickness: 2px; }
+a.aidlc-id.aidlc-id-out { text-decoration-style: dotted; }
+a.aidlc-id.aidlc-id-unknown { color: var(--muted, currentColor); text-decoration-style: dashed; }
+a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outline-offset: 2px; border-radius: 3px; }
+[data-aidlc-id] { scroll-margin-top: 96px; }
+@keyframes aidlc-flash { from { box-shadow: 0 0 0 3px var(--accent, #3b82f6); } to { box-shadow: 0 0 0 3px transparent; } }
+.aidlc-flash { animation: aidlc-flash 1.6s ease-out; border-radius: 6px; }
+@media (prefers-reduced-motion: reduce) { .aidlc-flash { animation: none; outline: 2px solid var(--accent, #3b82f6); } }
+/* aidlc-ids.css:end */
 </style>
 
 <div class="wrap" id="wrap">
@@ -438,6 +450,149 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <div id="live" class="sr" aria-live="polite"></div>
 
+<script>
+/* aidlc-ids.js:begin */
+/* The ids an AI-DLC page shows (US1.1, AC1.1.2, FR1.4, NFR3, BR1.2, Q4, U31, C2, ADR-009, R-01, ...), each a link with
+   a tooltip saying what it is. Shared: the canonical copy is shared/aidlc-ids/aidlc-ids.js in mskuibida-ai-tools,
+   copied into every page by scripts/sync-shared.py. Edit it there.
+
+   The page gives it a map of what each id is, `ids` = {"FR1.4": {kind, title, text, doc}}, the output of
+   `aidlc_ids.py refs` written with the page's data, and marks each element that shows an id's own definition with
+   data-aidlc-id="<id>". Then:
+
+     AidlcIds.linkify(root, ids, { toast: fn })   turn every id in root's text into a link; run after each render
+     AidlcIds.observe(root, getIds, { toast: fn }) the same, again whenever root's content changes
+
+   A link whose id is shown in the page jumps there and flashes it. One that is not shown still looks like a link: its
+   tooltip says what it is, and a click shows a toast that it is not in this page. An id no document defines says so.
+   The tooltip is the page's own: the link carries data-tip and aria-label, which every page's tooltip reads. */
+var AidlcIds = (function () {
+  "use strict";
+  var ID = /(^|[^\w-])([A-Z][A-Z]{0,4}-?\d+[a-z]?(?:[.-]\d+[a-z]?)*(?:-[A-Z]{1,4}\d+[a-z]?)?)(?![\w-])/g;
+  var NOT_IDS = /^(UTF-?\d+|SHA-?\d+|ISO-?\d+|RFC-?\d+|HTTP-?\d+|TLS-?\d|H[1-6]|V\d+|X\d+|P\d|ES\d+|ID\d*)$/;
+  var KINDS = { US: "Story", AC: "Acceptance criterion", FR: "Functional requirement", NFR: "Non-functional requirement",
+    BR: "Business rule", Q: "Question", U: "Unit", C: "Contract", E: "External interface", ADR: "Decision record",
+    R: "Review finding", D: "Decision", DR: "Design rule", S: "Screen", M: "Mockup", T: "Task" };
+  var SKIP = "a, button, code, pre, script, style, textarea, input, select, option, [data-aidlc-noids]";
+
+  function prefix(id) { return (/^[A-Z]+/.exec(id) || [""])[0]; }
+  function docName(doc) { return String(doc || "").split("/").pop(); }
+
+  function anchorOf(id) {
+    var css = window.CSS && CSS.escape ? CSS.escape(id) : id.replace(/["\\]/g, "\\$&");
+    return document.querySelector('[data-aidlc-id="' + css + '"]');
+  }
+
+  /** The tooltip of an id: what it is, in plain words, and where it is written. */
+  function tip(id, def) {
+    if (!def) return id + ": not found in this project's documents.";
+    var kind = def.kind || KINDS[prefix(id)] || "";
+    var head = (kind ? kind + " " : "") + id + (def.title ? ": " + def.title : "");
+    var body = def.text && def.text !== def.title ? " " + def.text : "";
+    return head + (/[.!?…]$/.test(head) || !body ? "" : ".") + body + (def.doc ? " (" + docName(def.doc) + ")" : "");
+  }
+
+  /** Whether a word is an id this page knows of, or looks like one of a kind it knows. */
+  function isId(word, ids, prefixes) {
+    if (NOT_IDS.test(word)) return false;
+    return Object.prototype.hasOwnProperty.call(ids, word) || prefixes[prefix(word)] === true;
+  }
+
+  function linkify(root, ids, opts) {
+    if (!root) return;
+    ids = ids || {};
+    opts = opts || {};
+    var prefixes = {};
+    Object.keys(ids).forEach(function (k) { prefixes[prefix(k)] = true; });
+    Object.keys(KINDS).forEach(function (k) { prefixes[k] = true; });
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (n) {
+        if (!n.nodeValue || !/[A-Z]-?\d/.test(n.nodeValue)) return NodeFilter.FILTER_REJECT;
+        var p = n.parentElement;
+        return p && !p.closest(SKIP) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      }
+    });
+    var nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(function (node) {
+      var text = node.nodeValue, last = 0, frag = null, m;
+      var own = node.parentElement.closest("[data-aidlc-id]");
+      ID.lastIndex = 0;
+      while ((m = ID.exec(text))) {
+        var word = m[2], start = m.index + m[1].length;
+        if (!isId(word, ids, prefixes) || (own && own.getAttribute("data-aidlc-id") === word)) continue;
+        frag = frag || document.createDocumentFragment();
+        frag.appendChild(document.createTextNode(text.slice(last, start)));
+        var a = document.createElement("a");
+        var def = ids[word];
+        a.className = "aidlc-id" + (def ? "" : " aidlc-id-unknown");
+        a.href = "#" + encodeURIComponent(word);
+        a.textContent = word;
+        a.setAttribute("data-aidlc-ref", word);
+        a.setAttribute("data-tip", tip(word, def));
+        a.setAttribute("aria-label", tip(word, def));
+        frag.appendChild(a);
+        last = start + word.length;
+      }
+      if (frag) {
+        frag.appendChild(document.createTextNode(text.slice(last)));
+        node.parentNode.replaceChild(frag, node);
+      }
+    });
+    markLive(root);
+    bind(root, opts);
+  }
+
+  /** Links whose id is shown in the page get the live look; the rest the out-of-page one. */
+  function markLive(root) {
+    Array.prototype.forEach.call(root.querySelectorAll("a.aidlc-id"), function (a) {
+      a.classList.toggle("aidlc-id-out", !anchorOf(a.getAttribute("data-aidlc-ref")));
+    });
+  }
+
+  function bind(root, opts) {
+    if (root.__aidlcIds) { root.__aidlcIds.opts = opts; return; }
+    root.__aidlcIds = { opts: opts };
+    root.addEventListener("click", function (e) {
+      var a = e.target.closest && e.target.closest("a.aidlc-id");
+      if (!a || !root.contains(a)) return;
+      e.preventDefault();
+      var id = a.getAttribute("data-aidlc-ref"), target = anchorOf(id);
+      var say = root.__aidlcIds.opts.toast || function (t) { window.alert(t); };
+      if (target) {
+        var closed = target.closest("details:not([open])");
+        if (closed) closed.open = true;
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+        target.classList.remove("aidlc-flash");
+        void target.offsetWidth;
+        target.classList.add("aidlc-flash");
+        if (target.tabIndex < 0 && !target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+        target.focus({ preventScroll: true });
+      } else if (a.classList.contains("aidlc-id-unknown")) {
+        say(id + " isn't defined in this project's documents.");
+      } else {
+        say(id + " isn't in this page. What it is: in its tooltip.");
+      }
+    });
+  }
+
+  function observe(root, getIds, opts) {
+    if (!root) return;
+    var busy = false;
+    var run = function () {
+      if (busy) return;
+      busy = true;
+      try { linkify(root, getIds(), opts); } finally { busy = false; }
+    };
+    run();
+    new MutationObserver(function () { if (!busy) window.requestAnimationFrame(run); })
+      .observe(root, { childList: true, subtree: true, characterData: true });
+  }
+
+  return { linkify: linkify, observe: observe, tip: tip, KINDS: KINDS };
+})();
+/* aidlc-ids.js:end */
+</script>
 <script>
 (() => {
   "use strict";
@@ -469,10 +624,6 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
     "AI-DLC": "AI-driven development life cycle: the staged way this project is planned, designed and built with an agent.",
   };
 
-  /* Ids from the intent's documents (FR1.5, NFR2, BR3, US2.1, AC15.1.2, ADR-013, C21, U5, WF2). The page knows
-     each kind; a form's `ids` gives an id its own text and target. */
-  const ID_KINDS = { FR: "Functional requirement", NFR: "Non-functional requirement", BR: "Business rule", US: "User story", AC: "Acceptance criterion", ADR: "Architecture decision", C: "Component", U: "Unit", WF: "Workflow" };
-  const ID_RE = "(?:NFR|ADR|FR|BR|US|AC|WF|C|U)-?\\d+(?:\\.\\d+)*[a-z]?";
   let db = null, uid = null;
   const view = {
     id: "", unsub: [], form: null, mode: "", boxesKey: "", loaded: false, rendered: new Map(), drag: null,
@@ -507,43 +658,31 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
   }
   function toast(text) { toastEl.textContent = text; toastEl.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => { toastEl.hidden = true; }, 3200); }
 
-  /* ---------- text: the Markdown subset, with links to this form's ids and tooltips on terms ---------- */
+  /* ---------- text: the Markdown subset, with tooltips on terms ----------
+     Ids (FR1.4, US2.1, Q3, R-05, …) are not matched here: the shared AidlcIds script links every id in the page,
+     the same way on every plugin's page, from the form's `ids` map and the questions and cards on the page. */
   function tokens() {
     if (view.tokens) return view.tokens;
-    const ids = [...view.questions.keys()];
     const terms = Object.assign({}, TERMS, (view.form && typeof view.form.terms === "object" && view.form.terms) || {});
-    const docIds = (view.form && view.form.ids && typeof view.form.ids === "object") ? view.form.ids : {};
-    const words = [...new Set([...ids, ...Object.keys(docIds), ...Object.keys(terms)])].filter(Boolean).sort((a, b) => b.length - a.length).map((w) => reEsc(esc(w)));
-    if (!isBoard()) words.push("Q\\d+");
-    words.push(ID_RE);
-    const re = new RegExp(`(?<![\\w-])(${words.join("|")})(?![\\w-])`, "g");
-    view.tokens = { re, ids: new Set(ids), terms, docIds, idRe: new RegExp(`^${ID_RE}$`) };
+    const words = Object.keys(terms).filter(Boolean).sort((a, b) => b.length - a.length).map((w) => reEsc(esc(w)));
+    const re = words.length ? new RegExp(`(?<![\\w-])(${words.join("|")})(?![\\w-])`, "g") : null;
+    view.tokens = { re, terms, ids: null };
     return view.tokens;
   }
   const qLabel = (q) => q ? (q.text || "").replace(/[`*]/g, "") : "";
-  function idRef(id, self) {
-    const t = tokens(), q = view.questions.get(id);
-    if (q) {
-      if (id === self) return esc(id);
-      const kind = q.kind === "card" ? "Card" : "Question";
-      return `<a class="ref" href="#" data-jump="q-${esc(id)}" data-tip="${esc(`${kind} ${id}: ${qLabel(q)}. Press to go there.`)}">${esc(id)}</a>`;
-    }
-    return `<a class="ref off" href="#" data-off="1" data-tip="${esc(`Question ${id} is not in this form; it may be in an earlier questions file.`)}">${esc(id)}</a>`;
-  }
-  /* An id from the intent's documents: its text from the form's `ids` when given, else its kind. */
-  function docIdRef(id) {
-    const d = tokens().docIds[id], entry = typeof d === "string" ? { t: d } : (d || {});
-    const kind = ID_KINDS[(id.match(/^[A-Z]+/) || [""])[0]] || "";
-    const what = entry.t ? `${kind ? kind + " " : ""}${id}: ${entry.t}` : `${kind || "Id"} ${id}, from the intent’s documents.`;
-    return refHtml({ label: id, tip: what, target: entry.target || "", raw: true });
+  /* What AidlcIds links from: the form's `ids` (aidlc_ids.py refs), and every question or card shown here. */
+  function idMap() {
+    const t = tokens(); if (t.ids) return t.ids;
+    const own = (view.form && view.form.ids && typeof view.form.ids === "object") ? view.form.ids : {};
+    const map = Object.assign({}, own);
+    qsAll().forEach((q) => { map[q.id] = Object.assign({}, own[q.id] || {}, { kind: q.kind === "card" ? "Card" : "Question", title: qLabel(q), text: "", doc: "" }); });
+    t.ids = map; return map;
   }
   function linkify(html, self) {
     const t = tokens(); if (!t.re) return html;
     /* only text between tags: never inside an attribute or a tag name */
     return html.replace(/(<[^>]+>)|([^<]+)/g, (m, tag, text) => tag ? tag : text.replace(t.re, (w) => {
       const raw = w.replace(/&amp;/g, "&");
-      if (t.ids.has(raw) || (/^Q\d+$/.test(raw) && !t.docIds[raw])) return idRef(raw, self);
-      if (Object.prototype.hasOwnProperty.call(t.docIds, raw) || t.idRe.test(raw)) return docIdRef(raw);
       const tip = t.terms[raw]; return tip ? `<span class="term" tabindex="0" data-tip="${esc(raw + ": " + tip)}">${w}</span>` : w;
     }));
   }
@@ -643,10 +782,12 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
     loadMarks(id);
     view.unsub.push(ref.onSnapshot((snap) => {
       if (!snap.exists) { view.form = null; app.innerHTML = `<div class="card msg"><b>No such form</b><p>Nothing is stored under this id. Check the link Claude gave you, or go back to <a href="#" data-home="1">all forms</a>.</p></div>`; return; }
-      const f = snap.data(), termsChanged = JSON.stringify((view.form || {}).terms || null) !== JSON.stringify(f.terms || null);
-      view.form = f; if (termsChanged) { view.tokens = null; view.rendered = new Map(); }
+      const f = snap.data(), old = view.form || {}, textChanged = JSON.stringify([old.terms || null, old.ids || null]) !== JSON.stringify([f.terms || null, f.ids || null]);
+      view.form = f; if (textChanged) { view.tokens = null; view.rendered = new Map(); }
       document.title = (f.title || id) + " · AI-DLC question forms";
       layout();
+      /* a new `ids` map: draw the questions again, so their id links carry the new tooltips */
+      if (textChanged && view.loaded) sync();
       const remote = f.answers || {};
       for (const [qid, a] of Object.entries(remote)) { if (!view.pending[qid] && !(view.touched[qid] && Date.now() - view.touched[qid] < 2000)) { view.answers[qid] = a; paintAnswer(qid); } }
       if (!view.inflight && !Object.keys(view.pending).length && view.save.state !== "fail") view.save = { state: Object.keys(remote).length ? "ok" : "idle", at: latest(remote), msg: "" };
@@ -656,7 +797,7 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
       const next = new Map(); snap.docs.forEach((d) => next.set(d.id, { id: d.id, ...d.data() }));
       const idsChanged = [...next.keys()].join("|") !== [...view.questions.keys()].join("|");
       view.questions = next; view.loaded = true;
-      if (idsChanged) { view.tokens = null; view.rendered = new Map(); }
+      if (idsChanged) { view.tokens = null; view.rendered = new Map(); } else if (view.tokens) view.tokens.ids = null;
       baseline(); sync();
     }, () => setSave("fail", "Couldn’t load the questions. Reload the page.")));
   }
@@ -892,7 +1033,7 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
   }
   const CHEV = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   function renderCard(q) {
-    const c = document.createElement("article"); c.className = "fcard"; c.id = "q-" + q.id; c.dataset.qid = q.id; c.tabIndex = -1;
+    const c = document.createElement("article"); c.className = "fcard"; c.id = "q-" + q.id; c.dataset.qid = q.id; c.dataset.aidlcId = q.id; c.tabIndex = -1;
     c.setAttribute("aria-labelledby", "ct-" + q.id);
     c.innerHTML = `<div class="chead"><span class="cgrip" draggable="true" data-tip="Drag to another box; the move buttons do the same." aria-hidden="true"><svg viewBox="0 0 10 16" width="10" height="16"><g fill="currentColor"><circle cx="2.5" cy="3" r="1.4"/><circle cx="7.5" cy="3" r="1.4"/><circle cx="2.5" cy="8" r="1.4"/><circle cx="7.5" cy="8" r="1.4"/><circle cx="2.5" cy="13" r="1.4"/><circle cx="7.5" cy="13" r="1.4"/></g></svg></span><span class="qid" tabindex="0" data-tip="${esc(`Card ${q.id}. Use it when you mention this card in chat.`)}">${esc(q.id)}</span><h4 class="ctitle" id="ct-${esc(q.id)}">${inline(q.text, q.id)}</h4>
         <span class="cflags"><span class="qfresh"></span><span class="qstate"></span></span>
@@ -1007,7 +1148,7 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
 
   /* ---------- question list ---------- */
   function qShell(q, body) {
-    const s = document.createElement("section"); s.className = "card q"; s.id = "q-" + q.id; s.dataset.qid = q.id;
+    const s = document.createElement("section"); s.className = "card q"; s.id = "q-" + q.id; s.dataset.qid = q.id; s.dataset.aidlcId = q.id;
     s.setAttribute("aria-labelledby", "qt-" + q.id);
     s.innerHTML = `<div class="qhead"><span class="qid" tabindex="0" data-tip="${esc(`Question ${q.id} in the questions file. Use it when you mention this question in chat.`)}">${esc(q.id)}</span><h2 id="qt-${esc(q.id)}">${inline(q.text, q.id)}</h2>
         <span class="qtags"><span class="qfresh"></span><span class="qstate"></span></span></div>
@@ -1135,7 +1276,7 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
   }
   function unanswered() { return ordered().map((q) => q.id).filter((qid) => !answered(qid)); }
   function missingNotes() { return ordered().map((q) => q.id).filter(needsNote); }
-  const idList = (ids) => (ids.length > 4 ? ids.slice(0, 4) : ids).map((q) => idRef(q)).join(", ") + (ids.length > 4 ? ` and ${ids.length - 4} more` : "");
+  const idList = (ids) => (ids.length > 4 ? ids.slice(0, 4) : ids).map(esc).join(", ") + (ids.length > 4 ? ` and ${ids.length - 4} more` : "");
 
   async function done() {
     if (!db || !view.id || view.closing) return;
@@ -1198,7 +1339,7 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
     if (fl) { view.filter = view.filter === fl.dataset.filter && fl.dataset.filter !== "all" ? "all" : fl.dataset.filter; applyFilter(); paintBar(); return; }
     const act = e.target.closest("[data-act]")?.dataset.act;
     if (!act) {
-      const t = e.target.closest(".term[data-tip], .tag[data-tip], .qid[data-tip]");
+      const t = e.target.closest(".term[data-tip], .tag[data-tip], .qid[data-tip], a.aidlc-id[data-tip]");
       if (t) showTip(t);
       return;
     }
@@ -1209,10 +1350,18 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
     else if (act === "collapse") setAllOpen(false);
     else if (act === "allseen") markSeen(qsAll().map((q) => q.id));
   });
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest && e.target.closest("a.aidlc-id"); if (!a) return;
+    const id = a.getAttribute("data-aidlc-ref"), node = id && document.getElementById("q-" + id);
+    if (!node) return;
+    if (node.classList.contains("filtered")) { view.filter = "all"; applyFilter(); paintBar(); }
+    if (node.classList.contains("fcard") && !node.classList.contains("open")) setOpen(node, true);
+  }, true);
   window.addEventListener("beforeunload", (e) => { if (Object.keys(view.pending).length || view.inflight) { flush(); e.preventDefault(); e.returnValue = ""; } });
 
   /* ---------- boot ---------- */
   function route() { const id = formId(); if (id) showForm(id); else showIndex(); }
+  AidlcIds.observe(app, idMap, { toast });
   window.addEventListener("hashchange", route);
   (async () => {
     const use = window.claude && typeof window.claude.use === "function" ? window.claude.use : null;

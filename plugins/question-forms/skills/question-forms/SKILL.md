@@ -66,18 +66,29 @@ badges, and links. None of it needs extra rows; these optional fields make it be
   tooltip wherever they appear. The page knows common ones (AC, API, CI, MVP, NFR, PR, SSO, UI …);
   add the project's own (a Unit name, a domain word).
 - `revNote` on a question — one line on why a follow-up was added or a question changed.
-- `ids: {"<id>": "<one plain line>" | {t, target}}` on the form — **every** id of the intent's
-  documents that the form's text mentions (`FR1.5`, `NFR2`, `BR3`, `US2.1`, `AC15.1.2`, `ADR-013`,
-  `C21`, `U5`, …), with its text in one plain line, copied from the document that defines it, and
-  `target: "path:<repo path>#<heading anchor>"` where it is defined. The page draws every id as a
-  link with a tooltip anyway; without `ids` the tooltip only names the id's kind. Write `ids` in
-  the same batch as the questions, and add to it when a changed question mentions a new id.
+- `ids` on the form — what every id in the form's text is, from the shared id map (below).
 - `records: "https://github.com/<owner>/<repo>/blob/<branch>/"` on the form, when the repository is
-  on a code host — `path:` targets, file paths in `` `code` `` and the questions file then open
-  there. Leave it out for a repository with no web address.
+  on a code host — `refs` with `path:` targets, file paths in `` `code` `` and the questions file
+  then open there. Leave it out for a repository with no web address. Ids don't use it: they keep
+  the shared tooltip.
 
-Ids of other questions in the form's text (`Q5`, `R-06`) become links by themselves, and a
-`` `code` `` span that is a file path becomes a file link; write them as you would anyway. In
+**Ids: the `ids` map.** Every id in the page's text (`US1.1`, `AC1.1.2`, `FR1.4`, `NFR3`, `BR1.2`,
+`Q4`, `U31`, `C2`, `E7`, `ADR-009`, `R-01` and every kind the project's documents define) is a link
+with a tooltip, found by the shared `aidlc-ids` piece the same way on every plugin's page
+(`shared/aidlc-ids/README.md` in this repository is the contract). Before the batch that opens or
+changes a form:
+
+1. `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/aidlc_ids.py" sync` — keeps the checkout's id map, outside
+   the project; fast when nothing changed.
+2. Write all the text you put into the form (titles, `text`, `ctx`, options, hints, proposals, a
+   board's cards) into one scratch file, and run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/aidlc_ids.py"
+   refs --text-file <that file> --near <the questions file>`.
+3. Store its output, `{id: {kind, title, text, doc, line}}`, as the form's `ids` in the same batch.
+   When a later change adds text with a new id, run `refs` again and update `ids` with it.
+
+The page links ids to questions and cards it shows by itself (a live jump), and shows an id no
+document defines as not defined; a form opened before `ids` existed still gets every id linked,
+as not defined. A `` `code` `` span that is a file path becomes a file link. In
 `text`, `from`, `plain` and option labels say things in words, not by id: "Guests can't tell
 which dish is vegan", not "AC 3 of US2.1"; put the id in `refs`.
 
