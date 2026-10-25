@@ -46,13 +46,13 @@
       "name": "story-points",
       "source": "./plugins/story-points",
       "description": "For AI-DLC projects: keeps each intent's unit-points.csv (read by project-panel) with the developers' story-point estimates, typed with /story-points:set, picked in a review form with /story-points:review, or synced from Jira when the project's .story-points.json names a tracker; checks a Unit is estimated before it is claimed.",
-      "version": "2.1.0"
+      "version": "2.2.0"
     },
     {
       "name": "approval-gates",
       "source": "./plugins/approval-gates",
       "description": "For AI-DLC projects: at every approval gate the stage's documents, the review brief and the completion summary become one page in the developer's private artifact, linked from the gate question, with a purpose-built view per document kind (entities, rules, components, units, stories, requirements, decisions, contracts, bolts, traceability) and ids linked across documents; a hook refuses the Approval question and the approved or rejected report until the page exists. Notes left in the page come back to the agent. Under the unit-end rhythm a Unit gets two pages instead: the plan page (every design stage, read once) and the unit-end page (what was built), built from a gate bundle whose JSON contract and validator ship with the plugin.",
-      "version": "1.4.0"
+      "version": "1.5.0"
     },
     {
       "name": "review-findings",

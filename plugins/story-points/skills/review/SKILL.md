@@ -7,7 +7,7 @@ description: Use when the developers want to see, verify or change an intent's s
 
 `unit-points.csv` (`unit,points,source`) sits next to the intent's `aidlc-state.md`. This skill shows
 every Unit of the intent as a card in one artifact, with its current value marked (amber sparkle:
-AI suggestion; navy person: developer estimate). The developer presses a number per Unit. Pressing
+AI suggestion; blue person: developer estimate). The developer presses a number per Unit. Pressing
 the number an AI row already holds confirms it as theirs. Their picks are then written with
 `points.py set`, so they become `human` rows.
 
@@ -45,15 +45,28 @@ For each Unit write, from the documents and in the developer's terms:
   "U3 api-billing").
 - `ctx`: what the Unit builds and what makes it big or small, in two to five short blocks: paragraphs,
   or `- ` lists with a **bold** lead-in, as the template's header comment allows. Copy facts as the
-  documents state them. No estimate, and no opinion on the size.
-- `dependsOn`: the `U<n>` ids of its dependencies.
+  documents state them. No estimate, and no opinion on the size. Name other Units, stories and
+  requirements by what they are, not by id; an id that slips in (`U3`, `US-2.1`) still renders as a
+  link labelled with its title.
+- `dependsOn`: its dependencies, each `{unit: "U<n>", title}` (a bare `"U<n>"` still works). A Unit in
+  this review links to its card; the title is what a link to one outside the review shows.
+- `stories` (optional): the user stories it delivers, from `unit-of-work-story-map.md` or the Unit's
+  documents: `[{id, title, text?}]`, `text` the story's one-line statement.
+- `requirements` (optional): the requirements it covers, `[{id, title, text?}]`, as the documents
+  name them.
+
+Stories and requirements are not cards on the page: their links show the title, keep the id and
+text in a tooltip, and say on a click that the source is not in this document. Leave a field out
+when the documents do not say it.
 
 ## 3. The artifact (once per developer)
 
 `Artifact` → `action: "list"` → the artifact titled **AI-DLC story points**. If the developer has
 none, publish `points-review.html` from this skill's directory once:
-`capabilities: {db: {}}`, `icon: "cards"`, description "Review an AI-DLC intent's story points
-Unit by Unit; Claude writes the picks into unit-points.csv." Reuse its URL from then on.
+`capabilities: {db: {}, user: {}}`, `icon: "cards"`, description "Review an AI-DLC intent's story
+points Unit by Unit; Claude writes the picks into unit-points.csv." Reuse its URL from then on.
+After a plugin update, republish the page from this file to the same URL, with the same
+capabilities (`user` keeps each viewer's read marks).
 
 ## 4. Open the review
 
@@ -65,7 +78,8 @@ delete the unit rows that are no longer Units. Then write them with `ArtifactDat
 - `reviews/<id>`: `set` `{title: <the intent's name>, intent: <directory name>, file: <show's file>,
   scale: <show's scale>, status: "open", createdAt: <now ISO>, picks: {}}`. Reopening starts with
   no picks: the file already holds every pick recorded earlier.
-- `reviews/<id>/units/<U<n>>`: `set` `{n, unit, name, title, ctx, dependsOn, points, source}`, with
+- `reviews/<id>/units/<U<n>>`: `set` `{n, unit, name, title, ctx, dependsOn, stories?,
+  requirements?, points, source}`, with
   `points` (a number) and `source` (`"ai"` or `"human"`) from the row `show` printed, both `null`
   when the Unit has no row.
 
