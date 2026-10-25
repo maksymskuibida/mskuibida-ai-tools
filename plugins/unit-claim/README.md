@@ -57,8 +57,9 @@ claim with `--rhythm`, or refused and ask again. Nothing reads the session trans
 - **A claim whose Unit can't be read**, such as options before the Unit that the hook doesn't know.
 
 The hook does nothing outside an AI-DLC project (no `aidlc/spaces`). It never fails an after-call or prompt hook.
-The answer of each Unit is kept in the plugin's data folder (`answers/<project>/<intent>/<unit>.json`).
-`UNIT_CLAIM_DIR` changes that folder; the tests use it.
+The answer of each Unit is kept in `~/.claude/plugins/data/unit-claim/answers/<project>/<intent>/<unit>.json`, the
+project being the main checkout, so a git worktree and its main checkout share one answer. `UNIT_CLAIM_DIR` changes
+that folder; the tests use it.
 
 ## Settings
 

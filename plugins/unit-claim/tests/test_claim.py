@@ -193,6 +193,50 @@ class TestAfterTheClaim(Case):
         self.assertEqual(code, 0, err)
 
 
+class TestWorktrees(Case):
+    """A session in a git worktree may have its hooks run from the main checkout and its mod's processes from the
+    worktree; both must find the same answer. A worktree also lacks the gitignored cursors (active-space,
+    active-intent)."""
+
+    def setUp(self):
+        super().setUp()
+        os.makedirs(os.path.join(self.project, ".git", "worktrees", "wt"))
+        self.worktree = os.path.join(self.project, ".claude", "worktrees", "wt")
+        os.makedirs(os.path.join(self.worktree, "aidlc", "spaces", "default", "intents", INTENT))
+        with open(os.path.join(self.worktree, ".git"), "w") as f:
+            f.write(f"gitdir: {os.path.join(self.project, '.git', 'worktrees', 'wt')}\n")
+        with open(os.path.join(self.project, ".git", "worktrees", "wt", "commondir"), "w") as f:
+            f.write("../..\n")
+
+    def record_in_worktree(self):
+        env = dict(os.environ)  # as the mod starts it: no CLAUDE_PLUGIN_DATA
+        env.pop("CLAUDE_PLUGIN_DATA", None)
+        done = subprocess.run([sys.executable, SCRIPT, "record", "--unit", UNIT, "--stages", "functional-design",
+                               "--rhythm", "unit-end"], capture_output=True, text=True, env=env, cwd=self.worktree)
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_an_answer_recorded_in_the_worktree_lets_the_main_checkout_claim(self):
+        self.record_in_worktree()
+        self.assertEqual(cc.intent_of(self.worktree), INTENT)
+        self.assertEqual(cc.answer_path(self.worktree, UNIT), cc.answer_path(self.project, UNIT))
+        code, _out, err = self.claim()
+        self.assertEqual(code, 0, err)
+        code, _out, err = self.run_hook({"hook_event_name": "PreToolUse", "tool_name": "Bash", "cwd": self.worktree,
+                                         "tool_input": {"command": f"aidlc unit claim {UNIT} --team A --rhythm unit-end"}})
+        self.assertEqual(code, 0, err)
+
+    def test_the_plugin_data_folder_the_hook_is_given_does_not_split_the_answers(self):
+        os.environ.pop("UNIT_CLAIM_DIR")
+        os.environ["HOME"], home = self.tmp, os.environ.get("HOME", "")
+        self.addCleanup(os.environ.__setitem__, "HOME", home)
+        self.record_in_worktree()
+        env = dict(os.environ, CLAUDE_PLUGIN_DATA=os.path.join(self.tmp, "elsewhere"), CLAUDE_PROJECT_DIR=self.project)
+        event = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "cwd": self.project,
+                 "tool_input": {"command": f"aidlc unit claim {UNIT} --team A --rhythm unit-end"}}
+        done = subprocess.run([sys.executable, HOOK], input=json.dumps(event), capture_output=True, text=True, env=env)
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+
 class TestPrompt(Case):
     def test_claim_prompt_says_how_to_open_the_dialog(self):
         _code, out, _err = self.run_hook({"hook_event_name": "UserPromptSubmit", "prompt": f"/aidlc --claim {UNIT} --team A"})
