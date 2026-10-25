@@ -170,12 +170,13 @@ class PlainWords(unittest.TestCase):
         self.assertEqual(first["rest"], "See rules.py for the code.")
         self.assertEqual(first["suggested"], "Align it with finding 2 and an earlier finding.")
         self.assertEqual(first["suggested_by"], "reviewer")
-        refs = {(r["kind"], r["t"]): r for r in first["refs"]}
-        self.assertEqual(refs[("finding", "finding 2")]["qid"], "R-04")  # a card in the same form: a live link
-        self.assertNotIn("qid", refs[("finding", "an earlier finding")])  # closed: not in the form
-        self.assertIn("R-01", refs[("finding", "an earlier finding")]["tip"])
-        self.assertEqual(refs[("file", "rules.py")]["tip"], "src/cart/rules.py, line 12")
-        self.assertEqual(refs[("section", "domain model › Cart aggregate")]["tip"], "domain-model.md > Cart aggregate")
+        refs = {r["label"]: r for r in first["refs"]}
+        self.assertEqual(refs["finding 2"]["target"], "#R-04")  # a card in the same form: a live link
+        self.assertEqual(refs["an earlier finding"]["target"], "finding:R-01")  # closed: not in the form
+        self.assertIn("R-01", refs["an earlier finding"]["tip"])
+        self.assertEqual(refs["rules.py"], {"label": "rules.py", "tip": "src/cart/rules.py, line 12",
+                                            "target": "path:src/cart/rules.py"})
+        self.assertEqual(refs["domain model › Cart aggregate"]["tip"], "domain-model.md > Cart aggregate")
         self.assertEqual(first["where"], "domain model › Cart aggregate")
         self.assertEqual(second["where"], "glossary")
 
@@ -194,7 +195,7 @@ class PlainWords(unittest.TestCase):
         self.assertEqual(first["title"], "Discount applied before tax")
         self.assertEqual(first["rest"], "The discount is applied before the tax is added. Totals come out too low.")
         self.assertEqual(first["where"], "in cart.py")
-        self.assertEqual(first["refs"][0], {"t": "cart.py", "kind": "file", "tip": "src/cart.py, line 42"})
+        self.assertEqual(first["refs"][0], {"label": "cart.py", "tip": "src/cart.py, line 42", "target": "path:src/cart.py"})
         self.assertEqual(first["suggested"], "Change it so that this no longer happens: a cart of 100 with a 10% discount "
                                              "and 20% tax totals 108 instead of 110.")
 
@@ -286,10 +287,9 @@ class Board(unittest.TestCase):
     def test_cards(self):
         _, blocking, minor, _ = self.made()
         self.assertEqual((blocking["kind"], blocking["n"], minor["n"]), ("card", 1, 2))
-        self.assertEqual(blocking["proposed"], {"k": "fix", "why": "Blocking, so it starts in Fix"})
-        self.assertEqual(minor["proposed"], {"k": "accept", "why": "Not blocking, so it starts in Accept"})
-        self.assertEqual(blocking["badge"]["t"], "Blocking")
-        self.assertIn("Major", blocking["badge"]["tip"])
+        self.assertEqual(blocking["proposed"],
+                         {"k": "fix", "why": "Major: it blocks approval until it is fixed or rejected, so it starts in Fix"})
+        self.assertEqual(minor["proposed"], {"k": "accept", "why": "Minor: it can be carried as a known risk, so it starts in Accept"})
         self.assertEqual(set(blocking["outcomes"]), {"fix", "accept", "reject"})
         self.assertEqual(blocking["from"], "AI review, Major")
         self.assertLessEqual(len(blocking["text"]), 90)
@@ -307,13 +307,15 @@ class Board(unittest.TestCase):
 
     def test_plain_fields_for_the_page(self):
         _, blocking, minor, _ = self.made()
-        self.assertTrue(blocking["what"].startswith("The `Cart` rule `checkout | expire` is ambiguous. Two events"))
-        self.assertEqual(blocking["suggested"], "State the winning event. Add one line on what happens to reserved stock.")
-        self.assertNotIn("suggestedBy", blocking)
+        self.assertTrue(blocking["plain"].startswith("Two events can fire on the same cart"))  # the title is not repeated
+        self.assertNotIn("plain", minor)  # its finding is its title
+        self.assertEqual(blocking["action"], "State the winning event. Add one line on what happens to reserved stock.")
+        self.assertTrue(minor["action"].startswith("No change was named"))
         self.assertEqual(blocking["detail"], "**Where:** domain model › Cart aggregate, invariants list")
-        self.assertEqual(blocking["refs"], [{"t": "domain model › Cart aggregate, invariants list", "kind": "section",
-                                             "tip": "domain-model.md > Cart aggregate, invariants list"}])
-        self.assertTrue(all("qid" not in r for r in minor["refs"]))
+        self.assertEqual(blocking["refs"], [{"label": "domain model › Cart aggregate, invariants list",
+                                             "tip": "domain-model.md > Cart aggregate, invariants list",
+                                             "target": "doc:domain-model.md > Cart aggregate, invariants list"}])
+        self.assertTrue(all(not r["target"].startswith("#") for r in minor["refs"]))
 
     def test_writes_json(self):
         writes = self.made()[3]

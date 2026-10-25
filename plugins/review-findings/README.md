@@ -107,18 +107,19 @@ findings.py board    --findings FILE [--id ID] [--title T] [--project-dir D] --o
 `board` writes `forms.json`, `cards/<id>.json` and `writes.json` for one `ArtifactData` batch: the
 form `forms/<id>` (`view: "board"`, three boxes) and a `forms/<id>/questions/<finding id>` card per
 finding, in the contract of the `question-forms` template. Each card's `ctx` is the plain words
-(What's wrong, Suggested, Where); the card also carries the optional fields `what`, `suggested`,
-`suggestedBy`, `detail`, `refs` and `badge` for a page that draws them apart:
+(What's wrong, Suggested, Where); the card also carries the optional fields `plain` (what the
+finding means, after its title), `action` (the suggested action), `detail` (`ctx` without those
+two) and `refs` for a page that draws them apart:
 
 ```json
-"refs": [{"t": "domain model › Cart aggregate", "kind": "section", "tip": "domain-model.md > Cart aggregate"},
-         {"t": "finding 2", "kind": "finding", "tip": "R-04, card 2 in this form", "qid": "R-04"}],
-"badge": {"t": "Blocking", "tip": "Major: a Critical or Major finding blocks approval until it is fixed or rejected."}
+"refs": [{"label": "domain model › Cart aggregate", "tip": "domain-model.md > Cart aggregate",
+          "target": "doc:domain-model.md > Cart aggregate"},
+         {"label": "finding 2", "tip": "R-04, card 2 in this form", "target": "#R-04"}]
 ```
 
-A ref with `qid` points at another card of the same form; one without points at something the form
-does not hold (a document section, a file, a finding closed before this round), and `tip` is all
-that is known of it. The form id is
+A `#<qid>` target is another card of the same form, a live link; a `doc:`, `path:` or `finding:`
+target is something the form does not hold (a document section, a file, a finding closed before
+this round), and `tip` is all that is known of it. The form id is
 `<intent>-<stage>[-<unit>]-findings-<YYYYMMDDTHHMM>`, or `code-review-<YYYYMMDDTHHMM>`.
 
 ## Install

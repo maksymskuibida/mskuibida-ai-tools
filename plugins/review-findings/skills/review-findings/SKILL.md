@@ -105,9 +105,9 @@ that skill's § 1 to publish it first.
    (reason required)** ("Not applicable; write why in the note"). Each finding is one card: the
    title is its first sentence, the details hold Where, Finding and Required action, and it starts
    in Fix when it blocks and in Accept when it does not. Its details say, in plain words, what is
-   wrong, the suggested action and where; the card also carries them apart (`what`, `suggested`,
-   `detail`), with `refs` (what the finding points at, linked when it is another card of the form)
-   and a `badge` for the page (question-forms § 5).
+   wrong, the suggested action and where; the card also carries them apart (`plain`, `action`,
+   `detail`), with `refs` (what the finding points at, `{label, tip, target}`, a live link when the
+   target is `#<qid>` of another card) for the page (question-forms § 5).
 2. Write the rows with **one** `ArtifactData` `batch` whose `writes` are the array in
    `writes.json`, as it is (new rows: no `if_version`).
 3. Send the form check, as `question-forms` § 5b A says: `AskUserQuestion`, header `Form`, question

@@ -254,33 +254,34 @@ def place(f, code):
         found = re.fullmatch(r"(.+?):(\d+)", raw)
         path, line = (found.group(1), found.group(2)) if found else (raw, "")
         tip = f"{path}, line {line}" if line else path
-        return f"in {os.path.basename(path)}", {"t": os.path.basename(path), "kind": "file", "tip": tip}
+        return f"in {os.path.basename(path)}", {"label": os.path.basename(path), "tip": tip, "target": f"path:{path}"}
     head, _, section = raw.partition(" > ")
     name = doc_name(head)
     plain = f"{name} › {section.strip()}" if section.strip() else name
-    return plain, {"t": plain, "kind": "section", "tip": raw}
+    return plain, {"label": plain, "tip": raw, "target": f"doc:{raw}"}
 
 
 def plain(text, numbers, refs):
     """A finding's words without internal ids: another finding's id becomes "finding N" (its number in this list),
-    a `path/file.py:42` becomes the file's name. Each becomes a reference (`refs`) the form can show and link."""
+    a `path/file.py:42` becomes the file's name. Each becomes a reference (`refs`, `{label, tip, target}`): target
+    `#<qid>` is another card of the same form, a live link; `path:`, `doc:` and `finding:` targets are not in the form."""
     def finding(m):
         fid = m.group(0)
         n = numbers.get(fid)
-        add(refs, {"t": f"finding {n}" if n else "an earlier finding", "kind": "finding",
+        add(refs, {"label": f"finding {n}" if n else "an earlier finding",
                    "tip": f"{fid}, card {n} in this form" if n else f"{fid}, closed before this round; not in this form",
-                   **({"qid": fid} if n else {})})
+                   "target": f"#{fid}" if n else f"finding:{fid}"})
         return f"finding {n}" if n else "an earlier finding"
 
     def file_line(m):
-        add(refs, {"t": m.group(2), "kind": "file", "tip": f"{m.group(1)}, line {m.group(3)}"})
+        add(refs, {"label": m.group(2), "tip": f"{m.group(1)}, line {m.group(3)}", "target": f"path:{m.group(1)}"})
         return m.group(2)
 
     return FILE_LINE.sub(file_line, FINDING_REF.sub(finding, one_line(text)))
 
 
 def add(refs, ref):
-    if ref and all((r["kind"], r["tip"]) != (ref["kind"], ref["tip"]) for r in refs):
+    if ref and all((r["target"], r["tip"]) != (ref["target"], ref["tip"]) for r in refs):
         refs.append(ref)
 
 
@@ -491,37 +492,33 @@ def block(label, text):
     return f"**{label}:** {text}" if text else ""
 
 
-def badge(f, code):
-    """The card's status in one word, and what it means for its tooltip."""
+def why(f, code):
+    """Why the card starts where it does, in plain words."""
     if code:
-        return ({"t": "Blocking", "tip": "Confirmed by the review: edits and commits wait until it is sorted."}
-                if f.get("blocking") else
-                {"t": "Not blocking", "tip": "Possible, not confirmed by the review: it can be accepted as it is."})
+        return ("Confirmed by the review, so it starts in Fix" if f.get("blocking") else
+                "Possible, not confirmed by the review, so it starts in Accept")
     sev = f.get("severity") or "Unrated"
-    return ({"t": "Blocking", "tip": f"{sev}: a Critical or Major finding blocks approval until it is fixed or rejected."}
-            if f.get("blocking") else
-            {"t": "Not blocking", "tip": f"{sev}: it can be carried as a known risk."})
+    return (f"{sev}: it blocks approval until it is fixed or rejected, so it starts in Fix" if f.get("blocking") else
+            f"{sev}: it can be carried as a known risk, so it starts in Accept")
 
 
 def card(item, f, code, reviewer=""):
-    """One board card. `ctx` holds the plain words for the page as it is today; `what`, `suggested`, `detail`,
-    `refs` and `badge` are the optional fields a page reads to draw them apart (question-forms § 5)."""
+    """One board card. `ctx` holds the plain words for a page that draws only it. The optional `plain` (what the
+    finding means, under the title), `action` (the suggested action), `refs` and `detail` (ctx without the two) are
+    for a page that draws them apart (question-forms § 5)."""
     detail = [block("Where", item["where"])]
     if code:
         detail.append(block("What goes wrong", item["scenario"]))
     detail = [b for b in detail if b]
     who = reviewer or ("Code review" if code else "AI review")
-    tag = badge(f, code)
     return {
         "n": item["n"], "text": item["title"] or item["id"],
         "ctx": "\n\n".join(b for b in [block("What's wrong", item["what"]), block("Suggested", item["suggested"])] + detail if b),
         "kind": "card",
-        "what": item["what"], "suggested": item["suggested"],
-        **({"suggestedBy": "model"} if item["suggested_by"] == "model" else {}),
-        "detail": "\n\n".join(detail), "refs": item["refs"], "badge": tag,
+        **({"plain": item["rest"]} if item["rest"] else {}), "action": item["suggested"],
+        "detail": "\n\n".join(detail), "refs": item["refs"],
         "from": ", ".join(p for p in (who, f.get("severity"), f.get("category")) if p),
-        "proposed": {"k": "fix" if f.get("blocking") else "accept",
-                     "why": f"{tag['t']}, so it starts in {'Fix' if f.get('blocking') else 'Accept'}"},
+        "proposed": {"k": "fix" if f.get("blocking") else "accept", "why": why(f, code)},
         "outcomes": {"fix": "Fixed now, in the code." if code else "Goes into Request Changes; fixed, then reviewed again.",
                      "accept": "Carried as a known risk; no change.",
                      "reject": "Not applicable; your note says why."},
