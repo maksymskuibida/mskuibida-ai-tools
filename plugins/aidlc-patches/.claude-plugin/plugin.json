@@ -1,0 +1,9 @@
+{
+  "name": "aidlc-patches",
+  "displayName": "AI-DLC patches",
+  "version": "0.1.0",
+  "description": "Patch the AI-DLC engine (awslabs/aidlc-workflows) in your own fork, kept as an upstream release plus one commit per patch: investigate a bug to a failing test, check upstream first, keep the series in order, release previews from .101, roll them into projects, and send fixes upstream. Remembers your forks across plugin updates.",
+  "author": {
+    "name": "Maksym Skuibida"
+  }
+}

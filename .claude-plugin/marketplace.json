@@ -4,7 +4,7 @@
     "name": "Maksym Skuibida"
   },
   "description": "Maksym Skuibida's personal Claude Code tooling — small, opinionated plugins.",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "plugins": [
     {
       "name": "response-format",
@@ -64,6 +64,12 @@
       "name": "aidlc-session-titles",
       "source": "./plugins/aidlc-session-titles",
       "description": "For AI-DLC projects: keeps every session that runs the workflow titled by what it is on — `<unit> — <stage>` on a Construction Unit, else `<phase> — <stage>` — read from the project's state (binding, claim, directive, stage graph), never from the agent. Set at each prompt and, in the desktop app, renamed mid-turn when the stage or Unit moves on.",
+      "version": "0.1.0"
+    },
+    {
+      "name": "aidlc-patches",
+      "source": "./plugins/aidlc-patches",
+      "description": "For people who patch the AI-DLC engine in their own fork of awslabs/aidlc-workflows: investigate a bug to a failing test, check upstream first, keep the fork as an upstream release plus one commit per patch, release previews numbered from .101, pin projects to them, and send fixes upstream. Remembers your forks across plugin updates.",
       "version": "0.1.0"
     }
   ]
