@@ -68,8 +68,10 @@
       boxes offered to its keys and the proposed box.
       plain?: what the card means in plain words, shown on the card under its title.
       action?: the suggested action, shown in the card's details. refs?: as for questions.
-      detail?: ctx without what plain and action say; shown in place of ctx when present, so a
-        card that carries plain and action does not say them twice. ctx stays for older pages.
+      detail?: ctx without what plain and action say; shown in place of ctx when the card has plain
+        or action, so the plain words are not said twice. ctx stays complete for older pages.
+      refs targets on a findings board: "#<qid>" another card (live); "doc:<where>", "path:<file>",
+        "finding:<closed id>" are not in the form (a link that says so).
 
   What the page writes (the only thing an agent reads back, one `get` of forms/<id>):
 
@@ -860,7 +862,7 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
       <div class="moves" role="group" aria-label="Move this card"></div>
       <div class="cdetail" id="cd-${esc(q.id)}"><div class="cin"><div class="cmain">
         ${q.from ? `<p class="from">${inline(q.from, q.id)}</p>` : ""}
-        ${(q.detail || q.ctx) ? `<div class="ctx">${md(q.detail || q.ctx, q.id)}</div>` : ""}
+        ${(q.detail && (q.plain || q.action) ? q.detail : q.ctx) ? `<div class="ctx">${md(q.detail && (q.plain || q.action) ? q.detail : q.ctx, q.id)}</div>` : ""}
         ${q.action ? `<p class="action"><b>Suggested action</b>${inline(q.action, q.id)}</p>` : ""}
         ${refsHtml(q, "Refers to")}
         <button type="button" class="addnote">Add a note</button>

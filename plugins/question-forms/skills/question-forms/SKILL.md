@@ -116,7 +116,9 @@ agent proposes and can be moved by button or drag.
   line on who asked for what; `outcomes` says what happens when the card sits in each box. A
   card's optional `plain` says what it means in plain words (shown on the card under the
   title), `action` the suggested action (shown in its details), `detail` the `ctx` without those
-  two (shown instead of `ctx` when present), and `refs` what it refers to (§ 2). A card's `ctx` follows the § 2 rule: paragraphs and `- ` bullets with **bold** lead-ins, never
+  two (shown instead of `ctx` when the card has `plain` or `action`; `ctx` stays complete), and `refs` what it refers to (§ 2;
+  the `review-findings` board uses `#<qid>` for another card, and `doc:`, `path:` or `finding:` for
+  what the form does not hold). A card's `ctx` follows the § 2 rule: paragraphs and `- ` bullets with **bold** lead-ins, never
   one run-on paragraph; `text`, `from`, `outcomes`, `plain`, `action` and `proposed.why` take the inline subset only. On a
   grouped board the group alone decides where a card can go; on a board without groups,
   `outcomes` also limits the boxes offered to its keys (plus the proposed box).
