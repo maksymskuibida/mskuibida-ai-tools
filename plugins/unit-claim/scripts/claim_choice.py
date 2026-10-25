@@ -2,22 +2,18 @@
 """The claim choice of a team Unit: which design stages run and which approval rhythm it is claimed with.
 
     claim_choice.py stages   [--project-dir <dir>]                 the four design stages and their `condition:`
-    claim_choice.py status   --unit <u> [--project-dir <dir>]      the choice in force for the Unit, and where it is from
-    claim_choice.py pick     --unit <u> --stages <a,b|none> [--project-dir <dir>]
-                             record the agent's pick for the Unit; only when a saved choice says "use the agent's pick"
-    claim_choice.py save     --scope me|project --stages <a,b|none|agent> --rhythm per-stage|unit-end [--project-dir <dir>]
-                             save a choice: for me in the plugin's data folder, for the project in <project>/.unit-claim.json
+    claim_choice.py brief    --unit <u> [--project-dir <dir>]      what the recommendation reads: the stages, the
+                                                                   Unit's entry in unit-of-work.md and its stories
+    claim_choice.py status   --unit <u> [--project-dir <dir>]      the choice recorded for the Unit, or null
+    claim_choice.py record   --unit <u> --stages <a,b|none> --rhythm <r> [--project-dir <dir>]
+                             record the developer's answer; run by the plugin's mod after the claim dialog, never by
+                             the agent (the hook refuses it from Bash)
     claim_choice.py skips    --unit <u> [--project-dir <dir>]      the skip report of every stage the choice leaves out
     claim_choice.py forget   --unit <u> [--project-dir <dir>]      drop the answer recorded for the Unit
 
-Where a choice comes from, first match wins:
-  1. the answer of the claim dialog for this Unit in this checkout (written by hooks/claim_guard.py when the dialog is
-     answered, or by `pick`), in <data>/answers/<project key>/<intent>/<unit>.json;
-  2. the project's saved choice, <project>/.unit-claim.json (landed through a bookkeeping pull request);
-  3. the developer's saved choice, <data>/choice.json.
-<data> is $UNIT_CLAIM_DIR, else $CLAUDE_PLUGIN_DATA, else ~/.claude/plugins/data/unit-claim. A saved choice is
-{"stages": [slugs] | "agent", "rhythm": "per-stage"|"unit-end"}: a fixed set of stages, or "agent" for the agent's pick
-of each Unit without asking (the reasoning message is still sent). Standard library only.
+The answer of each Unit is kept in <data>/answers/<project key>/<intent>/<unit>.json, where <data> is $UNIT_CLAIM_DIR,
+else $CLAUDE_PLUGIN_DATA, else ~/.claude/plugins/data/unit-claim. Nothing is saved across Units: every claim is
+asked. Standard library only.
 """
 
 import argparse
@@ -45,9 +41,9 @@ CONDITIONS = {
 }
 # A stage that needs another: picking the first without the second adds the second back.
 NEEDS = {"nfr-design": "nfr-requirements"}
+# The rhythms this plugin knows; the mod asks the pinned engine (`aidlc unit claim --help`) for the ones it accepts.
 RHYTHMS = ("per-stage", "unit-end")
 SKIP_REASON = "skipped at claim by the developer"
-PROJECT_FILE = ".unit-claim.json"
 
 
 class ChoiceError(Exception):
@@ -138,35 +134,11 @@ def now():
     return datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def valid_saved(data):
-    if not data or data.get("rhythm") not in RHYTHMS:
-        return None
-    stages = data.get("stages")
-    if stages == "agent" or (isinstance(stages, list) and all(s in DESIGN_STAGES for s in stages)):
-        return data
-    return None
-
-
-def saved_choice(project):
-    """(scope, choice) of the saved choice in force for the project, or (None, None)."""
-    project_saved = valid_saved(load(os.path.join(project, PROJECT_FILE)))
-    if project_saved:
-        return "project", project_saved
-    mine = valid_saved(load(os.path.join(data_dir(), "choice.json")))
-    if mine:
-        return "me", mine
-    return None, None
-
-
 def choice_for(project, unit):
-    """{"stages": [...], "rhythm": ..., "source": "answer"|"pick"|"project"|"me", ...} in force for the Unit, or None.
-    A saved "agent" choice is in force only once the agent's pick for the Unit is recorded."""
+    """{"unit", "stages": [...], "rhythm", "at"} recorded for the Unit, or None."""
     answer = load(answer_path(project, unit))
     if answer and isinstance(answer.get("stages"), list) and answer.get("rhythm") in RHYTHMS:
-        return dict(answer, source=answer.get("source") or "answer")
-    scope, saved = saved_choice(project)
-    if saved and isinstance(saved["stages"], list):
-        return {"unit": unit, "stages": list(saved["stages"]), "rhythm": saved["rhythm"], "source": scope}
+        return answer
     return None
 
 
@@ -216,33 +188,11 @@ def with_needs(stages):
     return [s for s in DESIGN_STAGES if s in chosen], notes
 
 
-def parse_rhythm(text):
-    low = str(text).lower()
-    if "unit-end" in low or "unit end" in low or "one approval per unit" in low:
-        return "unit-end"
-    if "per-stage" in low or "per stage" in low or "every stage" in low:
-        return "per-stage"
-    return None
-
-
-def parse_save(text):
-    low = str(text).lower()
-    if "project" in low:
-        return "project"
-    if "for me" in low or low.strip() in ("me", "mine"):
-        return "me"
-    if low.strip().startswith("no") or "don't" in low or "do not" in low:
-        return "no"
-    return None
-
-
-def record_answer(project, unit, stages, rhythm, save, source="answer"):
-    """Write the Unit's answer (and, for "me", the developer's saved choice). Returns (choice, notes)."""
+def record_answer(project, unit, stages, rhythm):
+    """Write the Unit's answer. Returns (choice, notes)."""
     stages, notes = with_needs(stages)
-    choice = {"unit": unit, "stages": stages, "rhythm": rhythm, "save": save, "source": source, "at": now()}
+    choice = {"unit": unit, "stages": stages, "rhythm": rhythm, "at": now()}
     write(answer_path(project, unit), choice)
-    if save == "me":
-        write(os.path.join(data_dir(), "choice.json"), {"stages": stages, "rhythm": rhythm, "savedAt": now()})
     return choice, notes
 
 
@@ -270,54 +220,71 @@ def stage_info(project):
     return out
 
 
+def intent_dir(project):
+    space = first_line(os.path.join(project, "aidlc", "active-space")) or "default"
+    return os.path.join(project, "aidlc", "spaces", space, "intents", intent_of(project))
+
+
+def section(path, heading):
+    """The Markdown section whose heading matches `heading` (a regex), down to the next heading of its level or above."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return ""
+    out, level = [], None
+    for line in lines:
+        mark = re.match(r"^(#{1,6})\s", line)
+        if level is None:
+            if mark and re.search(heading, line, re.I):
+                level, out = len(mark.group(1)), [line]
+        elif mark and len(mark.group(1)) <= level:
+            break
+        else:
+            out.append(line)
+    return "\n".join(out).strip()
+
+
+def brief(project, unit):
+    """What the stage recommendation reads: the four stages and their conditions, the Unit's entry, its stories."""
+    folder = intent_dir(project)
+    entry = section(os.path.join(folder, "inception", "units-generation", "unit-of-work.md"), rf"\b{re.escape(unit)}\b")
+    stories = []
+    for story in sorted(set(re.findall(r"\bUS\d+(?:\.\d+)*\b", entry))):
+        text = section(os.path.join(folder, "inception", "user-stories", "stories.md"), rf"\b{re.escape(story)}\b")
+        if text:
+            stories.append(text)
+    return {"unit": unit, "stages": stage_info(project), "entry": entry, "stories": stories}
+
+
 # ---------------------------------------------------------------- command line
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="claim_choice.py", description="The claim choice of a team Unit.")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("stages", "status", "pick", "save", "skips", "forget"):
+    for name in ("stages", "brief", "status", "record", "skips", "forget"):
         p = sub.add_parser(name)
         p.add_argument("--project-dir")
-        if name in ("status", "pick", "skips", "forget"):
+        if name != "stages":
             p.add_argument("--unit", required=True)
-        if name in ("pick", "save"):
+        if name == "record":
             p.add_argument("--stages", required=True)
-        if name == "save":
-            p.add_argument("--scope", choices=("me", "project"), required=True)
             p.add_argument("--rhythm", choices=RHYTHMS, required=True)
     args = ap.parse_args(argv)
     project = project_dir(given=args.project_dir)
     try:
         if args.cmd == "stages":
             print(json.dumps(stage_info(project), indent=2))
+        elif args.cmd == "brief":
+            print(json.dumps(brief(project, args.unit), indent=2))
         elif args.cmd == "status":
-            choice = choice_for(project, args.unit)
-            scope, saved = saved_choice(project)
-            print(json.dumps({"unit": args.unit, "choice": choice, "saved": scope, "savedStages": (saved or {}).get("stages"),
-                              "ask": choice is None and not (saved and saved["stages"] == "agent"),
-                              "agentPick": bool(saved and saved["stages"] == "agent" and choice is None)}, indent=2))
-        elif args.cmd == "pick":
-            scope, saved = saved_choice(project)
-            if not saved or saved["stages"] != "agent":
-                raise ChoiceError("a pick without asking needs a saved choice that says so (stages: \"agent\"); "
-                                  "otherwise ask the claim dialog")
+            print(json.dumps({"unit": args.unit, "choice": choice_for(project, args.unit)}, indent=2))
+        elif args.cmd == "record":
             stages = parse_stages(args.stages)
             if stages is None:
                 raise ChoiceError(f"cannot read the stages {args.stages!r}; name them by slug, comma-separated, or none")
-            choice, notes = record_answer(project, args.unit, stages, saved["rhythm"], "no", source="pick")
+            choice, notes = record_answer(project, args.unit, stages, args.rhythm)
             print(json.dumps({"choice": choice, "notes": notes, "skips": [skip_command(s, args.unit) for s in left_out(choice)]}, indent=2))
-        elif args.cmd == "save":
-            if args.stages == "agent":
-                stages = "agent"
-            else:
-                stages = parse_stages(args.stages)
-                if stages is None:
-                    raise ChoiceError(f"cannot read the stages {args.stages!r}")
-                stages, _notes = with_needs(stages)
-            value = {"stages": stages, "rhythm": args.rhythm, "savedAt": now()}
-            path = os.path.join(project, PROJECT_FILE) if args.scope == "project" else os.path.join(data_dir(), "choice.json")
-            write(path, value)
-            print(json.dumps({"saved": args.scope, "path": path, "choice": value}, indent=2))
         elif args.cmd == "skips":
             choice = choice_for(project, args.unit)
             if not choice:

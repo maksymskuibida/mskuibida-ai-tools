@@ -93,6 +93,12 @@ jobs:
           claude plugin validate plugins/ask-guard
           claude plugin test plugins/ask-guard
 
+      - name: Validate and test unit-claim
+        # Not best effort, same as model-fit: the claim dialog is the mod's.
+        run: |
+          claude plugin validate plugins/unit-claim
+          claude plugin test plugins/unit-claim
+
       - name: Validate the marketplace and the plugins without a test command
         run: |
           claude plugin validate .
@@ -102,7 +108,6 @@ jobs:
           claude plugin validate plugins/approval-gates
           claude plugin validate plugins/review-findings
           claude plugin validate plugins/aidlc-session-titles
-          claude plugin validate plugins/unit-claim
           claude plugin validate plugins/aidlc-patches
 
       - name: Test story-points
