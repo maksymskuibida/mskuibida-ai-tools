@@ -79,7 +79,7 @@ F = library()
 # ---------------------------------------------------------------- state
 
 def state_dir():
-    return os.environ.get("REVIEW_FINDINGS_DIR") or os.path.join(os.path.expanduser("~"), ".claude", "review-findings")
+    return F.state_dir()
 
 
 def state_path(event):
@@ -88,8 +88,9 @@ def state_path(event):
 
 
 def findings_path(event):
-    """The pending findings as a findings document, for `findings.py summary|question|board --findings`."""
-    return state_path(event)[:-len(".json")] + ".findings"
+    """The pending findings as a findings document, for `findings.py summary|question|dialog|board --findings` (and
+    `dialog --session`, which the mod runs)."""
+    return F.session_findings(event.get("session_id"))
 
 
 def load(event):

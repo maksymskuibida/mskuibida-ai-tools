@@ -116,36 +116,127 @@ class Summary(unittest.TestCase):
         text = findings.summary(findings.parse_brief(fixture("brief-open.txt"), "domain-design"))
         lines = text.splitlines()
         self.assertEqual(lines[0], "**Review findings — Domain Design:** 2 open, 1 blocking")
-        self.assertEqual(lines[1], "| ID | Severity | Where | Finding |")
-        self.assertEqual(lines[2], "|---|---|---|---|")
-        self.assertTrue(lines[3].startswith("| R-02 | Major | domain-model.md > Cart aggregate, invariants list |"))
-        self.assertEqual(len(lines), 5)
+        self.assertEqual(lines[1], "")
+        self.assertTrue(lines[2].startswith("1. **The `Cart` rule `checkout | expire` is ambiguous.** (Blocking, domain "
+                                            "model › Cart aggregate, invariants list) Two events can fire"))
+        self.assertEqual(lines[3], "   Suggested: State the winning event. Add one line on what happens to reserved stock.")
+        self.assertTrue(lines[4].startswith("2. **The Events table lists"))
+        self.assertTrue(lines[5].startswith("   Suggested: No change was named by the reviewer"))
+        self.assertEqual(len(lines), 6)
 
-    def test_pipes_are_escaped(self):
-        text = findings.summary(findings.parse_brief(fixture("brief-open.txt"), "domain-design"))
-        self.assertIn("`checkout \\| expire`", text)
-        for row in text.splitlines()[3:]:
-            self.assertEqual(len(re.split(r"(?<!\\)\|", row.strip())), 6)  # 4 cells between 5 bars
+    def test_no_ids_or_paths_in_the_sentences(self):
+        for doc in (findings.parse_brief(fixture("brief-open.txt"), "domain-design"), report()):
+            text = findings.summary(doc)
+            self.assertNotRegex(text, r"\b[RF]-\d+\b")
+            self.assertNotIn(".md", text)
+            self.assertNotRegex(text, r"\.py:\d+")
+            self.assertNotIn("| ID |", text)
 
-    def test_first_sentence_and_truncation(self):
+    def test_the_rest_is_clipped(self):
         doc = {"source": "aidlc", "stage_name": "X", "findings": [
-            {"id": "R-01", "severity": "Minor", "where": "w" * 200, "finding": "A" * 300 + ". Second.", "blocking": False}]}
-        row = findings.summary(doc).splitlines()[3]
-        cells = [c.strip() for c in row.strip("|").split("|")]
-        self.assertEqual(len(cells[3]), 140)
-        self.assertTrue(cells[3].endswith("…"))
-        self.assertEqual(len(cells[2]), 80)
+            {"id": "R-01", "severity": "Minor", "where": "w", "finding": "One. " + "A" * 300 + ".", "blocking": False,
+             "title": "One."}]}
+        line = findings.summary(doc).splitlines()[2]
+        self.assertTrue(line.endswith("…"))
         self.assertEqual(findings.first_sentence("One. Two.", 140), "One.")
         self.assertEqual(findings.first_sentence("See requirements.md for more. Two.", 140), "See requirements.md for more.")
 
     def test_code_review_label(self):
-        with open(os.path.join(FIXTURES, "report-findings.json"), encoding="utf-8") as f:
-            doc = findings.parse_report(json.load(f))
-        self.assertTrue(findings.summary(doc).startswith("**Review findings — code review:** 3 open, 1 blocking"))
+        self.assertTrue(findings.summary(report()).startswith("**Review findings — code review:** 3 open, 1 blocking"))
 
     def test_none_open(self):
         self.assertEqual(findings.summary({"source": "aidlc", "stage_name": "X", "findings": []}),
                          "**Review findings — X:** 0 open, 0 blocking")
+
+
+def report():
+    with open(os.path.join(FIXTURES, "report-findings.json"), encoding="utf-8") as f:
+        return findings.parse_report(json.load(f))
+
+
+class PlainWords(unittest.TestCase):
+    def doc(self, **extra):
+        return {"source": "aidlc", "stage_name": "Domain Design", "findings": [
+            dict({"id": "R-02", "severity": "Major", "blocking": True, "where": "domain-model.md > Cart aggregate ...",
+                  "finding": "The rule clashes with R-04. See src/cart/rules.py:12 for the code.",
+                  "action": "Align it with R-04 and R-01.", "title": "The rule clashes with R-04."}, **extra),
+            {"id": "R-04", "severity": "Minor", "blocking": False, "where": "glossary.md", "finding": "Two names.",
+             "action": "", "title": "Two names."}]}
+
+    def test_ids_become_numbers_and_references(self):
+        first, second = findings.readable(self.doc())
+        self.assertEqual(first["title"], "The rule clashes with finding 2.")
+        self.assertEqual(first["what"], "The rule clashes with finding 2. See rules.py for the code.")
+        self.assertEqual(first["rest"], "See rules.py for the code.")
+        self.assertEqual(first["suggested"], "Align it with finding 2 and an earlier finding.")
+        self.assertEqual(first["suggested_by"], "reviewer")
+        refs = {(r["kind"], r["t"]): r for r in first["refs"]}
+        self.assertEqual(refs[("finding", "finding 2")]["qid"], "R-04")  # a card in the same form: a live link
+        self.assertNotIn("qid", refs[("finding", "an earlier finding")])  # closed: not in the form
+        self.assertIn("R-01", refs[("finding", "an earlier finding")]["tip"])
+        self.assertEqual(refs[("file", "rules.py")]["tip"], "src/cart/rules.py, line 12")
+        self.assertEqual(refs[("section", "domain model › Cart aggregate")]["tip"], "domain-model.md > Cart aggregate")
+        self.assertEqual(first["where"], "domain model › Cart aggregate")
+        self.assertEqual(second["where"], "glossary")
+
+    def test_suggested_action_order(self):
+        doc = self.doc()
+        self.assertEqual(findings.needs_suggestion(doc), ["R-04"])
+        self.assertTrue(findings.readable(doc)[1]["suggested"].startswith("No change was named"))
+        self.assertEqual(findings.suggest(doc, {"R-04": "Pick one name.", "R-02": "Ignored: it has an action."}), ["R-04"])
+        second = findings.readable(doc)[1]
+        self.assertEqual((second["suggested"], second["suggested_by"]), ("Pick one name.", "model"))
+        self.assertEqual(findings.needs_suggestion(doc), [])
+        self.assertEqual(findings.readable(doc)[0]["suggested"], "Align it with finding 2 and an earlier finding.")
+
+    def test_code_review_places_and_fallback(self):
+        first = findings.readable(report())[0]
+        self.assertEqual(first["title"], "Discount applied before tax")
+        self.assertEqual(first["rest"], "The discount is applied before the tax is added. Totals come out too low.")
+        self.assertEqual(first["where"], "in cart.py")
+        self.assertEqual(first["refs"][0], {"t": "cart.py", "kind": "file", "tip": "src/cart.py, line 42"})
+        self.assertEqual(first["suggested"], "Change it so that this no longer happens: a cart of 100 with a 10% discount "
+                                             "and 20% tax totals 108 instead of 110.")
+
+
+class Dialog(unittest.TestCase):
+    def many(self, n, long=False):
+        text = ("This sentence is long enough to wrap a few times in a narrow frame. " * (6 if long else 1)).strip()
+        return {"source": "aidlc", "stage_name": "Domain Design", "findings": [
+            {"id": f"R-{i:02d}", "severity": "Major" if i % 2 else "Minor", "blocking": bool(i % 2),
+             "where": f"domain-model.md > Part {i}", "finding": f"Finding number {i} is wrong. {text}",
+             "action": f"Do the change {i}. {text}", "title": f"Finding number {i} is wrong."} for i in range(1, n + 1)]}
+
+    def test_markdown_fits_48_rows(self):
+        for n, long in ((1, False), (2, True), (5, False), (12, True), (40, False)):
+            with self.subTest(n=n, long=long):
+                text = findings.dialog_markdown(self.many(n, long))
+                self.assertLessEqual(findings.rows(text), findings.DIALOG_ROWS)
+                self.assertIn("### 1 · Finding number 1 is wrong.", text)
+                self.assertNotRegex(text, r"\bR-\d+\b")
+                if n >= 12:
+                    self.assertRegex(text, r"…and \d+ more findings\. Pick \*\*Open in form\*\*")
+
+    def test_terminal_fits_12_rows(self):
+        for n in (1, 2, 3, 9):
+            with self.subTest(n=n):
+                lines = findings.dialog_lines(self.many(n, True))
+                self.assertLessEqual(sum(findings.rows(line) for line in lines), findings.TERMINAL_ROWS)
+                self.assertTrue(lines[1].startswith("1. Finding number 1 is wrong. (blocking)"))
+                for line in lines:
+                    self.assertNotIn("`", line)
+                    self.assertNotIn("**", line)
+                if n == 9:
+                    self.assertTrue(lines[-1].startswith("…and "))
+
+    def test_brief(self):
+        out = findings.dialog(findings.parse_brief(fixture("brief-open.txt"), "domain-design"), "/s/x.findings")
+        self.assertEqual(out["findings"], "/s/x.findings")
+        self.assertEqual(out["question"]["questions"][0]["header"], "Findings")
+        self.assertEqual(out["needs_suggestion"], ["R-03"])
+        self.assertIn("**Suggested:** State the winning event.", out["markdown"])
+        self.assertIn("- **Blocking** · domain model › Cart aggregate, invariants list", out["markdown"])
+        self.assertEqual([i["id"] for i in out["items"]], ["R-02", "R-03"])
 
 
 class Triage(unittest.TestCase):
@@ -195,8 +286,10 @@ class Board(unittest.TestCase):
     def test_cards(self):
         _, blocking, minor, _ = self.made()
         self.assertEqual((blocking["kind"], blocking["n"], minor["n"]), ("card", 1, 2))
-        self.assertEqual(blocking["proposed"], {"k": "fix", "why": "Major"})
-        self.assertEqual(minor["proposed"], {"k": "accept", "why": "Minor"})
+        self.assertEqual(blocking["proposed"], {"k": "fix", "why": "Blocking, so it starts in Fix"})
+        self.assertEqual(minor["proposed"], {"k": "accept", "why": "Not blocking, so it starts in Accept"})
+        self.assertEqual(blocking["badge"]["t"], "Blocking")
+        self.assertIn("Major", blocking["badge"]["tip"])
         self.assertEqual(set(blocking["outcomes"]), {"fix", "accept", "reject"})
         self.assertEqual(blocking["from"], "AI review, Major")
         self.assertLessEqual(len(blocking["text"]), 90)
@@ -205,10 +298,22 @@ class Board(unittest.TestCase):
     def test_ctx_blocks_are_separated_by_blank_lines(self):
         _, blocking, minor, _ = self.made()
         blocks = blocking["ctx"].split("\n\n")
-        self.assertEqual([b.split(":**")[0] for b in blocks], ["**Where", "**Finding", "**Required action"])
-        self.assertEqual([b.split(":**")[0] for b in minor["ctx"].split("\n\n")], ["**Where", "**Finding"])  # no action
+        self.assertEqual([b.split(":**")[0] for b in blocks], ["**What's wrong", "**Suggested", "**Where"])
+        self.assertEqual([b.split(":**")[0] for b in minor["ctx"].split("\n\n")], ["**What's wrong", "**Suggested", "**Where"])
+        self.assertIn("**Suggested:** No change was named by the reviewer", minor["ctx"])
         for b in blocks:
             self.assertNotIn("\n\n", b)
+        self.assertNotIn(".md", blocking["ctx"])
+
+    def test_plain_fields_for_the_page(self):
+        _, blocking, minor, _ = self.made()
+        self.assertTrue(blocking["what"].startswith("The `Cart` rule `checkout | expire` is ambiguous. Two events"))
+        self.assertEqual(blocking["suggested"], "State the winning event. Add one line on what happens to reserved stock.")
+        self.assertNotIn("suggestedBy", blocking)
+        self.assertEqual(blocking["detail"], "**Where:** domain model › Cart aggregate, invariants list")
+        self.assertEqual(blocking["refs"], [{"t": "domain model › Cart aggregate, invariants list", "kind": "section",
+                                             "tip": "domain-model.md > Cart aggregate, invariants list"}])
+        self.assertTrue(all("qid" not in r for r in minor["refs"]))
 
     def test_writes_json(self):
         writes = self.made()[3]
@@ -232,6 +337,8 @@ class Board(unittest.TestCase):
             form = json.load(f)
         self.assertEqual(card["from"], "Code review, Confirmed, correctness")
         self.assertIn("**What goes wrong:** A cart of 100", card["ctx"])
+        self.assertEqual(card["detail"].split("\n\n")[0], "**Where:** in cart.py")
+        self.assertEqual(card["refs"][0]["tip"], "src/cart.py, line 42")
         self.assertEqual(card["proposed"]["k"], "fix")
         self.assertNotIn("stage", form)
 
@@ -295,6 +402,23 @@ class Cli(unittest.TestCase):
         doc["findings"][1]["finding"] = "  "
         with tempfile.TemporaryDirectory() as tmp, self.assertRaisesRegex(ValueError, "cut off.*R-03"):
             findings.board(doc, "x", "t", tmp)
+
+    def test_dialog_and_suggest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["REVIEW_FINDINGS_DIR"] = tmp
+            self.addCleanup(os.environ.pop, "REVIEW_FINDINGS_DIR", None)
+            path = findings.session_findings("abc/def")
+            self.assertEqual(path, os.path.join(tmp, "abc_def.findings"))
+            findings.dump(path, findings.parse_brief(fixture("brief-open.txt"), "domain-design"))
+            code, out, _ = self.run_cli("dialog", "--session", "abc/def")
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(out)["needs_suggestion"], ["R-03"])
+            code, out, _ = self.run_cli("suggest", "--findings", path, "--set", '{"R-03": "Use one name for the event."}')
+            self.assertEqual((code, json.loads(out)), (0, {"set": ["R-03"]}))
+            out = json.loads(self.run_cli("dialog", "--findings", path)[1])
+            self.assertEqual(out["needs_suggestion"], [])
+            self.assertIn("**Suggested:** Use one name for the event.", out["markdown"])
+            self.assertEqual(self.run_cli("dialog", "--session", "nobody")[0], 1)
 
     def test_errors_exit_one(self):
         code, _, err = self.run_cli("summary", "--findings", os.path.join(FIXTURES, "brief-open.txt"))

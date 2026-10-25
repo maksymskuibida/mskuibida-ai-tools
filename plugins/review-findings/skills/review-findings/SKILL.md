@@ -1,6 +1,6 @@
 ---
 name: review-findings
-description: Use whenever review findings reach the developer — the review brief printed at an AI-DLC approval gate (`aidlc engine review-brief review --stage …`) with open findings, or the result of a code review (`/code-review`, the ReportFindings tool). Show a compact summary of the open findings, ask one question first (Fix / Accept / Open in form), and act on the answer; Open in form sorts each finding in a board form in the developer's "AI-DLC question forms" artifact. A hook holds back everything else until the question is answered.
+description: Use whenever review findings reach the developer — the review brief printed at an AI-DLC approval gate (`aidlc engine review-brief review --stage …`) with open findings, or the result of a code review (`/code-review`, the ReportFindings tool). Show each open finding in plain words with a suggested action, ask one question first (Fix / Accept / Open in form), and act on the answer; Open in form sorts each finding in a board form in the developer's "AI-DLC question forms" artifact. A hook holds back everything else until the question is answered.
 ---
 
 # Review findings
@@ -39,18 +39,26 @@ brief or the report. It holds the summary block and the path of a saved findings
 ## 2. The summary and the question
 
 Print the summary block from the hook message in chat (or render it again with `FINDINGS summary
---findings <file>`):
+--findings <file>`). It shows each open finding in plain words, with its suggested action and no
+ids, rule codes or paths in the sentences:
 
 ```
 **Review findings — Domain Design:** 2 open, 1 blocking
-| ID | Severity | Where | Finding |
-|---|---|---|---|
-| R-02 | Major | domain-model.md > Cart aggregate | The `Cart` rule is ambiguous. |
+
+1. **The `Cart` rule `checkout | expire` is ambiguous.** (Blocking, domain model › Cart aggregate, invariants list) Two events can fire on the same cart, …
+   Suggested: State the winning event. Add one line on what happens to reserved stock.
 ```
 
-Then ask one `AskUserQuestion` and nothing else before it (`FINDINGS question --findings <file>`
-prints it as JSON): header `Findings`, question `"3 review findings are open (1 blocking). What
-should I do with them?"` (`(none blocking)` when no finding blocks), and the options in this order:
+When you talk about a finding in chat, do the same: its number in this list and its words, never
+`R-02` or `src/cart.py:42` in the sentence.
+
+Then ask one `AskUserQuestion` and nothing else before it: `FINDINGS question --findings <file>`
+prints its input as JSON, `metadata: {"source": "review-findings"}` included; pass it as it is.
+The plugin's mod builds the question again from the saved findings and draws every finding above
+the dialog (Markdown on desktop, plain lines on the terminal), with a suggested action written by
+a model for each finding whose reviewer named none. The question: header `Findings`, question
+`"3 review findings are open (1 blocking). What should I do with them?"` (`(none blocking)` when no
+finding blocks), and the options in this order:
 
 - `Fix`: "Fix every open finding. At a stage gate this goes through Request Changes with the
   findings as the reason."
@@ -96,7 +104,10 @@ that skill's § 1 to publish it first.
    boxes: **Fix** ("Fixed before approval"), **Accept** ("Carried as a known risk") and **Reject
    (reason required)** ("Not applicable; write why in the note"). Each finding is one card: the
    title is its first sentence, the details hold Where, Finding and Required action, and it starts
-   in Fix when it blocks and in Accept when it does not.
+   in Fix when it blocks and in Accept when it does not. Its details say, in plain words, what is
+   wrong, the suggested action and where; the card also carries them apart (`what`, `suggested`,
+   `detail`), with `refs` (what the finding points at, linked when it is another card of the form)
+   and a `badge` for the page (question-forms § 5).
 2. Write the rows with **one** `ArtifactData` `batch` whose `writes` are the array in
    `writes.json`, as it is (new rows: no `if_version`).
 3. Send the form check, as `question-forms` § 5b A says: `AskUserQuestion`, header `Form`, question

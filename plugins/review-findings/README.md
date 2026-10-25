@@ -1,7 +1,7 @@
 # review-findings
 
 When review findings reach you, you decide what happens to them before anything else does. The
-agent shows a short summary of the open findings and asks one question: **Fix**, **Accept** (only
+agent shows each open finding in plain words, with a suggested action, and asks one question: **Fix**, **Accept** (only
 when nothing blocks) or **Open in form**. A hook keeps that order.
 
 Two sources, nothing else in this version:
@@ -19,20 +19,37 @@ skills/review-findings/SKILL.md   the procedure: the summary, the question, what
 skills/release/SKILL.md           /review-findings:release
 scripts/findings.py               parses a brief, a review-NN.md or a ReportFindings input; renders the summary and the board rows
 hooks/findings_guard.py           the guard (PreToolUse, PostToolUse, UserPromptSubmit)
+hooks/register.tsx                the mod: builds the question from the saved findings and draws them above the dialog
 ```
 
 ## What you see
 
-A summary in chat, then the question:
+The findings in plain words, in chat and again above the question (the mod draws them in the
+dialog's frame: Markdown on desktop, up to 48 rows; plain lines on the terminal, up to 12; what does
+not fit is counted on one line that points at the form). No finding ids, rule codes or `file:line`
+in the sentences:
 
 ```
-**Review findings — Domain Design:** 3 open, 1 blocking
-| ID | Severity | Where | Finding |
-|---|---|---|---|
-| R-02 | Major | domain-model.md > Cart aggregate | The `Cart` rule is ambiguous. |
-...
-3 review findings are open (1 blocking). What should I do with them?   Fix / Open in form
+## Review findings · Domain Design
+2 open, 1 blocking. Choose below what happens to them.
+
+### 1 · The `Cart` rule `checkout | expire` is ambiguous.
+- **Blocking** · domain model › Cart aggregate, invariants list
+- Two events can fire on the same cart, and the model does not say which one wins. …
+- **Suggested:** State the winning event. Add one line on what happens to reserved stock.
+
+### 2 · The Events table lists `OrderPlaced` but the flow text calls it `CheckoutDone`.
+- **Not blocking** · domain model › Events
+- **Suggested:** Use one name for the order event in the table and the flow text.
+
+2 review findings are open (1 blocking). What should I do with them?   Fix / Open in form
 ```
+
+The suggested action is the reviewer's required action. Where the reviewer named none (a code
+review's findings, an AI-DLC finding without a `Required action:` line), the mod asks a model for
+one sentence (`suggestModel`, Haiku by default; `off` keeps a fixed line), once per round, and
+keeps it only when it carries no id. Another finding's id in the text becomes "finding 2"; a path
+with a line becomes the file's name.
 
 - **Fix.** At a stage gate the agent presents the gate as usual and says that Request Changes
   carries the findings. When you pick Request Changes, the reason names every open finding and its
@@ -82,12 +99,26 @@ does not.
 findings.py parse --brief FILE | --review FILE | --report FILE [--stage SLUG] [--unit U]
 findings.py summary  --findings FILE
 findings.py question --findings FILE
+findings.py dialog   --findings FILE | --session ID      (what the mod draws and asks, as JSON)
+findings.py suggest  --findings FILE --set JSON          (records the model's suggested actions)
 findings.py board    --findings FILE [--id ID] [--title T] [--project-dir D] --out DIR
 ```
 
 `board` writes `forms.json`, `cards/<id>.json` and `writes.json` for one `ArtifactData` batch: the
 form `forms/<id>` (`view: "board"`, three boxes) and a `forms/<id>/questions/<finding id>` card per
-finding, in the contract of the `question-forms` template. The form id is
+finding, in the contract of the `question-forms` template. Each card's `ctx` is the plain words
+(What's wrong, Suggested, Where); the card also carries the optional fields `what`, `suggested`,
+`suggestedBy`, `detail`, `refs` and `badge` for a page that draws them apart:
+
+```json
+"refs": [{"t": "domain model › Cart aggregate", "kind": "section", "tip": "domain-model.md > Cart aggregate"},
+         {"t": "finding 2", "kind": "finding", "tip": "R-04, card 2 in this form", "qid": "R-04"}],
+"badge": {"t": "Blocking", "tip": "Major: a Critical or Major finding blocks approval until it is fixed or rejected."}
+```
+
+A ref with `qid` points at another card of the same form; one without points at something the form
+does not hold (a document section, a file, a finding closed before this round), and `tip` is all
+that is known of it. The form id is
 `<intent>-<stage>[-<unit>]-findings-<YYYYMMDDTHHMM>`, or `code-review-<YYYYMMDDTHHMM>`.
 
 ## Install
@@ -108,6 +139,9 @@ claude plugin install review-findings@mskuibida-tooling
 
 ```bash
 python3 -m unittest discover -s plugins/review-findings/tests
+claude plugin validate plugins/review-findings
+claude plugin test plugins/review-findings
 ```
 
-Standard library only; no network and no `aidlc` binary needed.
+The Python suites use the standard library only; no network and no `aidlc` binary needed. The
+mod's tests (`tests/dialog.test.tsx`) stand in for the engine, findings.py and the model.
