@@ -110,7 +110,7 @@
   --med-bg: #E3ECFB; --med-fg: #1E4A9A; --low-bg: #EEF0F3; --low-fg: #4A5160;
   --ok-bg: #E6F4EA; --ok-fg: #1F6B36; --warn-bg: #FFF4DB; --warn-fg: #7A4B00; --warn-dot: #B26B00;
   --r2-tint: #F8F5FE; --r2-bg: #EDE5FC; --r2-fg: #5B2FA8;
-  --band-bg: #171A21; --band-fg: #FFFFFF; --band-muted: #C9CDD6; --tip-bg: #171A21; --tip-fg: #FFFFFF;
+  --band-bg: #171A21; --band-fg: #FFFFFF; --band-muted: #C9CDD6; --band-line: #171A21; --tip-bg: #171A21; --tip-fg: #FFFFFF; --tip-line: #171A21; --on-accent: #FFFFFF;
   --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
   --bar-h: 120px;
@@ -123,7 +123,7 @@
   --med-bg: #1C2A45; --med-fg: #9DBBF2; --low-bg: #262A33; --low-fg: #AEB4C0;
   --ok-bg: #183024; --ok-fg: #8FD3A6; --warn-bg: #3A2C12; --warn-fg: #F0C36B; --warn-dot: #F0A93B;
   --r2-tint: #1E1A2B; --r2-bg: #2E2547; --r2-fg: #C7B1F5;
-  --band-bg: #E6E8EE; --band-fg: #111318; --band-muted: #3D4350; --tip-bg: #E6E8EE; --tip-fg: #111318;
+  --band-bg: #252A34; --band-fg: #E6E8EE; --band-muted: #C3C8D2; --band-line: #343946; --tip-bg: #2B303B; --tip-fg: #E6E8EE; --tip-line: #3A3F4B; --on-accent: #111318;
   color-scheme: dark } }
 :root[data-theme="dark"] {
   --bg: #111318; --surface: #1A1D24; --raised: #20232B; --fg: #E6E8EE; --fg-2: #C3C8D2; --muted: #9AA1AF;
@@ -133,7 +133,7 @@
   --med-bg: #1C2A45; --med-fg: #9DBBF2; --low-bg: #262A33; --low-fg: #AEB4C0;
   --ok-bg: #183024; --ok-fg: #8FD3A6; --warn-bg: #3A2C12; --warn-fg: #F0C36B; --warn-dot: #F0A93B;
   --r2-tint: #1E1A2B; --r2-bg: #2E2547; --r2-fg: #C7B1F5;
-  --band-bg: #E6E8EE; --band-fg: #111318; --band-muted: #3D4350; --tip-bg: #E6E8EE; --tip-fg: #111318;
+  --band-bg: #252A34; --band-fg: #E6E8EE; --band-muted: #C3C8D2; --band-line: #343946; --tip-bg: #2B303B; --tip-fg: #E6E8EE; --tip-line: #3A3F4B; --on-accent: #111318;
   color-scheme: dark }
 
 * { box-sizing: border-box; }
@@ -184,9 +184,7 @@ h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em; line
 .meter i { display: block; height: 6px; background: var(--accent); transition: width .2s; }
 .btn { height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--control); background: var(--surface); }
 .btn:hover, .pill:hover { border-color: var(--accent); }
-.primary { height: 32px; padding: 0 16px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; font-weight: 600; }
-:root[data-theme="dark"] .primary { color: #111318; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .primary { color: #111318; } }
+.primary { height: 32px; padding: 0 16px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: var(--on-accent); font-weight: 600; }
 .primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
 .primary:disabled { opacity: .55; cursor: default; }
 .primary.is-done { background: var(--ok-fg); border-color: var(--ok-fg); }
@@ -227,9 +225,9 @@ button.tag:hover { filter: brightness(.96); }
 .term { text-decoration: underline dotted color-mix(in srgb, var(--fg) 45%, transparent); text-underline-offset: 3px; cursor: help; border-radius: 2px; }
 .refs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .refs > span { font-size: 12px; color: var(--muted); }
-#tip { position: fixed; z-index: 30; max-width: min(340px, calc(100vw - 24px)); padding: 8px 10px; border-radius: 6px; background: var(--tip-bg); color: var(--tip-fg); font: 12px/1.45 var(--body); pointer-events: none; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
+#tip { position: fixed; z-index: 30; max-width: min(340px, calc(100vw - 24px)); padding: 8px 10px; border-radius: 6px; background: var(--tip-bg); color: var(--tip-fg); border: 1px solid var(--tip-line); font: 12px/1.45 var(--body); pointer-events: none; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
 #tip b { font-family: var(--mono); font-weight: 500; }
-#toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); max-width: calc(100vw - 32px); background: var(--tip-bg); color: var(--tip-fg); padding: 8px 14px; border-radius: 8px; font-size: 13px; z-index: 31; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
+#toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); max-width: calc(100vw - 32px); background: var(--tip-bg); color: var(--tip-fg); border: 1px solid var(--tip-line); padding: 8px 14px; border-radius: 8px; font-size: 13px; z-index: 31; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
 .flash { animation: flash 1.6s ease-out; }
 @keyframes flash { 0% { box-shadow: 0 0 0 3px var(--accent); background-color: var(--accent-tint); } 100% { box-shadow: 0 0 0 0 transparent; } }
 
@@ -287,11 +285,10 @@ section.q.needs-note .note label { color: var(--crit-fg); }
 .proposal .tag { background: var(--accent-soft); color: var(--accent); margin-right: 8px; vertical-align: 1px; }
 .use { height: 32px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--accent); background: var(--surface); color: var(--accent); font-weight: 600; }
 .use:hover { background: var(--accent-soft); }
-.use[aria-pressed="true"] { background: var(--accent); color: var(--surface); }
+.use[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
 
-.band { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 14px 18px; border-radius: 12px; background: var(--band-bg); color: var(--band-fg); }
+.band { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 14px 18px; border-radius: 12px; background: var(--band-bg); color: var(--band-fg); border: 1px solid var(--band-line); }
 .band span { color: var(--band-muted); flex: 1 1 260px; } .band b { font-weight: 500; }
-.band .primary { background: var(--band-fg); color: var(--band-bg); border-color: var(--band-fg); }
 .band .primary.is-done { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-bg); }
 
 /* Board: boxes side by side when the column is wide enough, stacked otherwise. */
