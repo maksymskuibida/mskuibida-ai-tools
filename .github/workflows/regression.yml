@@ -43,6 +43,7 @@ jobs:
         # every event; on a PR the guard also requires a bump for any plugin changed against its base.
         run: |
           python3 -m unittest discover scripts/tests
+          python3 scripts/sync-shared.py --check
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             python3 scripts/check-versions.py --base "origin/${{ github.base_ref }}"
           else
@@ -98,6 +99,12 @@ jobs:
         run: |
           claude plugin validate plugins/unit-claim
           claude plugin test plugins/unit-claim
+
+      - name: Validate and test aidlc-ids
+        # Not best effort, same as model-fit.
+        run: |
+          claude plugin validate plugins/aidlc-ids
+          claude plugin test plugins/aidlc-ids
 
       - name: Validate the marketplace and the plugins without a test command
         run: |
