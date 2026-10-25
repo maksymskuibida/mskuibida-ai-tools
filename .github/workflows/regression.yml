@@ -60,7 +60,7 @@ jobs:
       - name: Install the Claude Code CLI
         # Pinned on purpose: the mod API is early-access and moves between releases, so a
         # new CLI must be adopted by bumping this version, not by a CI run that broke overnight.
-        # 2.1.295 is the oldest build that knows the models model-fit routes to; 2.1.302 the oldest that draws a
+        # 2.1.295 is the oldest build that knows the models model-fit routes to; 2.1.295 refuses, and 2.1.302 draws, a
         # Markdown block above the question dialog (review-findings and unit-claim draw one there).
         run: npm install -g @anthropic-ai/claude-code@2.1.302
 
