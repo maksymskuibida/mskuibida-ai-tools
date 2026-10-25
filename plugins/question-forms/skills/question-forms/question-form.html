@@ -143,6 +143,7 @@ button:focus-visible, a:focus-visible, textarea:focus-visible, input:focus-visib
 .num { font-variant-numeric: tabular-nums; }
 .wrap { width: 100%; max-width: 920px; margin: 0 auto; padding-block: 24px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 16px; }
 body.wide .wrap { max-width: 1320px; }
+#app { display: flex; flex-direction: column; gap: 16px; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
 
@@ -408,8 +409,10 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
   .head { padding: 16px; }
   section.q { padding: 16px; }
   .qbody { padding-left: 0; }
-  .qhead { flex-wrap: wrap; }
-  .qtags { max-width: none; width: 100%; justify-content: flex-start; order: 3; }
+  /* the tags sit under the title, aligned with it, not under the id */
+  .qhead { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 12px; }
+  .qtags { grid-column: 2; max-width: none; justify-content: flex-start; }
+  .qtags:not(:has(.tag)) { display: none; }
   .tools { margin-left: 0; width: 100%; }
   .tools .grow-sp { flex: 1; }
   .meter { width: 64px; }
