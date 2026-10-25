@@ -1,18 +1,23 @@
 # unit-claim
 
-Before a team AI-DLC Unit is claimed, you choose which design stages it runs and how it is approved. You choose
-once, in one dialog, and you can save the choice so you are not asked again.
+Before a team AI-DLC Unit is claimed, you choose which design stages it runs and how it is approved. You choose in
+one dialog, with a recommendation for each stage shown above it.
 
-The agent sends two messages before the claim:
+The agent opens the dialog, and the plugin's mod fills it in:
 
-1. **Its reasoning, as plain text.** One line per design stage (Functional Design, NFR Requirements, NFR Design,
-   Infrastructure Design). Each line is judged against that stage's own `condition:` from the project's stage graph.
-2. **One dialog with three questions:**
-   - **Stages**: which design stages run. You can pick several. The question line names the agent's pick, and those
-     options are marked "(Recommended)".
-   - **Rhythm**: `unit-end` (one plan page before the code and one page at the end, through the approval-gates
-     plugin) or `per-stage` (an approval after every stage, as today).
-   - **Save**: No, For me, or For this project.
+- **Above the dialog**: suggested design stages. A model (Sonnet by default) reads the Unit's entry in
+  `unit-of-work.md`, its stories and each stage's own `condition:` from the project's stage graph. It splits the four
+  stages (Functional Design, NFR Requirements, NFR Design, Infrastructure Design) into **Recommended stages** and
+  **Skip these**, with a reason under each.
+- **Stages**: "Suggested stages", "All four stages", or type your own under Other.
+- **Rhythm**: the rhythms the project's pinned engine accepts (`aidlc unit claim --help`): today `unit-end` (one plan
+  page before the code and one page at the end, through the approval-gates plugin) and `per-stage` (an approval after
+  every stage). No default is picked for you.
+
+What you type under Other is read by a second model (Haiku by default), so typos and short forms work ("funtional
+desgn, nfr reqs", "infra", "per stag"). An answer that names something that isn't a stage or rhythm, or names a stage
+twice, is refused. The refusal and a suggestion of what you probably meant are shown above the same two questions,
+asked again.
 
 The Unit is then claimed with `--rhythm <your choice>`. Each stage you left out is skipped **for that Unit only**,
 through the engine's per-Unit conditional skip:
@@ -22,51 +27,45 @@ aidlc engine orchestrate report --stage <slug> --unit <unit> --result skipped --
 ```
 
 If you pick NFR Design without NFR Requirements, NFR Requirements is added back, and the agent tells you in one line.
-Summary confirmation stays a project setting and isn't asked.
+Nothing is saved across Units: every claim asks.
 
 ```
+hooks/register.tsx           the mod: the dialog's questions, the recommendation above it, reading typed answers, recording
+hooks/claim_guard.py         the guard (PreToolUse, PostToolUse, UserPromptSubmit)
+hooks/hooks.json             registers both
+scripts/claim_choice.py      the stage conditions, the Unit's brief, the recorded answer, the skip commands
 skills/unit-claim/SKILL.md   the procedure the agent follows before a claim
-scripts/claim_choice.py      the stage conditions, the choice in force, saving, the skip commands
-hooks/claim_guard.py         the guard (PreToolUse, PostToolUse, UserPromptSubmit; hooks/hooks.json registers it)
 ```
 
-## Saving a choice
+## How the dialog is opened
 
-Once a choice is saved, the dialog isn't shown again.
-
-- **For me**: the choice is saved in the plugin's data folder (`$CLAUDE_PLUGIN_DATA/choice.json`, else
-  `~/.claude/plugins/data/unit-claim/`). It applies to every project.
-- **For this project**: a bookkeeping pull request adds `.unit-claim.json` at the project root. The agent offers to
-  run it in its own session:
-  - if it runs there, the Unit carries on here with your choice;
-  - if it runs here, the agent creates the pull request first, then follows the project's and your own rules for
-    after a PR is opened, then offers to continue the Unit.
-
-  A project choice wins over yours.
-
-A saved choice is either a fixed set of stages (what the dialog saves) or `"agent"`, which means "use the agent's
-pick for each Unit without asking". The reasoning message is still sent. To set the second form, ask the agent, which
-runs `claim_choice.py save --scope me --stages agent --rhythm unit-end`.
+A mod can ask only one question at a time on its own (`$.ui.ask`); `AskUserQuestion` is the model's. So the agent
+calls `AskUserQuestion` with `metadata.source` set to `unit-claim:<unit>` and a placeholder question. The mod catches
+that call, puts its two questions in, and draws the recommendation (or a refusal) above the dialog. Once you have
+answered, it records the answer with `claim_choice.py record` and adds one line for the agent: either recorded and
+claim with `--rhythm`, or refused and ask again. Nothing reads the session transcript.
 
 ## What the hook refuses
 
 - **The claim**: `aidlc unit claim <unit>`, `aidlc --claim <unit>`, or `aidlc-unit.ts claim <unit>`. It is refused
-  until that Unit's dialog is answered or a saved choice exists, and also when the command lacks
-  `--rhythm <the chosen rhythm>`.
-- **The dialog**:
-  - while a choice is saved;
-  - until a message of the agent since your last prompt names all four design stages;
-  - when it is not the three-question shape above.
+  until that Unit has a recorded answer, and also when the command lacks `--rhythm <the chosen rhythm>`. The refusal
+  tells the agent how to open the dialog.
+- **Recording an answer by the agent**: `claim_choice.py record` from Bash, and writing an answer file by hand. An
+  answer is recorded only by the mod, after you answer.
 - **`aidlc engine state unit start`** of a stage the choice leaves out for that Unit. The refusal names the skip
   report to run instead.
-- **Saving a choice the developer didn't ask for**: `claim_choice.py save` passes only after "For this project" in the
-  dialog (with the same stages and rhythm), or when the developer's last message asks to save. Writing a choice file
-  by hand (`.unit-claim.json`, the plugin's data folder) is refused.
 - **A claim whose Unit can't be read**, such as options before the Unit that the hook doesn't know.
 
 The hook does nothing outside an AI-DLC project (no `aidlc/spaces`). It never fails an after-call or prompt hook.
 The answer of each Unit is kept in the plugin's data folder (`answers/<project>/<intent>/<unit>.json`).
 `UNIT_CLAIM_DIR` changes that folder; the tests use it.
+
+## Settings
+
+| Setting | Default | What it does |
+|---|---|---|
+| Recommendation model (`recommendModel`) | `claude-sonnet-5-5` | Writes the run or skip recommendation and a reason per stage |
+| Answer resolver model (`resolveModel`) | `claude-haiku-5-5` | Reads stage names or a rhythm you typed under Other |
 
 ## Install
 
@@ -74,6 +73,9 @@ The answer of each Unit is kept in the plugin's data folder (`answers/<project>/
 claude plugin marketplace add maksymskuibida/mskuibida-ai-tools
 claude plugin install unit-claim@mskuibida-tooling
 ```
+
+The dialog needs a Claude Code build that loads plugin mods (`"modules"` in `hooks/hooks.json`). Without the mod, the
+hook still refuses the claim, but nothing fills in the dialog.
 
 ## Pairs with
 
@@ -84,6 +86,8 @@ claude plugin install unit-claim@mskuibida-tooling
 
 ```bash
 python3 -m unittest discover -s plugins/unit-claim/tests
+claude plugin test plugins/unit-claim
 ```
 
-They use the Python 3 standard library only.
+The first covers the hook and the script, with the Python 3 standard library only. The second runs the mod's tests
+(`tests/dialog.test.ts`) against the engine, with the dialog, the processes and the two models stood in for.
