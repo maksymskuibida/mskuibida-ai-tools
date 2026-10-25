@@ -12,8 +12,8 @@
     claim_choice.py forget   --unit <u> [--project-dir <dir>]      drop the answer recorded for the Unit
 
 The answer of each Unit is kept in <data>/answers/<project key>/<intent>/<unit>.json, where <data> is $UNIT_CLAIM_DIR,
-else $CLAUDE_PLUGIN_DATA, else ~/.claude/plugins/data/unit-claim. Nothing is saved across Units: every claim is
-asked. Standard library only.
+else ~/.claude/plugins/data/unit-claim, and the project key is the main checkout's, shared by its git worktrees.
+Nothing is saved across Units: every claim is asked. Standard library only.
 """
 
 import argparse
@@ -53,8 +53,9 @@ class ChoiceError(Exception):
 # ---------------------------------------------------------------- places
 
 def data_dir():
-    return (os.environ.get("UNIT_CLAIM_DIR") or os.environ.get("CLAUDE_PLUGIN_DATA")
-            or os.path.join(os.path.expanduser("~"), ".claude", "plugins", "data", "unit-claim"))
+    """One folder for the hook and the mod alike. Not $CLAUDE_PLUGIN_DATA: the hook is given it, the processes the mod
+    starts are not, so the two would read and write different folders."""
+    return os.environ.get("UNIT_CLAIM_DIR") or os.path.join(os.path.expanduser("~"), ".claude", "plugins", "data", "unit-claim")
 
 
 def first_line(path):
@@ -96,13 +97,44 @@ def project_dir(cwd=None, given=None):
     return os.path.abspath(cwd or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
 
 
+def main_checkout(folder):
+    """The repository's main checkout when `folder` is a linked git worktree (its `.git` is a file pointing into the
+    main checkout's `.git/worktrees/`), else `folder`. A session in a worktree may have its hooks run from the main
+    checkout and its mod's processes from the worktree: both must find the same answer."""
+    try:
+        with open(os.path.join(folder, ".git"), encoding="utf-8") as f:
+            line = f.readline().strip()
+    except OSError:
+        return folder
+    if not line.startswith("gitdir:"):
+        return folder
+    gitdir = os.path.join(folder, line[len("gitdir:"):].strip())
+    common = first_line(os.path.join(gitdir, "commondir"))
+    common = os.path.normpath(os.path.join(gitdir, common)) if common else ""
+    if os.path.basename(common) == ".git" and has_project(os.path.dirname(common)):
+        return os.path.dirname(common)
+    return folder
+
+
+def cursor(project, *parts):
+    """A gitignored AI-DLC cursor (active-space, active-intent): the checkout's own, else the main checkout's."""
+    for place in (project, main_checkout(project)):
+        found = first_line(os.path.join(place, "aidlc", *parts))
+        if found:
+            return found
+    return ""
+
+
+def active_space(project):
+    return cursor(project, "active-space") or "default"
+
+
 def intent_of(project):
-    space = first_line(os.path.join(project, "aidlc", "active-space")) or "default"
-    return first_line(os.path.join(project, "aidlc", "spaces", space, "intents", "active-intent")) or "no-intent"
+    return cursor(project, "spaces", active_space(project), "intents", "active-intent") or "no-intent"
 
 
 def project_key(project):
-    return hashlib.sha256(os.path.realpath(project).encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha256(os.path.realpath(main_checkout(project)).encode("utf-8")).hexdigest()[:12]
 
 
 def answer_path(project, unit):
@@ -221,8 +253,7 @@ def stage_info(project):
 
 
 def intent_dir(project):
-    space = first_line(os.path.join(project, "aidlc", "active-space")) or "default"
-    return os.path.join(project, "aidlc", "spaces", space, "intents", intent_of(project))
+    return os.path.join(project, "aidlc", "spaces", active_space(project), "intents", intent_of(project))
 
 
 def section(path, heading):

@@ -62,7 +62,8 @@ async function rhythmsOf($: EngineInterface, cwd: string): Promise<string[]> {
   const help = await run($, ['aidlc', 'unit', 'claim', '--help'], cwd).catch(() => ({ out: '', err: '' }))
   const found = /--rhythm\s+([a-z|-]+)/.exec(help.out + help.err)?.[1]?.split('|').filter(Boolean) ?? []
 
-  return found.length >= 2 ? found : Object.keys(RHYTHM_NOTES)
+  // unit-end first: the rhythm the plugin exists for.
+  return (found.length >= 2 ? found : Object.keys(RHYTHM_NOTES)).sort((a, b) => Number(b === 'unit-end') - Number(a === 'unit-end'))
 }
 
 async function recommend($: EngineInterface, model: string, unit: string, cwd: string): Promise<Recommendation> {

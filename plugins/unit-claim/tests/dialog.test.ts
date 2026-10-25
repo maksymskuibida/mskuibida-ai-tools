@@ -95,7 +95,7 @@ describe('the claim dialog', () => {
     expect(w.opened).toEqual([
       [
         { question: STAGES_Q, options: ['Suggested stages', 'All four stages'] },
-        { question: RHYTHM_Q, options: ['per-stage', 'unit-end'] },
+        { question: RHYTHM_Q, options: ['unit-end', 'per-stage'] },
       ],
     ])
     expect(w.recorded).toEqual([['--unit', UNIT, '--stages', 'functional-design', '--rhythm', 'unit-end']])
@@ -143,7 +143,7 @@ describe('the claim dialog', () => {
     const result = await $.tool.call(placeholder(`unit-claim:${UNIT}`))
 
     expect(w.recorded).toEqual([])
-    expect(result.context?.join(' ')).toContain('is not a rhythm of the pinned engine (per-stage, unit-end)')
+    expect(result.context?.join(' ')).toContain('is not a rhythm of the pinned engine (unit-end, per-stage)')
   })
 
   test('a stage the resolver invents is refused', async ($, on) => {
