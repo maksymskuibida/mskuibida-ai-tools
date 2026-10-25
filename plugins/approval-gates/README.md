@@ -61,13 +61,23 @@ Per-stage gates are unchanged.
 
 ## What you see
 
-A page per gate, newest first in a list grouped by intent. A gate uses the whole width: a compact
-header with the stage, round and what comes next; an outline on the left (every document and its
-sections, with Expand all and Collapse all); and a column of collapsible blocks: the agent's summary,
-the review (verdict, open-finding count, a findings table whose rows open to the finding, where and
-required action), then every document, each with its sections collapsible and a Note button for a
-note to Claude. JSON, questions and review copies start collapsed. A document longer than a database
-row is split at its headings and joined back on the page.
+A page per gate, newest first in a list grouped by intent. A gate looks and works like the unit approvals page:
+
+- A header card with the stage, the intent and phase, and its facts: the round (and why), the documents, the open
+  findings and your notes.
+- A sticky bar: filters (All, Unread, Changed, With notes, each with its count), your read progress, Expand all,
+  Collapse all, Mark all read, whether your notes are saved, and a chip per block (summary, review, every document)
+  that jumps to it. On wide screens an outline of every document's sections sits beside the blocks; on a phone it
+  opens from the bar.
+- Read marks are yours: a block is marked read with its dot. On a new round only the blocks whose text changed turn
+  unread.
+- From the second presentation of a stage on, the page compares itself with the previous one: changed and new
+  documents, and the changed sections inside them, carry the round's colour, and the Changed filter shows only those.
+- Then the blocks: the agent's summary, the review (verdict, open-finding count, a findings table whose rows open to
+  the finding, where and required action), then every document, each with its sections collapsible and an Add a
+  note button for a note to Claude. A note says whether it is saving, saved or not saved; a failed save is sent again
+  when you type, or with Retry in the bar. JSON, questions and review copies start collapsed. A document longer than a
+  database row is split at its headings and joined back on the page.
 
 Each document kind has its own view, with a Text switch back to the document as written:
 
@@ -104,9 +114,13 @@ Each document kind has its own view, with a Text switch back to the document as 
   steppers and every H2 as a collapsible section. Source tags such as `[Q3]` or `[assumption]` are
   quiet tags, and a `Q` id links to its question.
 
-Every id that names something in the gate (FR1.2, BR3.5, US1.1, AC1.1.2, ADR-003, U3, C4, R-02, an
-entity or component name) is a link: hover for the text, click to jump. A document whose shape is not
-recognised is Markdown with every H2 a collapsible section.
+Every id that names something in the gate (FR1.2, BR3.5, US1.1, AC1.1.2, ADR-003, U3, C4, R-02, Step 2), every
+entity, component or type name, and every file name of a document in the gate is a link: hover or focus it for the
+text, press it to jump there and see it highlighted. An id of a known kind (FR, NFR, BR, US, AC, ADR, U, Q, Step,
+Bolt, RAID, R-) whose target is not in the gate is still shown as a link: its tooltip says what kind of thing it is,
+and pressing it says it is not in this page. Badges explain themselves the same way: severity, likelihood and impact,
+priority, verdicts, statuses, source tags such as `[Q3]` or `[assumption]`, and the change marks. A document whose
+shape is not recognised is Markdown with every H2 a collapsible section.
 
 ## What the agent does
 
@@ -138,6 +152,7 @@ gates/<id>                  {title, stage, stageName, phase?, intent, project?, 
                              createdAt, summary?, brief?, review?, nextStage?, options, documents: [index]}
 gates/<id>/documents/<key>  {n, key, title, path, kind, text}
 page writes                 gates/<id>.notes[<key>]
+                            data/users/<viewer>/reads-<intent>--<stage>--<unit>   (the viewer's read marks)
 ```
 
 `<id>` is `<intent>-<stage>[-<unit>]-<YYYYMMDDTHHMM>`, new for every presentation. The full contract is

@@ -92,10 +92,13 @@ guessing.
 
 `/story-points:review` puts the intent's Units into one private artifact per developer, **AI-DLC story
 points**, published once from `skills/review/points-review.html` and reused for every review (the Units
-are rows in its database). Each Unit is a card with a short title, what it builds, its dependencies and
-a row of numbers from the scale. The value in the file carries a corner mark: an amber sparkle for an AI
-suggestion, a navy person for a developer estimate. A value off the scale shows as an extra dashed card.
-The developer's pick turns navy with the person mark; pressing the AI's number keeps it as theirs.
+are rows in its database). Each Unit is a card with a short title, what it builds, links to the Units it
+depends on, its stories and requirements, and a row of numbers from the scale. The value in the file carries
+a corner mark: an amber sparkle for an AI suggestion, a blue person for a developer estimate. A value off the
+scale shows as an extra dashed card. The developer's pick turns blue with the person mark; pressing the AI's
+number keeps it as theirs. A sticky bar jumps to any Unit, counts developer estimates against AI suggestions,
+filters to the Units still without a developer estimate, and shows whether the picks are saved, with Retry when
+a save fails. Every id, badge and term explains itself in a tooltip, and each viewer can mark Units read.
 
 The skill sends the link, then, as a separate message, asks for `form is done` (in the Claude desktop
 app, a single suggested reply button). Once the developer has pressed Done in the form and sent that,
