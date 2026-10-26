@@ -15,7 +15,7 @@
 
     gates/<id>                  {title, stage, stageName, phase?, intent, project?, unit?, round, why?,
                                  status: "open", createdAt (ISO), summary?, brief?,
-                                 review?: {verdict, reviewer, iteration, file}, nextStage?,
+                                 review?: {verdict, reviewer, iteration, file}, nextStage?, ids?,
                                  documents: [{key, title, path, kind, bytes, parts?}]}
       id: <intent>-<stage>[-<unit>]-<YYYYMMDDTHHMM>
       summary: Markdown (the agent's completion summary). brief: the review brief exactly as
@@ -26,6 +26,9 @@
       text: the file as is (JSON pretty-printed). A document longer than the row limit is split
       at its H2 headings into rows <key>-p1, <key>-p2, … with {key, part: 1.., parts: N}; the page
       joins the parts in order (an index entry carries `parts`).
+      ids: {<id>: {kind, title, text, doc, line}}, what each id the page shows is: the output of the shared
+      `aidlc_ids.py refs` over every text of the gate, with --near the stage's documents (shared/aidlc-ids/README.md
+      is its contract), so a Q1 or R-01 is this stage's and a BR1.1 this Unit's. gate_bundle.py writes it.
 
     Views. By the document's key the page renders a purpose-built view, with a Text switch back
     to the document as written: entities (the `entities:` YAML block as cards and an entity
@@ -34,8 +37,9 @@
     build layers), the story map, stories (cards by epic with Given/When/Then criteria),
     requirements (tables by group), decisions (ADR cards), bolt plans, contract operations and
     traceability coverage. Any other document, or one whose shape is not recognised, is Markdown
-    with every H2 a collapsible section. Ids such as FR1.2, BR3.5, US1.1, AC1.1.2, ADR-003, U3 or
-    C4 that name something in this gate are links to it.
+    with every H2 a collapsible section. Every id (FR1.2, BR3.5, US1.1, AC1.1.2, ADR-003, U3, C4, Q2,
+    R-01, …) is a link with a tooltip saying what it is, by the shared AidlcIds: live when this gate
+    shows its definition (data-aidlc-id), dotted when it is defined elsewhere, dashed when undefined.
 
   What the page writes (the only thing the agent reads back, one `get` of gates/<id>):
 
@@ -53,6 +57,162 @@
 -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script>
+/* aidlc-ids.js:begin */
+/* The ids an AI-DLC page shows (US1.1, AC1.1.2, FR1.4, NFR3, BR1.2, Q4, U31, C2, ADR-009, R-01, ...), each a link with
+   a tooltip saying what it is. Shared: the canonical copy is shared/aidlc-ids/aidlc-ids.js in mskuibida-ai-tools,
+   copied into every page by scripts/sync-shared.py. Edit it there.
+
+   The page gives it a map of what each id is, `ids` = {"FR1.4": {kind, title, text, doc}}, the output of
+   `aidlc_ids.py refs` written with the page's data, and marks each element that shows an id's own definition with
+   data-aidlc-id="<id>". Then:
+
+     AidlcIds.linkify(root, ids, { toast: fn })   turn every id in root's text into a link; run after each render
+     AidlcIds.observe(root, getIds, { toast: fn }) the same, again whenever root's content changes
+
+   A link whose id is shown in the page jumps there and flashes it. One that is not shown still looks like a link: its
+   tooltip says what it is, and a click shows a toast that it is not in this page. An id no document defines says so.
+   The tooltip is the page's own: the link carries data-tip and aria-label, which every page's tooltip reads. */
+var AidlcIds = (function () {
+  "use strict";
+  var ID = /(^|[^\w-])([A-Z][A-Z]{0,4}-?\d+[a-z]?(?:[.-]\d+[a-z]?)*(?:-[A-Z]{1,4}\d+[a-z]?)?)(?![\w-])/g;
+  var NOT_IDS = /^(UTF-?\d+|SHA-?\d+|ISO-?\d+|RFC-?\d+|HTTP-?\d+|TLS-?\d|H[1-6]|V\d+|X\d+|P\d|ES\d+|ID\d*)$/;
+  var KINDS = { US: "Story", AC: "Acceptance criterion", FR: "Functional requirement", NFR: "Non-functional requirement",
+    BR: "Business rule", Q: "Question", U: "Unit", C: "Contract", E: "External interface", ADR: "Decision record",
+    R: "Review finding", D: "Decision", DR: "Design rule", S: "Screen", M: "Mockup", T: "Task" };
+  var SKIP = "a, button, code, pre, script, style, textarea, input, select, option, [data-aidlc-noids]";
+
+  function prefix(id) { return (/^[A-Z]+/.exec(id) || [""])[0]; }
+  function docName(doc) { return String(doc || "").split("/").pop(); }
+
+  function anchorOf(id) {
+    var css = window.CSS && CSS.escape ? CSS.escape(id) : id.replace(/["\\]/g, "\\$&");
+    return document.querySelector('[data-aidlc-id="' + css + '"]');
+  }
+
+  /** The tooltip of an id: what it is, in plain words, and where it is written. */
+  function tip(id, def) {
+    if (!def) return id + ": not found in this project's documents.";
+    var kind = def.kind || KINDS[prefix(id)] || "";
+    var head = (kind ? kind + " " : "") + id + (def.title ? ": " + def.title : "");
+    var body = def.text && def.text !== def.title ? " " + def.text : "";
+    return head + (/[.!?…]$/.test(head) || !body ? "" : ".") + body + (def.doc ? " (" + docName(def.doc) + ")" : "");
+  }
+
+  /** Whether a word is an id this page knows of, or looks like one of a kind it knows. */
+  function isId(word, ids, prefixes) {
+    if (NOT_IDS.test(word)) return false;
+    return Object.prototype.hasOwnProperty.call(ids, word) || prefixes[prefix(word)] === true;
+  }
+
+  function linkify(root, ids, opts) {
+    if (!root) return;
+    ids = ids || {};
+    opts = opts || {};
+    var prefixes = {};
+    Object.keys(ids).forEach(function (k) { prefixes[prefix(k)] = true; });
+    Object.keys(KINDS).forEach(function (k) { prefixes[k] = true; });
+    // Keys of the page's own map that are not id-shaped (a form's q1, a card's f-3) are linked by their exact text.
+    var own = Object.keys(ids).filter(function (k) { return !/^[A-Z]/.test(k) && /^[\w.-]+$/.test(k); })
+      .sort(function (a, b) { return b.length - a.length; })
+      .map(function (k) { return k.replace(/[.-]/g, "\\$&"); });
+    var OWN = own.length ? new RegExp("(^|[^\\w-])(" + own.join("|") + ")(?![\\w-])", "g") : null;
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (n) {
+        if (!n.nodeValue || !(OWN ? /\d/ : /[A-Z]-?\d/).test(n.nodeValue)) return NodeFilter.FILTER_REJECT;
+        var p = n.parentElement;
+        return p && !p.closest(SKIP) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      }
+    });
+    var nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(function (node) {
+      var text = node.nodeValue, last = 0, frag = null, m;
+      var self = node.parentElement.closest("[data-aidlc-id]");
+      var found = [];
+      [ID, OWN].forEach(function (re) {
+        if (!re) return;
+        re.lastIndex = 0;
+        while ((m = re.exec(text))) found.push({ word: m[2], start: m.index + m[1].length, own: re === OWN });
+      });
+      found.sort(function (a, b) { return a.start - b.start; });
+      for (var i = 0; i < found.length; i++) {
+        var word = found[i].word, start = found[i].start;
+        if (start < last) continue;
+        if (!found[i].own && !isId(word, ids, prefixes)) continue;
+        if (self && self.getAttribute("data-aidlc-id") === word) continue;
+        frag = frag || document.createDocumentFragment();
+        frag.appendChild(document.createTextNode(text.slice(last, start)));
+        var a = document.createElement("a");
+        var def = ids[word];
+        a.className = "aidlc-id" + (def ? "" : " aidlc-id-unknown");
+        a.href = "#" + encodeURIComponent(word);
+        a.textContent = word;
+        a.setAttribute("data-aidlc-ref", word);
+        a.setAttribute("data-tip", tip(word, def));
+        a.setAttribute("aria-label", tip(word, def));
+        frag.appendChild(a);
+        last = start + word.length;
+      }
+      if (frag) {
+        frag.appendChild(document.createTextNode(text.slice(last)));
+        node.parentNode.replaceChild(frag, node);
+      }
+    });
+    markLive(root);
+    bind(root, opts);
+  }
+
+  /** Links whose id is shown in the page get the live look; the rest the out-of-page one. */
+  function markLive(root) {
+    Array.prototype.forEach.call(root.querySelectorAll("a.aidlc-id"), function (a) {
+      a.classList.toggle("aidlc-id-out", !anchorOf(a.getAttribute("data-aidlc-ref")));
+    });
+  }
+
+  function bind(root, opts) {
+    if (root.__aidlcIds) { root.__aidlcIds.opts = opts; return; }
+    root.__aidlcIds = { opts: opts };
+    root.addEventListener("click", function (e) {
+      var a = e.target.closest && e.target.closest("a.aidlc-id");
+      if (!a || !root.contains(a)) return;
+      e.preventDefault();
+      var id = a.getAttribute("data-aidlc-ref"), target = anchorOf(id);
+      var say = root.__aidlcIds.opts.toast || function (t) { window.alert(t); };
+      if (target) {
+        var closed = target.closest("details:not([open])");
+        if (closed) closed.open = true;
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+        target.classList.remove("aidlc-flash");
+        void target.offsetWidth;
+        target.classList.add("aidlc-flash");
+        if (target.tabIndex < 0 && !target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+        target.focus({ preventScroll: true });
+      } else if (a.classList.contains("aidlc-id-unknown")) {
+        say(id + " isn't defined in this project's documents.");
+      } else {
+        say(id + " isn't in this page. What it is: in its tooltip.");
+      }
+    });
+  }
+
+  function observe(root, getIds, opts) {
+    if (!root) return;
+    var busy = false;
+    var run = function () {
+      if (busy) return;
+      busy = true;
+      try { linkify(root, getIds(), opts); } finally { busy = false; }
+    };
+    run();
+    new MutationObserver(function () { if (!busy) window.requestAnimationFrame(run); })
+      .observe(root, { childList: true, subtree: true, characterData: true });
+  }
+
+  return { linkify: linkify, observe: observe, tip: tip, KINDS: KINDS };
+})();
+/* aidlc-ids.js:end */
+</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
@@ -71,7 +231,8 @@
   --ok-bg: #E6F4EA; --ok-fg: #1F6B36; --warn-bg: #FFF4DB; --warn-fg: #7A4B00; --warn-dot: #B26B00;
   --r2-tint: #F8F5FE; --r2-bg: #EDE5FC; --r2-fg: #5B2FA8; --r3-tint: #F1FAF8; --r3-bg: #DCF2EE; --r3-fg: #0F665F;
   --r4-tint: #FFF8EC; --r4-bg: #FCEBCB; --r4-fg: #8A5A00; --r5-tint: #FDF3F7; --r5-bg: #F9DCE8; --r5-fg: #9B2C5C;
-  --band-bg: #171A21; --band-fg: #FFFFFF; --band-muted: #C9CDD6; --tip-bg: #171A21; --tip-fg: #FFFFFF;
+  --band-bg: #171A21; --band-fg: #FFFFFF; --band-muted: #C9CDD6; --tip-bg: #171A21; --tip-fg: #FFFFFF; --tip-line: #171A21;
+  --on-accent: #FFFFFF;
   --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
   --bar-h: 112px;
@@ -85,7 +246,9 @@
   --ok-bg: #183024; --ok-fg: #8FD3A6; --warn-bg: #3A2C12; --warn-fg: #F0C36B; --warn-dot: #F0A93B;
   --r2-tint: #1E1A2B; --r2-bg: #2E2547; --r2-fg: #C7B1F5; --r3-tint: #15221F; --r3-bg: #1A3833; --r3-fg: #86DACB;
   --r4-tint: #241E12; --r4-bg: #3D3016; --r4-fg: #F0C36B; --r5-tint: #26161D; --r5-bg: #45212F; --r5-fg: #F2A2C2;
-  --band-bg: #E6E8EE; --band-fg: #111318; --band-muted: #3D4350; --tip-bg: #E6E8EE; --tip-fg: #111318;
+  /* the band, tooltips and the toast stay dark surfaces in dark mode, lifted off the page, never inverted to light */
+  --band-bg: #252A34; --band-fg: #E6E8EE; --band-muted: #C3C8D2; --tip-bg: #2B303B; --tip-fg: #E6E8EE; --tip-line: #3A3F4B;
+  --on-accent: #111318;
   color-scheme: dark } }
 :root[data-theme="dark"] {
   --bg: #111318; --surface: #1A1D24; --raised: #20232B; --fg: #E6E8EE; --fg-2: #C3C8D2; --muted: #9AA1AF;
@@ -96,7 +259,9 @@
   --ok-bg: #183024; --ok-fg: #8FD3A6; --warn-bg: #3A2C12; --warn-fg: #F0C36B; --warn-dot: #F0A93B;
   --r2-tint: #1E1A2B; --r2-bg: #2E2547; --r2-fg: #C7B1F5; --r3-tint: #15221F; --r3-bg: #1A3833; --r3-fg: #86DACB;
   --r4-tint: #241E12; --r4-bg: #3D3016; --r4-fg: #F0C36B; --r5-tint: #26161D; --r5-bg: #45212F; --r5-fg: #F2A2C2;
-  --band-bg: #E6E8EE; --band-fg: #111318; --band-muted: #3D4350; --tip-bg: #E6E8EE; --tip-fg: #111318;
+  /* the band, tooltips and the toast stay dark surfaces in dark mode, lifted off the page, never inverted to light */
+  --band-bg: #252A34; --band-fg: #E6E8EE; --band-muted: #C3C8D2; --tip-bg: #2B303B; --tip-fg: #E6E8EE; --tip-line: #3A3F4B;
+  --on-accent: #111318;
   color-scheme: dark }
 
 * { box-sizing: border-box; }
@@ -129,15 +294,16 @@ textarea { width: 100%; resize: vertical; font-size: 13px; }
 .pill.quiet { font-weight: 500; }
 [data-tip] { cursor: help; }
 a[data-tip], button[data-tip], summary [data-tip] { cursor: pointer; }
-.xref { color: var(--accent); text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; border-radius: 3px; }
-.xref:hover { background: var(--accent-soft); color: var(--accent-strong); }
-.xref.dead { text-decoration-style: dashed; color: var(--fg-2); }
-.xref.dead:hover { background: var(--line-soft); color: var(--fg); }
-#pop { position: fixed; z-index: 30; max-width: min(420px, calc(100vw - 24px)); background: var(--tip-bg); color: var(--tip-fg); border-radius: 8px; padding: 8px 11px; box-shadow: 0 8px 24px rgba(0,0,0,.2); font-size: 12.5px; line-height: 1.45; pointer-events: none; }
+/* the page's own links (names, files, steps) read like the shared id links: solid when the target is here, dotted when not */
+.xref { color: var(--accent); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; cursor: pointer; border-radius: 3px; }
+.xref:hover, a.aidlc-id:hover { background: var(--accent-soft); color: var(--accent-strong); border-radius: 3px; }
+.xref.dead { text-decoration-style: dotted; color: var(--fg-2); }
+.xref.dead:hover, a.aidlc-id.aidlc-id-unknown:hover { background: var(--line-soft); color: var(--fg); }
+#pop { position: fixed; z-index: 30; max-width: min(420px, calc(100vw - 24px)); background: var(--tip-bg); color: var(--tip-fg); border: 1px solid var(--tip-line); border-radius: 8px; padding: 8px 11px; box-shadow: 0 8px 24px rgba(0,0,0,.2); font-size: 12.5px; line-height: 1.45; pointer-events: none; }
 #pop b { font-weight: 600; margin-right: 6px; }
 #pop p { margin: 2px 0 0; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
 #pop small { display: block; margin-top: 4px; opacity: .75; }
-#toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); max-width: calc(100vw - 32px); background: var(--tip-bg); color: var(--tip-fg); padding: 9px 14px; border-radius: 8px; font-size: 13px; z-index: 40; box-shadow: 0 6px 18px rgba(0,0,0,.18); }
+#toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); max-width: calc(100vw - 32px); background: var(--tip-bg); color: var(--tip-fg); border: 1px solid var(--tip-line); padding: 9px 14px; border-radius: 8px; font-size: 13px; z-index: 40; box-shadow: 0 6px 18px rgba(0,0,0,.18); }
 .flash { animation: flash 1.8s ease-out; }
 @keyframes flash { 0% { background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent); } 70% { box-shadow: 0 0 0 2px transparent; } 100% { background: transparent; } }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -238,7 +404,7 @@ details[open] > summary > .caret, details[open] > summary .caret { transform: ro
 .seg { display: inline-flex; padding: 2px; border-radius: 7px; background: var(--line-soft); }
 .seg button { border: 0; min-height: 24px; padding: 0 9px; font-size: 12px; background: transparent; color: var(--muted); border-radius: 5px; }
 .seg button[aria-pressed="true"] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgba(23, 26, 33, .12); }
-.band { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 14px 18px; border-radius: 12px; background: var(--band-bg); color: var(--band-fg); }
+.band { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 14px 18px; border-radius: 12px; background: var(--band-bg); color: var(--band-fg); border: 1px solid var(--tip-line); }
 .band span { color: var(--band-muted); } .band b { font-weight: 500; } .band .end { margin-left: auto; font-family: var(--mono); font-size: 12px; }
 .nomatch { padding: 18px 20px; color: var(--muted); }
 
@@ -380,7 +546,7 @@ ol.steps > li > :first-child { margin-top: 0; } ol.steps > li > :last-child { ma
 ol.steps > li > p { margin: 0 0 .3em; }
 .md li.task { list-style: none; margin-left: -20px; padding-left: 24px; position: relative; overflow-wrap: anywhere; }
 .md li.task > p { margin: 0; }
-.tick { position: absolute; left: 0; top: .28em; width: 15px; height: 15px; border-radius: 4px; border: 1.5px solid var(--control); text-align: center; font: 700 11px/12px var(--body); color: #fff; }
+.tick { position: absolute; left: 0; top: .28em; width: 15px; height: 15px; border-radius: 4px; border: 1.5px solid var(--control); text-align: center; font: 700 11px/12px var(--body); color: var(--on-accent); }
 li.task.done > .tick { background: var(--ok-fg); border-color: var(--ok-fg); }
 li.task.done { color: var(--muted); }
 details.step { border: 1px solid var(--line); border-radius: 8px; padding: 0 12px; background: var(--surface); margin: 0; scroll-margin-top: calc(var(--bar-h) + 16px); }
@@ -448,6 +614,19 @@ figure.screen > details.sub { margin: 0; padding: 4px 12px 6px; border-top: 1px 
   .fact { min-width: 0; flex: 1 1 40%; }
 }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
+/* aidlc-ids.css:begin */
+/* Shared: the canonical copy is shared/aidlc-ids/aidlc-ids.css; scripts/sync-shared.py copies it into every page.
+   It uses the page's own tokens: --accent, --muted, --tip-bg (each page defines them). */
+a.aidlc-id { color: var(--accent, currentColor); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; cursor: pointer; white-space: nowrap; font-variant-numeric: tabular-nums; }
+a.aidlc-id:hover, a.aidlc-id:focus-visible { text-decoration-thickness: 2px; }
+a.aidlc-id.aidlc-id-out { text-decoration-style: dotted; }
+a.aidlc-id.aidlc-id-unknown { color: var(--muted, currentColor); text-decoration-style: dashed; }
+a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outline-offset: 2px; border-radius: 3px; }
+[data-aidlc-id] { scroll-margin-top: 96px; }
+@keyframes aidlc-flash { from { box-shadow: 0 0 0 3px var(--accent, #3b82f6); } to { box-shadow: 0 0 0 3px transparent; } }
+.aidlc-flash { animation: aidlc-flash 1.6s ease-out; border-radius: 6px; }
+@media (prefers-reduced-motion: reduce) { .aidlc-flash { animation: none; outline: 2px solid var(--accent, #3b82f6); } }
+/* aidlc-ids.css:end */
 </style>
 
 <main class="wrap">
@@ -495,7 +674,7 @@ figure.screen > details.sub { margin: 0; padding: 4px 12px 6px; border-top: 1px 
 
   let db = null, uid = null, tipOn = null;
   const fresh = () => ({ unsub: [], gate: null, docs: new Map(), docsLoaded: false, notes: {}, dirty: new Set(), noteStat: {}, unsaved: false, saving: false, failed: false,
-    noteTimer: null, painted: "", openNotes: new Set(), railSig: "", mode: {}, refs: new Map(), railOpen: {},
+    noteTimer: null, painted: "", openNotes: new Set(), railSig: "", mode: {}, refs: new Map(), ids: {}, railOpen: {},
     reads: {}, readKey: "", hashes: {}, filter: "all", prev: null, prevDocs: null, changed: {}, changedSecs: {} });
   const view = Object.assign({ id: "", diagrams: 0 }, fresh());
   const hasMd = () => typeof marked !== "undefined" && typeof DOMPurify !== "undefined";
@@ -538,7 +717,7 @@ figure.screen > details.sub { margin: 0; padding: 4px 12px 6px; border-top: 1px 
     root.querySelectorAll("pre > code.language-mermaid").forEach((code) => { code.parentElement.replaceWith(diagramBox(code.textContent)); });
   }
   function diagramBox(source) {
-    const box = document.createElement("div"); box.className = "diagram"; box.dataset.src = source;
+    const box = document.createElement("div"); box.className = "diagram"; box.dataset.src = source; box.dataset.aidlcNoids = "";
     const src = document.createElement("pre"); src.className = "src"; src.textContent = source; box.appendChild(src);
     return box;
   }
@@ -727,6 +906,7 @@ figure.screen > details.sub { margin: 0; padding: 4px 12px 6px; border-top: 1px 
     if (g.brief) fillBrief(g);
     docs.forEach((d, i) => fillDoc(d, i));
     docs.forEach((d) => { const b = $("d-" + d.key); if (b && d.path) regRef("file:" + d.path.split("/").pop().toLowerCase(), b, d.title || d.key, d.path.split("/").pop()); });
+    view.ids = idMap(docs);
     linkRefs(el.col);
     tipTerms(el.col);
     rowHandles(el.col);
@@ -958,20 +1138,39 @@ figure.screen > details.sub { margin: 0; padding: 4px 12px 6px; border-top: 1px 
   }
 
   /* ---------- cross-references ----------
-     An id, a name (entity, component, schema, type) or a document's file name that names something in this gate is a
-     live link: it jumps there and highlights it. An id of a known kind whose target is not in this gate still reads
-     as a link: its tooltip says what is known, and a click says it is not in this page. */
-  const ID_RE = /\b((?:ADR|RAID|NFR|SCD|SM|SD|RD|PD|OD|IB|CT|CO|CR|CB|OC|RC|TC|SC|BR|FR|US|AC|WF|RA|R|U|C|D|E|P|Q|A|I|S|M|T)-?\d+(?:\.\d+)*[a-z]?(?:-\d+)?|Step \d+|Bolt \d+)\b/g;
+     Ids (FR1.2, BR3.5, US1.1, AC1.1.2, ADR-003, U3, C4, Q2, R-01 and every other kind) are linked one way, by the shared
+     AidlcIds (aidlc-ids.js above), wherever they stand: a link with a tooltip saying what the id is, live when this gate
+     shows its definition (the element regRef marks with data-aidlc-id), dotted when the project defines it elsewhere,
+     dashed when no document does. What an id is comes from the gate's `ids` (aidlc_ids.py refs), and for an id only
+     this page defines, from what the page shows of it.
+     The page's own links (.xref) are for what is not an id: a name (entity, component, schema, type) or a document's
+     file name that names something in this gate, and a Step or Bolt number. They jump there and highlight it. */
+  const IDISH = /^[A-Z][A-Z]{0,4}-?\d+[a-z]?(?:[.-]\d+[a-z]?)*(?:-[A-Z]{1,4}\d+[a-z]?)?$/;
+  const PAGE_REF = /\b(Step \d+|Bolt \d+)\b/g;
   const HEAD_ID = /^((?:[A-Z]{1,5}-?\d+(?:\.\d+)*[a-z]?|Step \d+|Bolt \d+))\b/;
   const BULLET_ID = /^((?:ADR|BR|FR|NFR|US|AC|WF|U|C|R|TC|SC|E|D)-?\d+(?:\.\d+)*[a-z]?)\b/;
   const FILE_RE = /\b([a-z0-9][a-z0-9_-]*\.(?:md|json))\b/g;
-  /* what each kind of id is, in plain words; an id of a kind not listed here links only when its target is in the gate */
-  const GLOSS = [[/^NFR/, "a non-functional requirement"], [/^FR/, "a functional requirement"], [/^BR/, "a business rule"], [/^US/, "a user story"],
-    [/^AC/, "an acceptance criterion of a user story"], [/^ADR/, "an architecture decision"], [/^Q\d/, "a question from a questions file of this intent"],
-    [/^U\d/, "a Unit of work"], [/^Step /, "a step of the code generation plan"], [/^Bolt /, "a Bolt of the bolt plan"], [/^RAID/, "an entry of the RAID log"],
-    [/^R-\d/, "a reviewer finding"]];
+  /* what a Step or Bolt number is, in plain words, when its target is not in this gate */
+  const GLOSS = [[/^Step /, "a step of the code generation plan"], [/^Bolt /, "a Bolt of the bolt plan"]];
   const gloss = (id) => { const g = GLOSS.find(([re]) => re.test(id)); return g ? g[1] : ""; };
-  function regRef(id, element, title, label) { if (!id || !element) return; const k = String(id).toUpperCase(); if (!view.refs.has(k)) { if (!element.dataset.ref) element.dataset.ref = id; view.refs.set(k, { element, title: title || "", label: label || String(id) }); } }
+  function regRef(id, element, title, label) {
+    if (!id || !element) return; const k = String(id).toUpperCase(); if (view.refs.has(k)) return;
+    if (!element.dataset.ref) element.dataset.ref = id;
+    if (IDISH.test(String(id)) && !element.dataset.aidlcId) element.dataset.aidlcId = String(id);
+    view.refs.set(k, { element, title: title || "", label: label || String(id) });
+  }
+  /* The map AidlcIds links from: the gate's `ids`, and, for an id this page shows the definition of that the map lacks
+     (a gate written before the field), what the page says of it. */
+  function idMap(docs) {
+    const out = {};
+    view.refs.forEach((v) => {
+      const id = v.element.dataset.aidlcId; if (!id || out[id]) return;
+      const blk = v.element.closest(".block"); const d = blk && docs.find((x) => "d-" + x.key === blk.id);
+      out[id] = { title: String(v.title || "").replace(/\s+/g, " ").replace(new RegExp("^" + reEsc(id) + "\\b[\\s:.—–-]*"), "").slice(0, 200), doc: d && d.path ? d.path : "" };
+    });
+    return Object.assign(out, (view.gate && view.gate.ids) || {});
+  }
+  const idTarget = (id) => { const css = window.CSS && CSS.escape ? CSS.escape(id) : id; return el.col.querySelector(`[data-aidlc-id="${css}"]`); };
   function registerMdRefs(root) {
     root.querySelectorAll("h1, h2, h3, h4").forEach((h) => { const m = h.textContent.trim().match(HEAD_ID); if (m) regRef(m[1], h.closest("details.sec, details.sub") || h, h.textContent.trim()); });
     root.querySelectorAll("tr").forEach((tr) => { const td = tr.querySelector("td"); if (!td) return; const t = td.textContent.trim().replace(/[`*]/g, ""); const m = t.match(/^((?:[A-Z]{1,5})-?\d+(?:\.\d+)*[a-z]?)$/) || t.match(/^((?:[A-Z]{1,5})-?\d+(?:\.\d+)*[a-z]?)\s+\S/); if (m) regRef(m[1], tr, tr.textContent.trim().replace(/\s+/g, " ").slice(0, 300)); });
@@ -982,17 +1181,19 @@ figure.screen > details.sub { margin: 0; padding: 4px 12px 6px; border-top: 1px 
     const a = document.createElement("a"); a.className = "xref" + (live ? "" : " dead"); a.textContent = text; a.dataset.ref = key; a.tabIndex = 0; a.setAttribute("role", "link");
     if (!live) a.dataset.dead = tip; return a;
   }
-  const SKIP = "a, pre, textarea, button, .xref, summary h2, h1, h2, h3, h4, .acid, td.id, .chip, .unit b, .pill, .tag, .sev, .stepno, .notebox, .seg, figcaption";
+  const SKIP = "a, pre, textarea, button, .xref, summary h2, h1, h2, h3, h4, .acid, td.id, .chip, .unit b, .pill, .tag, .sev, .stepno, .notebox, .seg, figcaption, [data-aidlc-noids]";
   function linkRefs(root) {
     /* names: the multi-part ones (DayPlanner, task-service) link in prose; any name links where it stands alone in code or bold */
     const names = [...view.refs.entries()].filter(([k, v]) => !/^FILE:/.test(k) && !/^[A-Z]{1,5}-?\d/.test(k) && !/^(STEP|BOLT) \d/.test(k) && /[a-z][A-Z]|[-_]/.test(v.label) && v.label.length >= 4).map(([, v]) => v.label).sort((a, b) => b.length - a.length);
-    const parts = [ID_RE.source, FILE_RE.source]; if (names.length) parts.push("(?<![\\w-])(" + names.map(reEsc).join("|") + ")(?![\\w-])");
+    const parts = [PAGE_REF.source, FILE_RE.source]; if (names.length) parts.push("(?<![\\w-])(" + names.map(reEsc).join("|") + ")(?![\\w-])");
     const RE = new RegExp(parts.join("|"), "g");
     const fileHit = (name) => view.refs.get("FILE:" + name.toUpperCase());
-    /* code and bold that is one name or one file path: the whole element becomes the link */
+    /* code and bold that is one name or one file path: the whole element becomes the link; code that is one id
+       becomes plain text, so the shared linker makes it a link like every other id */
     root.querySelectorAll("code, strong").forEach((c) => {
       if (c.children.length || c.closest(SKIP)) return;
       const t = c.textContent.trim().replace(/^`|`$/g, "");
+      if (IDISH.test(t)) { if (c.tagName === "CODE") c.replaceWith(document.createTextNode(c.textContent)); return; }
       const fm = t.match(/(?:^|\/)([a-z0-9][a-z0-9_-]*\.(?:md|json))$/i);
       let hit = null, key = "", dead = "";
       if (fm) { hit = fileHit(fm[1]); key = "FILE:" + fm[1].toUpperCase(); if (!hit && c.tagName === "CODE") dead = "A file of the project that this gate doesn’t show, so there is nowhere on this page to jump to."; }
@@ -1054,9 +1255,11 @@ figure.screen > details.sub { margin: 0; padding: 4px 12px 6px; border-top: 1px 
     return "Where this line comes from, as the document tags it: " + t; };
   function tipTerms(root) {
     root.querySelectorAll(".chip, .pill, .sev, .srct, td.id, .acid, .stepno, .unit b").forEach((c) => {
-      if (c.dataset.tip || c.closest(".xref") || c.querySelector(".xref")) return;
+      if (c.dataset.tip || c.closest(".xref, a.aidlc-id") || c.querySelector(".xref, a.aidlc-id")) return;
       const t = c.textContent.trim(); const k = t.toLowerCase().replace(/[.:]$/, "");
-      const id = t.match(/^((?:[A-Z]{1,5})-?\d+(?:\.\d+)*[a-z]?|Step \d+|Bolt \d+)$/);
+      const id = t.match(/^(Step \d+|Bolt \d+)$/);
+      /* an id: where it is the definition shown here, the shared tooltip; anywhere else the shared linker makes it a link */
+      if (IDISH.test(t)) { const own = c.closest("[data-aidlc-id]"); if (own && own.dataset.aidlcId === t) c.dataset.tip = AidlcIds.tip(t, view.ids[t]); return; }
       let tip = "";
       if (c.classList.contains("srct")) tip = SRC_TIP(t);
       else if (c.classList.contains("sev")) tip = `Severity ${t.toLowerCase()}: ${isHi(t) ? "it blocks approval until it is settled" : "it does not block approval"}`;
@@ -1075,6 +1278,11 @@ figure.screen > details.sub { margin: 0; padding: 4px 12px 6px; border-top: 1px 
     });
   }
   function tipFor(t) {
+    if (t.classList.contains("aidlc-id")) {
+      const target = !t.classList.contains("aidlc-id-out") && idTarget(t.dataset.aidlcRef);
+      const blk = target && target.closest(".block"); const bt = blk && blk.querySelector(":scope > summary h2");
+      return { p: t.dataset.tip, s: target ? (bt && !blk.contains(t) ? "In " + bt.textContent.trim() + ". " : "") + "Press to jump there." : (t.classList.contains("aidlc-id-unknown") ? "Not in the project’s documents" : "Not in this page") };
+    }
     if (t.classList.contains("xref")) {
       if (t.classList.contains("dead")) return { h: t.textContent, p: t.dataset.dead, s: "Not in this page" };
       const hit = view.refs.get(String(t.dataset.ref).toUpperCase()); if (!hit) return null;
@@ -1122,6 +1330,11 @@ figure.screen > details.sub { margin: 0; padding: 4px 12px 6px; border-top: 1px 
   function syncRow(tr) { const det = tr.classList.contains("frow") ? tr.parentElement.querySelector(`tr.fdet[data-for="${tr.dataset.i}"]`) : tr.nextElementSibling; const c = tr.cells[0]; if (c) c.setAttribute("aria-expanded", String(!!det && !det.hidden)); }
   function rowHandles(root) { root.querySelectorAll("tr.rrow, tr.frow").forEach((tr) => { const c = tr.cells[0]; if (!c) return; c.tabIndex = 0; c.setAttribute("role", "button"); syncRow(tr); }); }
   el.col.addEventListener("click", (e) => {
+    /* an id shown in this gate: the page's own jump, which opens every section around it and keeps it below the bar
+       (it runs before the shared linker's click, which only toasts for an id this gate does not show) */
+    const ida = e.target.closest("a.aidlc-id"); const idt = ida && idTarget(ida.dataset.aidlcRef);
+    if (idt) { e.preventDefault(); e.stopImmediatePropagation(); jumpTo(idt); return; }
+    if (ida) return;
     const a = e.target.closest("a.xref"); if (a) { e.preventDefault(); e.stopPropagation(); followXref(a); return; }
     const tr = e.target.closest("tr.rrow, tr.frow"); if (tr) syncRow(tr);
   });
@@ -1248,6 +1461,8 @@ figure.screen > details.sub { margin: 0; padding: 4px 12px 6px; border-top: 1px 
     let n = 10;
     byGroup.forEach((items, title) => {
       const sec = section(d, n++, title, true, `${items.length} rules`);
+      /* a group labelled by its id (`# BR1 — Preferences store` in the YAML) is that id's definition */
+      const gm = String(title).match(HEAD_ID); if (gm) regRef(gm[1], sec, title);
       const table = node(`<div class="tablewrap"><table class="grid"><thead><tr><th>ID</th><th>Rule</th><th>Category</th><th>When</th><th>On violation</th></tr></thead><tbody></tbody></table></div>`);
       const tb = table.querySelector("tbody");
       items.forEach((r) => {
@@ -2347,6 +2562,9 @@ figure.screen > details.sub { margin: 0; padding: 4px 12px 6px; border-top: 1px 
   if (window.ResizeObserver) new ResizeObserver(() => { document.documentElement.style.setProperty("--bar-h", el.bar.offsetHeight + "px"); }).observe(el.bar);
   matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => { view.painted = ""; paintAll(); });
   new MutationObserver(() => { view.painted = ""; paintAll(); }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+  /* every id in the gate's documents, summary and review: a link with a tooltip, by the shared AidlcIds */
+  AidlcIds.observe(el.col, () => view.ids, { toast });
 
   /* ---------- boot ---------- */
   function route() { const id = gateId(); if (id) showGate(id); else showIndex(); }

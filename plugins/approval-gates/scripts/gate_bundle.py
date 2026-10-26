@@ -36,6 +36,10 @@ Review brief: for a stage with a reviewer (in the graph, or, when the graph does
 `reviews/` folder) the script runs `aidlc engine review-brief review --stage <slug> [--unit <u>] --why <why>`
 in the project directory and keeps its stdout as `brief`. The program is `aidlc` on PATH, or the executable
 that $APPROVAL_GATES_AIDLC names (the tests use that). A failure omits `brief` and warns on stderr.
+Ids: the gate row's `ids` says what each id its texts mention is (US1.1, FR1.4, BR1.2, Q3, R-01, ADR-009, ...), for the
+page's links and tooltips. The script brings the checkout's id map up to date (`aidlc_ids.py sync`, the shared copy next
+to this file) and asks it for the ids of the summary, the brief and every document, nearest the documents shown
+(`aidlc_ids.py refs --near`), so a Q1 or R-01 is this stage's and a BR1.1 this Unit's. A failure leaves `ids` out and warns.
 Standard library only.
 """
 
@@ -46,6 +50,9 @@ import os
 import re
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import aidlc_ids  # noqa: E402  (the shared copy, next to this file)
 
 MAX_DOC_BYTES = 200_000
 MAX_BATCH_WRITES = 50
@@ -337,6 +344,21 @@ def run_brief(project, slug, unit, why):
 
 # ---------------------------------------------------------------- the rows
 
+def id_map(root, texts, near):
+    """{id: {kind, title, text, doc, line}} of the ids the texts mention, as the shared aidlc_ids.py defines them: the
+    map synced first, then each id's definition nearest the documents shown. Over MAX_DOC_BYTES the texts are dropped."""
+    try:
+        aidlc_ids.sync(root)
+        ids = aidlc_ids.refs(root, "\n".join(t for t in texts if t), near)
+    except Exception as why:  # the page still links what it shows; the gate must not fail over its tooltips
+        print(f"approval-gates: the id map could not be built ({why}); the page links only the ids it shows", file=sys.stderr)
+        return {}
+    if len(json.dumps(ids, ensure_ascii=False).encode("utf-8")) > MAX_DOC_BYTES:
+        for d in ids.values():
+            d.pop("text", None)
+    return ids
+
+
 def now_utc():
     return datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
 
@@ -402,6 +424,10 @@ def build(args):
         {"k": "approve", "t": "Approve", "d": f"Continue to {next_name}" if next_name else "Continue"},
         {"k": "changes", "t": "Request Changes", "d": "Provide revision feedback"},
     ]
+    ids = id_map(root, [gate.get("summary", ""), gate.get("brief", "")] + [row["text"] for row, _index, _path in docs],
+                 sorted({path for _row, _index, path in docs}))
+    if ids:
+        gate["ids"] = ids
     gate["documents"] = [index for _row, index, _path in docs if index]
     return gate_id, gate, [row for row, _index, _path in docs]
 

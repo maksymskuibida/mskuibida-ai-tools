@@ -54,7 +54,9 @@ class Case(unittest.TestCase):
     def run_script(self, *args, aidlc=None):
         """(exit code, stdout, stderr) of main() with the project and output folder filled in."""
         argv = ["--project-dir", self.project, "--out", self.out, *args]
-        env = {"APPROVAL_GATES_AIDLC": aidlc} if aidlc else {}
+        env = {"AIDLC_IDS_DIR": os.path.join(self.tmp, "ids")}
+        if aidlc:
+            env["APPROVAL_GATES_AIDLC"] = aidlc
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.dict(os.environ, env), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = bundle.main(argv)
@@ -75,6 +77,24 @@ class Case(unittest.TestCase):
 
 
 class TestRows(Case):
+    def test_ids_are_this_stages_and_this_units(self):
+        self.summary("--stage", "functional-design", "--unit", "u2-pickup-slots", "--no-brief")
+        ids = self.gate()["ids"]
+        unit = os.path.join("construction", "u2-pickup-slots")
+        self.assertTrue(ids["SR1"]["doc"].startswith(unit))
+        self.assertTrue(all(not d["doc"].startswith(os.path.join("construction", "u1-core")) for d in ids.values()),
+                        "never another Unit's definition")
+        for ident, d in ids.items():
+            if ident.startswith(("Q", "R-")):
+                self.assertTrue(d["doc"].startswith(os.path.join(unit, "functional-design")), (ident, d["doc"]))
+
+    def test_ids_are_left_out_when_the_map_cannot_be_built(self):
+        with mock.patch.object(bundle.aidlc_ids, "sync", side_effect=OSError("disk full")):
+            code, _out, err = self.run_script("--stage", "functional-design", "--unit", "u2-pickup-slots", "--no-brief")
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("ids", self.gate())
+        self.assertIn("id map could not be built", err)
+
     def test_user_stories_documents_and_order(self):
         summary = self.summary("--stage", "user-stories", "--no-brief")
         # the graph's `produces` first (a missing file is skipped), then the other files by name, then the review

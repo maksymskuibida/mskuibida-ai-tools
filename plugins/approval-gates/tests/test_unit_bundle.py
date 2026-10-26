@@ -40,7 +40,7 @@ class Base(unittest.TestCase):
         self.n = 0
 
     def run_script(self, *args):
-        env = dict(os.environ, APPROVAL_GATES_DIR=self.store)
+        env = dict(os.environ, APPROVAL_GATES_DIR=self.store, AIDLC_IDS_DIR=os.path.join(self.tmp, "ids"))
         env.pop("CLAUDE_PROJECT_DIR", None)
         return subprocess.run([sys.executable, SCRIPT, *args], capture_output=True, text=True, env=env, timeout=60)
 
@@ -58,7 +58,7 @@ class Base(unittest.TestCase):
 
     def finalize(self, path, ok=True):
         out = os.path.join(self.tmp, f"out-{self.n}")
-        done = self.run_script("finalize", "--bundle", path, "--out", out)
+        done = self.run_script("finalize", "--bundle", path, "--project-dir", self.project, "--out", out)
         if ok:
             self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
             return json.loads(done.stdout)
@@ -136,6 +136,23 @@ class TestPlanDraft(Base):
 
 
 class TestFinalize(Base):
+    def test_ids_say_what_each_id_of_the_page_is_from_this_units_records(self):
+        _path, b, _info = self.finished()
+        ids = b["ids"]
+        self.assertEqual(ids["SR1"]["doc"], os.path.join("construction", UNIT, "functional-design", "functional-spec.md"))
+        self.assertIn("15 minutes", ids["SR1"]["title"] + ids["SR1"].get("text", ""))
+        self.assertTrue(all(not d["doc"].startswith(os.path.join("construction", "u1-core")) for d in ids.values()),
+                        "never another Unit's definition")
+        self.assertEqual(validate_bundle.validate(b), [])
+
+    def test_ids_with_an_unknown_field_are_refused(self):
+        _path, b, _info = self.finished()
+        b["ids"]["SR1"]["colour"] = "red"
+        self.assertTrue(any("unknown field `colour`" in p for p in validate_bundle.validate(b)))
+        b["ids"]["SR1"].pop("colour")
+        b["ids"]["SR1"].pop("title")
+        self.assertTrue(any("`title` is missing" in p for p in validate_bundle.validate(b)))
+
     def test_writes_one_row_and_keeps_a_copy(self):
         _path, b, info = self.finished()
         self.assertEqual(validate_bundle.validate(b), [])
@@ -263,8 +280,9 @@ class TestRender(Base):
         self.assertIn("look first", page)
         self.assertIn("differs from proposal", page)
         self.assertIn("Step 3 settles it", out["full"])
-        self.assertIn('data-tip="Slots. The day runs from 07:00 to 10:00 in slots of 15 minutes."', out["full"])
-        self.assertIn('data-path="aidlc/spaces/default/', out["full"])
+        self.assertIn('<span class="refid">SR1</span>', out["full"], "a design id among the references is left to the shared linker")
+        self.assertIn('data-aidlc-id="R-02" data-anchor="FD-R-02"', page, "a folded row's id is still a live link")
+        self.assertNotIn('data-aidlc-id="Q1"', page, "Q1 is in two stages' answers: no one row defines it")
         self.assertIn('class="row read"', out["v1read"])
         self.assertEqual(out["order"], validate_bundle.order(b))
         self.assertIn(b["id"], out["list"])
@@ -282,8 +300,8 @@ class TestRender(Base):
         self.assertIn("v2 · 1 change (current)", out["read"])
         self.assertIn('class="row read" id="A-1"', out["read"])
         self.assertIn('class="row" id="A-2"', out["read"], "a row changed in v2 turns unread")
-        self.assertIn('id="A-2"', out["v2"])
-        self.assertNotIn('id="A-1"', out["v2"])
+        self.assertIn(' id="A-2"', out["v2"])
+        self.assertNotIn(' id="A-1"', out["v2"])
 
     def test_a_steps_read_mark_follows_the_step_not_its_number(self):
         _path, b, _info = self.finished()

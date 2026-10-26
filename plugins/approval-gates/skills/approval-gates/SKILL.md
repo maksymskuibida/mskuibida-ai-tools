@@ -35,6 +35,11 @@ stage has a reviewer:
    Use `--why revision` after a Request Changes round, `stale` when the review was out of date, otherwise
    `first`. It prints `{"id", "stage", "unit", "documents", "writes", "batches", "round"}` and writes
    `writes.json` next to the rows. Without a path it reads the project from `$CLAUDE_PROJECT_DIR`.
+   It also writes the gate's `ids`, what every id the page shows is: it runs the shared `aidlc_ids.py sync` (the
+   checkout's id map, kept outside the project) and then `refs` over the summary, the brief and every document, with
+   `--near` the stage's documents, so the page's Q1 and R-01 are this stage's and its BR1.1 this Unit's. Leave it as
+   the script wrote it. A warning that the map could not be built leaves `ids` out; the page then links only the ids
+   it shows itself.
 3. Send the rows with **one** `ArtifactData` `batch`: the `writes` array of `writes.json` as it is
    (`file_path` entries, no `if_version`, these are new rows). When the script says the writes do not
    fit one batch, send the files named in `batches`, in order. If a write is refused because the id exists,
@@ -96,13 +101,17 @@ republish from this file to the same URL after a plugin update.
      group); on the unit-end page an empty `changes` section with `asApproved: true` when the design stays as approved,
      and a `map` of how the built pieces connect.
    - **References**: every id you mention gets a `{label, tip, target}`: `#<anchor>` inside the bundle,
-     `path:<record>#<id>` for a record. The tip says what the reference says.
+     `path:<record>#<id>` for a record. The tip says what the reference says. Ids in any text (a title, a body, a
+     sub-step) become links with tooltips on the page by themselves; write them where a reader needs them, plain words
+     around them.
    - **A revision** (after Request Changes): the draft carries every row whose source did not change over as you left
      it. Write `revNote` on each row and step you changed ("Changed in v2: …", "New in v2: …") and one line in
      `header.revisions` for the new revision.
 3. Finalize: `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/unit_bundle.py" finalize --bundle <scratch>/bundle.json --out <scratch>/out`.
-   It marks what changed since the last presentation, validates the bundle, and refuses with one problem per line
-   until it holds to the contract.
+   It marks what changed since the last presentation, writes the bundle's `ids` (the shared `aidlc_ids.py sync`, then
+   `refs` over every text of the bundle with `--near` the Unit's stage folders), validates the bundle, and refuses
+   with one problem per line until it holds to the contract. Pass `--project-dir` when the project is not the working
+   directory. Never edit `ids` by hand: run finalize again.
 4. Write `writes.json` with one `ArtifactData` `batch`, send `**Read:** <artifact url>#<bundle id>` in a message of its
    own, then ask the engine's question as the protocol words it, with no link in it. End the turn.
 
