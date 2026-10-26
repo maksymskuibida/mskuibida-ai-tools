@@ -4,8 +4,9 @@
     claim_choice.py stages   [--project-dir <dir>]                 the four design stages and their `condition:`
     claim_choice.py brief    --unit <u> [--project-dir <dir>]      what the recommendation reads: the stages, the
                                                                    Unit's entry in unit-of-work.md and its stories
-    claim_choice.py status   --unit <u> [--project-dir <dir>]      the choice recorded for the Unit, or null, and the
-                                                                   flags its claim takes (`claimFlags`)
+    claim_choice.py status   --unit <u> [--project-dir <dir>]      the choice recorded for the Unit, or null; whether a
+                                                                   claim already used it (`used`) and so the dialog is
+                                                                   asked again (`ask`); the flags its claim takes
     claim_choice.py engine   [--project-dir <dir>]                 what the project's pinned engine accepts at a claim:
                                                                    its rhythms, and whether it takes --skip-stages
     claim_choice.py record   --unit <u> --stages <a,b|none> --rhythm <r> [--project-dir <dir>]
@@ -16,7 +17,8 @@
 
 The answer of each Unit is kept in <data>/answers/<project key>/<intent>/<unit>.json, where <data> is $UNIT_CLAIM_DIR,
 else ~/.claude/plugins/data/unit-claim, and the project key is the main checkout's, shared by its git worktrees.
-Nothing is saved across Units: every claim is asked. Standard library only.
+Nothing is saved across Units: every claim is asked, and an answer serves the one claim it was given for: once that claim goes through it is marked used
+(`claimedAt`), and a later claim of the same Unit asks again. Standard library only.
 """
 
 import argparse
@@ -170,11 +172,27 @@ def now():
 
 
 def choice_for(project, unit):
-    """{"unit", "stages": [...], "rhythm", "at"} recorded for the Unit, or None."""
+    """{"unit", "stages": [...], "rhythm", "at", "claimedAt"?} recorded for the Unit, or None. A used answer (one whose
+    claim went through, `claimedAt` set) is still the Unit's choice for the rest of that claim: its skips and refusals."""
     answer = load(answer_path(project, unit))
     if answer and isinstance(answer.get("stages"), list) and answer.get("rhythm") in RHYTHMS:
         return answer
     return None
+
+
+def open_choice_for(project, unit):
+    """The Unit's answer a claim may still use: recorded and not yet used by a claim that went through. Each claim asks
+    the developer afresh: an answer belongs to the one claim it was given for."""
+    choice = choice_for(project, unit)
+    return choice if choice and not choice.get("claimedAt") else None
+
+
+def mark_claimed(project, unit):
+    """Record that the Unit's answer was used by a claim that went through, so a later claim asks again."""
+    choice = choice_for(project, unit)
+    if choice and not choice.get("claimedAt"):
+        choice["claimedAt"] = now()
+        write(answer_path(project, unit), choice)
 
 
 # ---------------------------------------------------------------- the choice itself
@@ -343,8 +361,10 @@ def main(argv=None):
             print(json.dumps(brief(project, args.unit), indent=2))
         elif args.cmd == "status":
             choice = choice_for(project, args.unit)
-            flags = claim_flags(choice, engine(project)) if choice else None
-            print(json.dumps({"unit": args.unit, "choice": choice, "claimFlags": flags}, indent=2))
+            usable = open_choice_for(project, args.unit)
+            flags = claim_flags(usable, engine(project)) if usable else None
+            print(json.dumps({"unit": args.unit, "choice": choice, "used": bool(choice and choice.get("claimedAt")),
+                              "ask": usable is None, "claimFlags": flags}, indent=2))
         elif args.cmd == "record":
             stages = parse_stages(args.stages)
             if stages is None:

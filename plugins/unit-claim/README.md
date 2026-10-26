@@ -30,7 +30,9 @@ aidlc engine orchestrate report --stage <slug> --unit <unit> --result skipped --
 ```
 
 If you pick NFR Design without NFR Requirements, NFR Requirements is added back, and the agent tells you in one line.
-Nothing is saved across Units: every claim asks.
+Nothing is saved across Units or claims: every claim asks. Your answer is used by the claim it was given for; once that
+claim goes through, the answer is marked used, and claiming the same Unit again later (after a release, or from another
+session) shows the dialog again.
 
 ```
 hooks/register.tsx           the mod: the dialog's questions, the recommendation above it, reading typed answers, recording

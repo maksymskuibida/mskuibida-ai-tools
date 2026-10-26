@@ -1,7 +1,7 @@
 {
   "name": "unit-claim",
   "displayName": "Unit claim",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Before a team AI-DLC Unit is claimed, one dialog asks which design stages run and the approval rhythm (unit-end or per-stage), with a model's recommendation per stage drawn above it. Typed answers are resolved by a model and refused when unclear. A hook refuses the claim until it is answered, claims with the chosen rhythm, and skips the left-out stages for that Unit only.",
   "author": {
     "name": "Maksym Skuibida"
