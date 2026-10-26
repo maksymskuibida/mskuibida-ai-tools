@@ -46,8 +46,8 @@ For each Unit write, from the documents and in the developer's terms:
 - `ctx`: what the Unit builds and what makes it big or small, in two to five short blocks: paragraphs,
   or `- ` lists with a **bold** lead-in, as the template's header comment allows. Copy facts as the
   documents state them. No estimate, and no opinion on the size. Name other Units, stories and
-  requirements by what they are, not by id; an id that slips in (`U3`, `US-2.1`) still renders as a
-  link labelled with its title.
+  requirements by what they are, not by id; an id that slips in (`U3`, `US-2.1`, `BR1.2`) still
+  becomes a link with a tooltip.
 - `dependsOn`: its dependencies, each `{unit: "U<n>", title}` (a bare `"U<n>"` still works). A Unit in
   this review links to its card; the title is what a link to one outside the review shows.
 - `stories` (optional): the user stories it delivers, from `unit-of-work-story-map.md` or the Unit's
@@ -55,9 +55,26 @@ For each Unit write, from the documents and in the developer's terms:
 - `requirements` (optional): the requirements it covers, `[{id, title, text?}]`, as the documents
   name them.
 
-Stories and requirements are not cards on the page: their links show the title, keep the id and
-text in a tooltip, and say on a click that the source is not in this document. Leave a field out
-when the documents do not say it.
+Each dependency, story and requirement shows as its id and its title. A Unit in this review is a
+card: its id links there. Stories and requirements are not cards: their ids keep what they are in a
+tooltip, and say on a click that they are not in this page. Leave a field out when the documents do
+not say it.
+
+### The ids
+
+Every id the page shows (U, US, AC, FR, NFR, BR, C, E, ADR and every other kind the project's
+documents define) is a link with a tooltip saying what it is, from the review's `ids`:
+
+1. `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/aidlc_ids.py" sync` — keeps the checkout's id map,
+   outside the project; fast when nothing changed.
+2. Write all the text the rows show (each Unit's `title`, `ctx`, and its `dependsOn`, `stories` and
+   `requirements` ids and titles) into one scratch file, and run
+   `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/aidlc_ids.py" refs --text-file <that file> --near <unit-of-work.md> --near <the stories file>`,
+   the stories file being `unit-of-work-story-map.md` (and `stories.md` when it exists).
+3. Store its output, `{id: {kind, title, text, doc, line}}`, as the review's `ids` (step 4).
+
+An id `refs` leaves out is shown as not defined in the project's documents; say which ones in your
+message with the link (step 5), so a typo is fixed rather than shipped.
 
 ## 3. The artifact (once per developer)
 
@@ -76,8 +93,8 @@ delete the unit rows that are no longer Units. Then write them with `ArtifactDat
 (at most 50 writes per batch; split larger ones):
 
 - `reviews/<id>`: `set` `{title: <the intent's name>, intent: <directory name>, file: <show's file>,
-  scale: <show's scale>, status: "open", createdAt: <now ISO>, picks: {}}`. Reopening starts with
-  no picks: the file already holds every pick recorded earlier.
+  scale: <show's scale>, status: "open", createdAt: <now ISO>, picks: {}, ids: <refs' output>}`.
+  Reopening starts with no picks: the file already holds every pick recorded earlier.
 - `reviews/<id>/units/<U<n>>`: `set` `{n, unit, name, title, ctx, dependsOn, stories?,
   requirements?, points, source}`, with
   `points` (a number) and `source` (`"ai"` or `"human"`) from the row `show` printed, both `null`
@@ -125,5 +142,5 @@ the claim check (`/story-points:set`, step 3) once that change is merged.
 ## Changing an open review
 
 When Units change while the review is open, write the unit rows again (step 4's `units` part, with
-`if_version`). Set the review's `status` back to `"open"` in the same batch, so the developer
+`if_version`), run `refs` again over the new text, and `update` the review's `ids` with it. Set the review's `status` back to `"open"` in the same batch, so the developer
 presses Done again, and send the link again as in step 5.
