@@ -1,0 +1,11 @@
+/* Shared: the canonical copy is shared/aidlc-ids/aidlc-ids.css; scripts/sync-shared.py copies it into every page.
+   It uses the page's own tokens: --accent, --muted, --tip-bg (each page defines them). */
+a.aidlc-id { color: var(--accent, currentColor); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; cursor: pointer; white-space: nowrap; font-variant-numeric: tabular-nums; }
+a.aidlc-id:hover, a.aidlc-id:focus-visible { text-decoration-thickness: 2px; }
+a.aidlc-id.aidlc-id-out { text-decoration-style: dotted; }
+a.aidlc-id.aidlc-id-unknown { color: var(--muted, currentColor); text-decoration-style: dashed; }
+a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outline-offset: 2px; border-radius: 3px; }
+[data-aidlc-id] { scroll-margin-top: 96px; }
+@keyframes aidlc-flash { from { box-shadow: 0 0 0 3px var(--accent, #3b82f6); } to { box-shadow: 0 0 0 3px transparent; } }
+.aidlc-flash { animation: aidlc-flash 1.6s ease-out; border-radius: 6px; }
+@media (prefers-reduced-motion: reduce) { .aidlc-flash { animation: none; outline: 2px solid var(--accent, #3b82f6); } }

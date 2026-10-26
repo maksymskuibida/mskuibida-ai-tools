@@ -1,0 +1,9 @@
+{
+  "name": "aidlc-ids",
+  "displayName": "AI-DLC ids",
+  "version": "0.1.0",
+  "description": "Keeps an AI-DLC project's own id map (US, AC, FR, NFR, BR, Q, U, C, E, ADR, R and the rest): /aidlc-ids:sync builds or brings it up to date without a model turn, and the plugins' pages read it so every id they show is a link with a tooltip.",
+  "author": {
+    "name": "Maksym Skuibida"
+  }
+}
