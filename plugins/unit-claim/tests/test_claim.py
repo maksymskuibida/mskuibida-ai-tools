@@ -237,6 +237,75 @@ class TestWorktrees(Case):
         self.assertEqual(done.returncode, 0, done.stderr)
 
 
+class TestSkipStagesAtClaim(Case):
+    """An engine whose claim takes --skip-stages (2.11.2-preview.20261026.101 on): the claim carries exactly the stages
+    the developer left out, and they are skipped by the claim itself."""
+
+    USAGE = ("Usage: aidlc-unit claim <unit> [--team <label>] [--rhythm per-stage|unit-end] "
+             "[--skip-stages <stage[,stage...]>]")
+
+    def setUp(self):
+        super().setUp()
+        tools = os.path.join(self.project, ".claude", "tools")
+        os.makedirs(tools)
+        with open(os.path.join(tools, "aidlc-unit.ts"), "w") as f:
+            f.write(f'  if (!unit) fail("{self.USAGE}");\n')
+
+    def test_the_engine_is_read_from_the_harness(self):
+        eng = json.loads(self.run_script("engine").stdout)
+        self.assertEqual((eng["rhythms"], eng["skipStages"]), (["per-stage", "unit-end"], True))
+
+    def test_the_claim_carries_exactly_the_left_out_stages(self):
+        got = self.answer("functional-design")
+        self.assertEqual(got["claimFlags"], "--rhythm unit-end --skip-stages nfr-requirements,nfr-design,infrastructure-design")
+        self.assertEqual(got["skips"], [])
+        code, _out, err = self.claim()
+        self.assertEqual(code, 2)
+        self.assertIn("--skip-stages nfr-requirements,nfr-design,infrastructure-design", err)
+        code, _out, err = self.claim(" --rhythm unit-end --skip-stages nfr-requirements,infrastructure-design")
+        self.assertEqual(code, 2)
+        self.assertIn("not --skip-stages nfr-requirements,infrastructure-design", err)
+        self.assertEqual(self.claim(" --rhythm unit-end --skip-stages infrastructure-design,nfr-design,nfr-requirements")[0], 0)
+        self.assertEqual(self.claim(" --rhythm=unit-end --skip-stages=nfr-requirements,nfr-design,infrastructure-design")[0], 0)
+
+    def test_every_stage_runs_so_no_flag(self):
+        self.answer("functional-design,nfr-requirements,nfr-design,infrastructure-design")
+        self.assertEqual(self.claim()[0], 0)
+        code, _out, err = self.claim(" --rhythm unit-end --skip-stages nfr-design")
+        self.assertEqual(code, 2)
+        self.assertIn("its flags are `--rhythm unit-end`", err)
+
+    def test_after_the_claim_and_a_skipped_stages_start(self):
+        self.answer("functional-design")
+        cmd = f"aidlc unit claim {UNIT} --team A --rhythm unit-end --skip-stages nfr-requirements,nfr-design,infrastructure-design"
+        _code, out, _err = self.post("Bash", {"command": cmd}, {"stdout": "claimed"})
+        said = self.context(out)
+        self.assertIn("NFR Requirements, NFR Design, Infrastructure Design are skipped for this Unit only", said)
+        self.assertIn("aidlc engine orchestrate next", said)
+        self.assertNotIn("--result skipped", said)
+        code, _out, err = self.pre("Bash", {"command": f"aidlc engine state unit start --stage nfr-design --unit {UNIT}"})
+        self.assertEqual(code, 2)
+        self.assertIn("skipped at the claim", err)
+
+    def test_status_and_the_prompt_name_the_flags(self):
+        self.answer("functional-design,nfr-requirements")
+        status = json.loads(self.run_script("status", "--unit", UNIT).stdout)
+        self.assertEqual(status["claimFlags"], "--rhythm unit-end --skip-stages nfr-design,infrastructure-design")
+        _code, out, _err = self.run_hook({"hook_event_name": "UserPromptSubmit", "prompt": f"/aidlc --claim {UNIT}"})
+        self.assertIn("`--rhythm unit-end --skip-stages nfr-design,infrastructure-design`", self.context(out))
+
+
+class TestOlderEngine(Case):
+    def test_an_engine_without_the_flag_refuses_it_and_keeps_the_per_stage_reports(self):
+        got = self.answer("functional-design")
+        self.assertEqual(got["claimFlags"], "--rhythm unit-end")
+        self.assertEqual(len(got["skips"]), 3)
+        code, _out, err = self.claim(" --rhythm unit-end --skip-stages nfr-requirements,nfr-design,infrastructure-design")
+        self.assertEqual(code, 2)
+        self.assertIn("has no `--skip-stages`", err)
+        self.assertEqual(self.claim()[0], 0)
+
+
 class TestPrompt(Case):
     def test_claim_prompt_says_how_to_open_the_dialog(self):
         _code, out, _err = self.run_hook({"hook_event_name": "UserPromptSubmit", "prompt": f"/aidlc --claim {UNIT} --team A"})
