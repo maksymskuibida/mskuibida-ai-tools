@@ -21,6 +21,8 @@ sys.path.insert(0, os.path.join(PLUGIN, "scripts"))
 import claim_choice as cc  # noqa: E402
 
 UNIT = "u4-day-navigation"
+# What the engine prints when a claim goes through.
+CLAIMED = '{"claimed":true,"unit":"u4-day-navigation","generation":3}'
 INTENT = "261016-daily-page-mvp"
 os.environ.pop("CLAUDE_PROJECT_DIR", None)
 os.environ.pop("CLAUDE_PLUGIN_DATA", None)
@@ -176,7 +178,7 @@ class TestTheAnswerIsTheDevelopers(Case):
 class TestAfterTheClaim(Case):
     def test_skips_are_named_after_the_claim(self):
         self.answer()
-        _code, out, _err = self.post("Bash", {"command": f"aidlc unit claim {UNIT} --team A --rhythm unit-end"}, {"stdout": "claimed"})
+        _code, out, _err = self.post("Bash", {"command": f"aidlc unit claim {UNIT} --team A --rhythm unit-end"}, {"stdout": CLAIMED})
         said = self.context(out)
         for slug in ("nfr-requirements", "nfr-design", "infrastructure-design"):
             self.assertIn(f'--stage {slug} --unit {UNIT} --result skipped --reason "skipped at claim by the developer"', said)
@@ -278,7 +280,7 @@ class TestSkipStagesAtClaim(Case):
     def test_after_the_claim_and_a_skipped_stages_start(self):
         self.answer("functional-design")
         cmd = f"aidlc unit claim {UNIT} --team A --rhythm unit-end --skip-stages nfr-requirements,nfr-design,infrastructure-design"
-        _code, out, _err = self.post("Bash", {"command": cmd}, {"stdout": "claimed"})
+        _code, out, _err = self.post("Bash", {"command": cmd}, {"stdout": CLAIMED})
         said = self.context(out)
         self.assertIn("NFR Requirements, NFR Design, Infrastructure Design are skipped for this Unit only", said)
         self.assertIn("aidlc engine orchestrate next", said)
@@ -304,6 +306,48 @@ class TestOlderEngine(Case):
         self.assertEqual(code, 2)
         self.assertIn("has no `--skip-stages`", err)
         self.assertEqual(self.claim()[0], 0)
+
+
+class TestEveryClaimAsks(Case):
+    """An answer serves the one claim it was given for: once that claim goes through, a later claim of the Unit asks."""
+
+    def claimed(self, stdout=CLAIMED, error=False):
+        response = {"stdout": stdout, "is_error": error} if error else {"stdout": stdout}
+        return self.post("Bash", {"command": f"aidlc unit claim {UNIT} --team A --rhythm unit-end"}, response)
+
+    def test_a_used_answer_asks_again(self):
+        self.answer()
+        self.assertEqual(self.claim()[0], 0)
+        self.claimed()
+        status = json.loads(self.run_script("status", "--unit", UNIT).stdout)
+        self.assertEqual((status["used"], status["ask"], status["claimFlags"]), (True, True, None))
+        code, _out, err = self.claim()
+        self.assertEqual(code, 2)
+        self.assertIn("used by an earlier claim", err)
+        self.assertIn(f'"source": "unit-claim:{UNIT}"', err)
+        self.answer("functional-design,nfr-requirements", "per-stage")
+        self.assertEqual(self.claim(" --rhythm per-stage")[0], 0)
+
+    def test_the_rest_of_the_claim_still_uses_it(self):
+        self.answer()
+        self.claimed()
+        code, _out, err = self.pre("Bash", {"command": f"aidlc engine state unit start --stage nfr-design --unit {UNIT}"})
+        self.assertEqual(code, 2)
+        self.assertIn("left out", err)
+
+    def test_only_a_claim_that_went_through_uses_it(self):
+        self.answer()
+        self.claimed('{"message":"Run `aidlc --claim u4-day-navigation --rhythm unit-end`","kind":"print"}')
+        self.claimed('{"error":"claim refused"}')
+        self.claimed(CLAIMED, error=True)
+        self.assertFalse(json.loads(self.run_script("status", "--unit", UNIT).stdout)["used"])
+        self.assertEqual(self.claim()[0], 0)
+
+    def test_the_prompt_asks_once_the_answer_is_used(self):
+        self.answer()
+        self.claimed()
+        _code, out, _err = self.run_hook({"hook_event_name": "UserPromptSubmit", "prompt": f"/aidlc --claim {UNIT}"})
+        self.assertIn(f'"source": "unit-claim:{UNIT}"', self.context(out))
 
 
 class TestPrompt(Case):

@@ -4,7 +4,7 @@
     "name": "Maksym Skuibida"
   },
   "description": "Maksym Skuibida's personal Claude Code tooling — small, opinionated plugins.",
-  "version": "1.11.0",
+  "version": "1.13.0",
   "plugins": [
     {
       "name": "response-format",
@@ -70,7 +70,7 @@
       "name": "unit-claim",
       "source": "./plugins/unit-claim",
       "description": "For team AI-DLC Units: before a claim one dialog asks which design stages run and the approval rhythm (unit-end or per-stage), with a model's run-or-skip recommendation per stage drawn above it; typed answers are read by a model and refused when unclear. A hook refuses the claim until it is answered, claims with the chosen rhythm, and skips left-out stages for that Unit only.",
-      "version": "0.3.0"
+      "version": "0.4.0"
     },
     {
       "name": "aidlc-patches",

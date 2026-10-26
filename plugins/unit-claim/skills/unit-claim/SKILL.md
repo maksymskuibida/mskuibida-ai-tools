@@ -12,10 +12,15 @@ developer chooses both for each Unit, before its claim. `hooks/claim_guard.py` r
 
 The script is `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/claim_choice.py"` (written `claim_choice.py` below).
 
-## 1. Is an answer already recorded?
+## 1. Is there an answer for this claim?
 
-Run `claim_choice.py status --unit <unit>`. When `choice` is set, the developer answered for this Unit already: say
-in one line which stages run and which rhythm, then claim (§ 3).
+Run `claim_choice.py status --unit <unit>`.
+
+- **`ask` is false**: the developer answered the dialog for this claim, and no claim has used that answer yet. Say in one
+  line which stages run and which rhythm, then claim (§ 3).
+- **`ask` is true**: open the dialog (§ 2), even when `choice` is set. An answer serves the one claim it was given for;
+  once that claim goes through it is marked used (`used`), and a later claim of the same Unit, after a release or in
+  another session, asks the developer again.
 
 ## 2. Open the claim dialog
 

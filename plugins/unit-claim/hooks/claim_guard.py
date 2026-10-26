@@ -6,7 +6,8 @@ The order, for the session that claims a Unit:
  1. `/aidlc --claim <unit>` (UserPromptSubmit): the assistant is told how the claim dialog is opened, or, when the
     Unit already has a recorded answer, which one is in force.
  2. `aidlc unit claim <unit>` (or `aidlc --claim <unit>`, `aidlc-unit.ts claim <unit>`) is refused until the Unit has a
-    recorded answer, and unless it carries `--rhythm <the chosen rhythm>` and, where the project's engine takes it,
+    recorded answer no earlier claim has used (each claim asks afresh; a claim that goes through marks its answer
+    used), and unless it carries `--rhythm <the chosen rhythm>` and, where the project's engine takes it,
     `--skip-stages <the stages left out>` (exactly those; none when every stage runs). The refusal says how to open the dialog: an
     AskUserQuestion with `metadata.source` "unit-claim:<unit>", which the plugin's mod (hooks/register.tsx) fills with
     its own questions, shows the recommendation above, resolves and records with claim_choice.py.
@@ -171,9 +172,11 @@ def pre(event, project):
         if not unit or unit.startswith("-"):
             raise Refusal("This claim names no Unit that can be read. Write it as `aidlc unit claim <unit> --team \"<label>\" "
                           "--rhythm <rhythm>`, the Unit first.")
-        choice = cc.choice_for(project, unit)
+        choice = cc.open_choice_for(project, unit)
         if not choice:
-            raise Refusal(f"Before {unit} is claimed, the developer chooses its design stages and rhythm. {ask_line(unit)}")
+            used = cc.choice_for(project, unit)
+            again = (" Its earlier answer was used by an earlier claim; every claim asks afresh." if used else "")
+            raise Refusal(f"Before {unit} is claimed, the developer chooses its design stages and rhythm.{again} {ask_line(unit)}")
         eng = eng or cc.engine(project)
         flags = cc.claim_flags(choice, eng)
         if rhythm != choice["rhythm"]:
@@ -205,9 +208,10 @@ def post(event, project):
     if isinstance(response, dict) and (response.get("is_error") or response.get("interrupted")):
         return
     for unit, _rhythm, skip in claims(str(ti.get("command", ""))):
-        choice = cc.choice_for(project, unit)
-        if not choice:
+        choice = cc.open_choice_for(project, unit)
+        if not choice or not claim_went_through(response):
             continue
+        cc.mark_claimed(project, unit)
         out = cc.left_out(choice)
         names = ", ".join(cc.NAMES[s] for s in out)
         if not out:
@@ -222,13 +226,22 @@ def post(event, project):
                                "`next`: " + "; ".join(f"`{cc.skip_command(s, unit)}`" for s in out))
 
 
+def claim_went_through(response):
+    """Whether the engine's output says the Unit was claimed (`"claimed": true`): a command that only routes to the
+    claim, or failed, leaves the answer open for the claim that follows."""
+    text = response if isinstance(response, str) else json.dumps(response) if response is not None else ""
+    if isinstance(response, dict):
+        text = str(response.get("stdout", "")) + str(response.get("output", ""))
+    return re.search(r'"claimed"\s*:\s*true', text) is not None
+
+
 def prompt(event, project):
     text = str(event.get("prompt") or "")
     found = re.search(r"(?:^|\s)/aidlc\b[^\n]*?--claim[ =](\S+)", text) or re.search(r"\baidlc unit claim (\S+)", text)
     if not found:
         return
     unit = found.group(1).strip("`'\"")
-    choice = cc.choice_for(project, unit)
+    choice = cc.open_choice_for(project, unit)
     if choice:
         say("UserPromptSubmit", f"{unit} has a recorded claim choice: "
                                 f"{', '.join(cc.NAMES[s] for s in choice['stages']) or 'no design stage'}; rhythm {choice['rhythm']}. "
