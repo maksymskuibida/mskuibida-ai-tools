@@ -7,8 +7,9 @@
 //                                (name, kind, depends_on), which is what the engine parses (parseBoltDag)
 //   their ID and Jira key        the `Unit ID` and `Jira` columns of the Unit index in unit-of-work.md
 //   their story points           ./points.ts: <intent>/unit-points.csv, else the Unit's Jira issue, else 5
-//   which (stage, Unit) is done  the UNIT_STARTED / PAUSED / RESUMED / COMPLETED rows of the intent's audit shards
-//                                (audit/*.md). With Construction Checkpoints on, or once any such row exists, a
+//   which (stage, Unit) is done  the UNIT_STARTED / PAUSED / RESUMED / COMPLETED / SKIPPED rows of the intent's audit shards
+//                                (audit/*.md). A stage whose latest row is UNIT_SKIPPED was left out for that Unit: it
+//                                is skipped, never done or planned, and counts for nothing. With Construction Checkpoints on, or once any such row exists, a
 //                                UNIT_COMPLETED receipt is what settles a Unit; without them, its artifacts are.
 //
 // A Unit is done when code-generation, its last per-unit stage, is settled for it: code-generation applies to every
@@ -45,7 +46,7 @@ export type Unit = UnitEdge & {
   jira: string
 }
 
-export type UnitEventKind = 'UNIT_STARTED' | 'UNIT_PAUSED' | 'UNIT_RESUMED' | 'UNIT_COMPLETED'
+export type UnitEventKind = 'UNIT_STARTED' | 'UNIT_PAUSED' | 'UNIT_RESUMED' | 'UNIT_COMPLETED' | 'UNIT_SKIPPED'
 
 export type UnitEvent = { event: UnitEventKind; stage: string; unit: string; at: string }
 
@@ -55,6 +56,8 @@ export type UnitProgress = {
   phase: 'done' | 'active' | 'paused' | 'awaiting' | 'revising' | 'between' | 'planned'
   /** The per-unit stage it is on (active, paused) or last finished (between); '' otherwise. */
   stage: string
+  /** The per-unit stages left out for this Unit (UNIT_SKIPPED, or [S] in the engine's table); they weigh nothing. */
+  skipped?: readonly string[]
 }
 
 // ── parsing ──────────────────────────────────────────────────────────────────
@@ -155,7 +158,7 @@ export function parseUnitIndex(text: string, names: readonly string[]): Map<stri
   return found
 }
 
-const UNIT_EVENTS: readonly string[] = ['UNIT_STARTED', 'UNIT_PAUSED', 'UNIT_RESUMED', 'UNIT_COMPLETED']
+const UNIT_EVENTS: readonly string[] = ['UNIT_STARTED', 'UNIT_PAUSED', 'UNIT_RESUMED', 'UNIT_COMPLETED', 'UNIT_SKIPPED']
 
 /** The UNIT_* rows of one audit shard, in file order. */
 export function parseUnitEvents(shard: string): UnitEvent[] {
@@ -216,6 +219,10 @@ export function parseUnitProgress(state: string): Map<string, Map<string, UnitCe
  * a cell becomes `[-]`. So does a `[x]` one: a stage re-opened after its approval (`aidlc engine jump reopen`) starts
  * again, and its start is the latest receipt while the table may still say done. A cell waiting on the person (`[?]`,
  * `[R]`) or already running (`[-]`) is the table's to say: an approval gate is only there.
+ *
+ * A stage whose latest receipt is `UNIT_SKIPPED` is skipped (`[S]`), whatever the table says: an older engine writes it
+ * `[x]`, and a claim with `--skip-stages` writes the receipt before the table is rewritten. code-generation is never
+ * skipped. A start after the skip (a re-opened stage) is the latest receipt again, so the stage is no longer skipped.
  */
 export function withReceipts(table: Map<string, Map<string, UnitCell>>, events: readonly UnitEvent[]): Map<string, Map<string, UnitCell>> {
   const latest = new Map<string, UnitEventKind>()
@@ -226,6 +233,10 @@ export function withReceipts(table: Map<string, Map<string, UnitCell>>, events: 
     for (const stage of PER_UNIT_STAGES) {
       const kind = latest.get(`${stage}\n${unit}`)
       const cell = next.get(stage) ?? ' '
+      if (kind === 'UNIT_SKIPPED') {
+        if (stage !== LAST_UNIT_STAGE) next.set(stage, 'S')
+        continue
+      }
       if ((cell === ' ' || cell === 'x') && kind !== undefined && kind !== 'UNIT_COMPLETED') next.set(stage, '-')
     }
     out.set(unit, next)
@@ -233,18 +244,29 @@ export function withReceipts(table: Map<string, Map<string, UnitCell>>, events: 
   return out
 }
 
+/** A progress with its skipped stages named; none named, none carried. */
+function progressWith(progress: UnitProgress, skipped: readonly string[]): UnitProgress {
+  return skipped.length === 0 ? progress : { ...progress, skipped }
+}
+
+/** The per-unit stages a table row marks skipped. */
+function skippedRow(row: Map<string, UnitCell>): string[] {
+  return PER_UNIT_STAGES.filter(stage => row.get(stage) === 'S')
+}
+
 /** A Unit's progress from its table row: built, on a stage (working, waiting, revising), between stages, or not started. */
 function progressFromRow(row: Map<string, UnitCell>, isPaused: boolean): UnitProgress {
   const cellOf = (stage: string) => row.get(stage) ?? ' '
   const live = PER_UNIT_STAGES.filter(stage => cellOf(stage) !== 'S')
-  if (live.length > 0 && live.every(stage => cellOf(stage) === 'x')) return { phase: 'done', stage: '' }
+  const skipped = PER_UNIT_STAGES.filter(stage => cellOf(stage) === 'S')
+  if (live.length > 0 && live.every(stage => cellOf(stage) === 'x')) return progressWith({ phase: 'done', stage: '' }, skipped)
   const on = live.find(stage => ['-', '?', 'R'].includes(cellOf(stage)))
   if (on !== undefined) {
     const cell = cellOf(on)
-    return { phase: cell === '?' ? 'awaiting' : cell === 'R' ? 'revising' : isPaused ? 'paused' : 'active', stage: on }
+    return progressWith({ phase: cell === '?' ? 'awaiting' : cell === 'R' ? 'revising' : isPaused ? 'paused' : 'active', stage: on }, skipped)
   }
   const last = live.filter(stage => cellOf(stage) === 'x').at(-1)
-  return last === undefined ? { phase: 'planned', stage: '' } : { phase: 'between', stage: last }
+  return progressWith(last === undefined ? { phase: 'planned', stage: '' } : { phase: 'between', stage: last }, skipped)
 }
 
 /** What the reads found, for `progressOf`. */
@@ -276,41 +298,45 @@ export function progressOf(
   const isPaused = (parsed.fields['Unit State'] ?? '').trim() === 'paused'
 
   // The latest row per (stage, Unit), and per Unit.
+  // A UNIT_SKIPPED row is no activity: it leaves the stage out, so it never makes a Unit active or "between".
   const latest = new Map<string, UnitEvent>()
   const lastOf = new Map<string, UnitEvent>()
   for (const event of facts.events) {
     if (!PER_UNIT_STAGES.includes(event.stage)) continue
     latest.set(`${event.stage}\n${event.unit}`, event)
-    lastOf.set(event.unit, event)
+    if (event.event !== 'UNIT_SKIPPED') lastOf.set(event.unit, event)
   }
+  const skippedOf = (unit: string) =>
+    PER_UNIT_STAGES.filter(stage => stage !== LAST_UNIT_STAGE && latest.get(`${stage}\n${unit}`)?.event === 'UNIT_SKIPPED')
 
   const out = new Map<string, UnitProgress>()
   for (const unit of units) {
     // The engine's own Unit Progress row, where the state has one, decides: it knows the approval gates.
     const row = table.get(unit.name)
     if (row !== undefined) {
-      out.set(unit.name, stageDone ? { phase: 'done', stage: '' } : progressFromRow(row, unit.name === activeUnit && isPaused))
+      out.set(unit.name, stageDone ? progressWith({ phase: 'done', stage: '' }, skippedRow(row)) : progressFromRow(row, unit.name === activeUnit && isPaused))
       continue
     }
     const built = isLedger
       ? latest.get(`${LAST_UNIT_STAGE}\n${unit.name}`)?.event === 'UNIT_COMPLETED'
       : facts.builtByFiles.has(unit.name)
+    const skipped = skippedOf(unit.name)
     if (stageDone || built) {
-      out.set(unit.name, { phase: 'done', stage: '' })
+      out.set(unit.name, progressWith({ phase: 'done', stage: '' }, skipped))
       continue
     }
     const last = lastOf.get(unit.name)
     if (unit.name === activeUnit || (last && last.event !== 'UNIT_COMPLETED')) {
       const paused = unit.name === activeUnit ? isPaused : last?.event === 'UNIT_PAUSED'
-      out.set(unit.name, { phase: paused ? 'paused' : 'active', stage: last?.stage ?? '' })
+      out.set(unit.name, progressWith({ phase: paused ? 'paused' : 'active', stage: last?.stage ?? '' }, skipped))
       continue
     }
     if (last) {
-      out.set(unit.name, { phase: 'between', stage: last.stage })
+      out.set(unit.name, progressWith({ phase: 'between', stage: last.stage }, skipped))
       continue
     }
     const onDisk = isLedger ? undefined : facts.startedByFiles.get(unit.name)
-    out.set(unit.name, onDisk === undefined ? { phase: 'planned', stage: '' } : { phase: 'active', stage: onDisk })
+    out.set(unit.name, progressWith(onDisk === undefined ? { phase: 'planned', stage: '' } : { phase: 'active', stage: onDisk }, skipped))
   }
   return out
 }
@@ -331,8 +357,10 @@ export function stageStatusesFromRow(row: Map<string, UnitCell>, isPaused: boole
  */
 export function unitStageStatuses(progress: UnitProgress): Map<string, UnitStageStatus> {
   const at = PER_UNIT_STAGES.indexOf(progress.stage)
+  const skipped = progress.skipped ?? []
   return new Map(
     PER_UNIT_STAGES.map((stage, index): [string, UnitStageStatus] => {
+      if (skipped.includes(stage)) return [stage, 'skipped']
       if (progress.phase === 'done') return [stage, 'done']
       if (at < 0) return [stage, 'planned']
       if (index < at) return [stage, 'done']

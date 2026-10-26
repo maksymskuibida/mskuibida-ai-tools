@@ -457,7 +457,8 @@ its UUID where `intents.json` has one) — a worktree or the main checkout — C
   rewrites the table only when `/aidlc` routes, so a stage that started since can still read `[ ]` there: a cell at
   `[ ]` whose latest receipt is `UNIT_STARTED`, `UNIT_RESUMED` or `UNIT_PAUSED` is in progress (0.20.1). So is a cell at `[x]` with such a receipt last: a stage re-opened after its approval
   (`aidlc engine jump reopen`) starts again while the table can still say done (0.21.2). Any other cell past `[ ]`
-  stays the table's. A stage a Unit's kind does not owe is `[x]` there too, unrun (0.21.0): units-generation tags each
+  stays the table's, except a stage whose latest receipt is `UNIT_SKIPPED`: that is skipped whatever the table says (0.25.0).
+  A stage a Unit's kind does not owe is `[x]` there too, unrun (0.21.0): units-generation tags each
   Unit `kind: service|spec|ui|packaging|library`, and a per-unit stage none of whose `produces` its `produces_kinds` map
   gives that kind does not apply (the engine's own rule). The panel reads those maps from the workspace's engine install
   (`.claude/aidlc-common/stages/construction/<stage>.md`, or the other agents' install folders) and draws such a stage
@@ -886,6 +887,7 @@ renderer: check the real pane too when spacing matters.
 - **0.4.0** — the `ledger` provider (WORKPLAN.md against PRs, product sections you pin).
 - **M2 (0.5.0)** — freshness: re-read on session start, branch change, writes to the `watch` files, turn end, a surface attaching, and an mtime poll; a provider's remote `fingerprint` poll (the ledger's PRs and default-branch tip); redraw only when the model changes; the desktop pane opens when the app attaches.
 - **0.6.0** — the pane redesign: header, Now card, Needs attention, Plan; three breakpoints, done-folding and the open-items cap, the status strip.
+- **0.25.0** — a Unit's design stages left out at its claim (`aidlc unit claim --skip-stages`, the engine's `UNIT_SKIPPED` receipts) are drawn skipped and weigh nothing in the Unit's progress or counts: on the older engine whose table writes them `[x]`, between the claim and the next `next`, and where the state has no Unit Progress table. A stage started again after its skip is no longer skipped.
 - **0.24.0** — the desktop's pull-request card under Needs attention has one line per PR, with all its statuses in a word or two and its command as a small button, instead of a card's worth per row.
 - **0.23.0** — on the desktop, the rows about pull requests under Needs attention are one card, and the cards stand further apart.
 - **0.22.0** — Units are listed in build order (the step of the dependency graph each can be built at, then by number), not in the dependency block's order.
