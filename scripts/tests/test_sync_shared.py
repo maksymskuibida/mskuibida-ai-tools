@@ -43,7 +43,9 @@ class TestIndex(unittest.TestCase):
             "inception/units-generation/unit-of-work-story-map.md": "| US1.1 | U31 | u31-thin-slice |\n",
             "inception/user-stories/user-stories-questions.md": "## Q1: Personas\nWho uses it.\n",
             "inception/domain-design/decisions.md": "| ADR-009 | The token in its own component | Accepted |\n",
-            "construction/u1-skeleton/functional-design/rules.md": "| BR1.1 | Keys are `<feature>.<setting>` and unique | constraint |\n",
+            "construction/u1-skeleton/functional-design/rules.md": "```yaml\nrules:\n  # BR1 — Preferences store (C4, E3)\n```\n"
+                                                                   "| BR1.1 | Keys are `<feature>.<setting>` and unique | constraint |\n",
+            "construction/u1-skeleton/functional-design/functional-spec.md": "| U31 | (thin slice), window shell | seam |\n",
             "construction/u31-thin-slice/functional-design/rules.md": "| BR1.1 | A token is never logged anywhere | constraint |\n",
             "construction/u31-thin-slice/functional-design/functional-design-questions.md": "## Q1: Where the token lives\nKeychain.\n",
             "construction/u31-thin-slice/functional-design/reviews/review-01.md":
@@ -96,6 +98,14 @@ class TestIndex(unittest.TestCase):
         _data, gone = ai.sync(self.intent)
         self.assertEqual(gone["dropped"], 1)
         self.assertNotIn("FR1.4", ai.index(self.intent))
+
+    def test_a_group_label_in_a_yaml_comment(self):
+        got = self.refs("BR1", ["construction/u1-skeleton/functional-design"])
+        self.assertEqual(got["BR1"]["title"], "Preferences store (C4, E3)")
+
+    def test_inception_wins_for_an_intent_wide_id_restated_in_the_shown_file(self):
+        got = self.refs("U31", ["construction/u1-skeleton/functional-design/functional-spec.md"])
+        self.assertEqual(got["U31"]["doc"], "inception/units-generation/unit-of-work.md")
 
     def test_not_ids(self):
         self.assertEqual(ai.mentioned("UTF-8, SHA-256, H2 and FR1.4, US1.1a"), ["FR1.4", "US1.1a"])
