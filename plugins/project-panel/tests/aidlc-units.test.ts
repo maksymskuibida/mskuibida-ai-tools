@@ -870,3 +870,119 @@ describe("the engine's Unit Progress table", () => {
     expect(list.items.find(item => item.id === 'unit:api-billing')?.status).toBe('planned')
   })
 })
+
+describe("a Unit's skipped design stages (UNIT_SKIPPED)", () => {
+  const withTable = (state: string, rows: Record<string, string[]>) =>
+    state.replace(
+      '## Current Status',
+      [
+        '## Unit Progress',
+        '',
+        '| unit | owner | functional-design | nfr-requirements | nfr-design | infrastructure-design | code-generation | gate |',
+        '| --- | --- | --- | --- | --- | --- | --- | --- |',
+        ...Object.entries(rows).map(([unit, cells]) => `| ${unit} | A | ${cells.map(cell => `[${cell}]`).join(' | ')} |`),
+        '',
+        '## Current Status',
+      ].join('\n'),
+    )
+  const SKIPS = ['nfr-requirements', 'nfr-design', 'infrastructure-design'] as const
+  const skipRows = (unit = 'api-billing'): [string, string, string, string][] =>
+    SKIPS.map((stage, at) => [`2026-10-02T09:0${at}:00Z`, 'UNIT_SKIPPED', stage, unit])
+  const world = (rows: [string, string, string, string][], table: Record<string, string[]> | null) =>
+    tree(table === null ? stateText() : withTable(stateText(), table), {
+      [`${INTENT_DIR}/audit/host-a.md`]: audit(...rows),
+      [POINTS_PATH]: POINTS,
+      ...claimOf('api-billing'),
+    })
+  const stages = (model: PanelModel) => construction(model).items.map(item => [item.id, item.status])
+
+  test('parseUnitEvents reads UNIT_SKIPPED rows', () => {
+    expect(parseUnitEvents(audit(['2026-10-02T09:00:00Z', 'UNIT_SKIPPED', 'nfr-design', 'api-billing']))).toEqual([
+      { event: 'UNIT_SKIPPED', stage: 'nfr-design', unit: 'api-billing', at: '2026-10-02T09:00:00Z' },
+    ])
+  })
+
+  test('older engine: the table writes a skipped stage [x]; the receipt makes it skipped, and it is not counted', async () => {
+    const model = await load(world(skipRows(), { 'api-billing': [' ', 'x', 'x', 'x', ' ', '-'] }))
+    expect(stages(model)).toEqual([
+      ['functional-design', 'planned'],
+      ['nfr-requirements', 'skipped'],
+      ['nfr-design', 'skipped'],
+      ['infrastructure-design', 'skipped'],
+      ['code-generation', 'planned'],
+    ])
+    expect(construction(model).counts).toEqual({ done: 0, total: 2 })
+    // Nothing is done, so the Unit is not started, as it was not before the claim.
+    expect(unitList(model).items.find(item => item.id === 'unit:api-billing')?.status).toBe('planned')
+  })
+
+  test('between a claim and the next `next`: the table still says planned, the receipt says skipped', async () => {
+    const model = await load(world(skipRows(), { 'api-billing': [' ', ' ', ' ', ' ', ' ', '-'] }))
+    expect(stages(model).map(one => one[1])).toEqual(['planned', 'skipped', 'skipped', 'skipped', 'planned'])
+    expect(construction(model).counts).toEqual({ done: 0, total: 2 })
+  })
+
+  test('mixed: Functional Design kept and finished, the other three skipped, so only Code Generation is left', async () => {
+    const rows: [string, string, string, string][] = [
+      ['2026-10-02T08:00:00Z', 'UNIT_STARTED', 'functional-design', 'api-billing'],
+      ['2026-10-02T08:30:00Z', 'UNIT_COMPLETED', 'functional-design', 'api-billing'],
+      ...skipRows(),
+    ]
+    const model = await load(world(rows, { 'api-billing': ['x', 'x', 'x', 'x', ' ', '-'] }))
+    expect(stages(model).map(one => one[1])).toEqual(['done', 'skipped', 'skipped', 'skipped', 'planned'])
+    expect(construction(model).counts).toEqual({ done: 1, total: 2 })
+    expect(unitList(model).items.find(item => item.id === 'unit:api-billing')).toMatchObject({ status: 'partial', statusWord: 'functional-design done' })
+  })
+
+  test('mixed: with Code Generation completed the Unit is done though three stages never ran', async () => {
+    const rows: [string, string, string, string][] = [
+      ['2026-10-02T08:30:00Z', 'UNIT_COMPLETED', 'functional-design', 'api-billing'],
+      ...skipRows(),
+      ['2026-10-02T10:00:00Z', 'UNIT_COMPLETED', 'code-generation', 'api-billing'],
+    ]
+    const model = await load(world(rows, { 'api-billing': ['x', 'x', 'x', 'x', 'x', 'x'] }))
+    expect(unitList(model).items.find(item => item.id === 'unit:api-billing')?.status).toBe('done')
+    expect(stages(model).map(one => one[1])).toEqual(['done', 'skipped', 'skipped', 'skipped', 'done'])
+  })
+
+  test('no Unit Progress table: the receipts alone draw the claimed Unit', async () => {
+    const rows: [string, string, string, string][] = [['2026-10-02T08:30:00Z', 'UNIT_COMPLETED', 'functional-design', 'api-billing'], ...skipRows()]
+    const model = await load(world(rows, null))
+    expect(stages(model).map(one => one[1])).toEqual(['done', 'skipped', 'skipped', 'skipped', 'planned'])
+    expect(construction(model).counts).toEqual({ done: 1, total: 2 })
+    expect(unitList(model).items.find(item => item.id === 'unit:api-billing')).toMatchObject({ status: 'partial', statusWord: 'functional-design done' })
+  })
+
+  test('no table and nothing but the skips: a fresh claim, on its first kept stage, with the skipped stages named', async () => {
+    const t = tree(stateText().replace('- **Current Stage**: code-generation', '- **Current Stage**: functional-design'), {
+      [`${INTENT_DIR}/audit/host-a.md`]: audit(...skipRows()),
+      [POINTS_PATH]: POINTS,
+      ...claimOf('api-billing'),
+    })
+    const model = await load(t)
+    expect(stages(model).map(one => one[1])).toEqual(['open', 'skipped', 'skipped', 'skipped', 'planned'])
+    expect(unitList(model).items.find(item => item.id === 'unit:api-billing')?.status).toBe('planned')
+  })
+
+  test('progressOf: a skip is no activity, and the skipped list rides on the progress', () => {
+    const units: Unit[] = [{ name: 'a', kind: '', dependsOn: [], id: 'U1', jira: '' }]
+    const facts: UnitFacts = {
+      events: SKIPS.map(stage => ({ event: 'UNIT_SKIPPED' as const, stage, unit: 'a', at: '' })),
+      builtByFiles: new Set(),
+      startedByFiles: new Map(),
+    }
+    const got = progressOf(units, parseState(stateText()), facts).get('a')
+    expect(got).toEqual({ phase: 'planned', stage: '', skipped: [...SKIPS] })
+    expect([...unitStageStatuses(got!)].map(one => one[1])).toEqual(['planned', 'skipped', 'skipped', 'skipped', 'planned'])
+  })
+
+  test('a stage started again after its skip is no longer skipped; code-generation is never skipped', () => {
+    const table = withReceipts(new Map([['u', new Map<string, UnitCell>([['nfr-design', 'x'], ['code-generation', 'x']])]]), [
+      { event: 'UNIT_SKIPPED', stage: 'code-generation', unit: 'u', at: '1' },
+      { event: 'UNIT_SKIPPED', stage: 'nfr-design', unit: 'u', at: '1' },
+      { event: 'UNIT_STARTED', stage: 'nfr-design', unit: 'u', at: '2' },
+    ])
+    expect(table.get('u')?.get('nfr-design')).toBe('-')
+    expect(table.get('u')?.get('code-generation')).toBe('x')
+  })
+})
