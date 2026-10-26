@@ -30,7 +30,9 @@ against contract/gate-bundle.schema.json and its rules, and writes into <dir>:
     row.json        the `bundles/<id>` row: {bundle, page, unit, intent, title, createdAt, status}
     writes.json     the `writes` array for one ArtifactData batch
 and keeps a copy in the bundle store (`$APPROVAL_GATES_DIR/bundles/<intent>/<unit>/`, default ~/.claude/approval-gates),
-which the next draft reads. A changed row with no `revNote` is refused: say what changed. It prints
+which the next draft reads. Before validating, it writes the bundle's `ids`: the checkout's id map brought up to date
+(`aidlc_ids.py sync`), then the definition of every id the bundle's text mentions, nearest the Unit's stage folders
+(`aidlc_ids.py refs --near`), so a BR1.1 is this Unit's and a Q1 or R-01 one of its stages'. A changed row with no `revNote` is refused: say what changed. It prints
 {"id", "page", "unit", "revision", "bundle", "writes", "lookFirst", "rows"}.
 
 The script never touches the artifact: the agent makes the ArtifactData call. Standard library only.
@@ -48,6 +50,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import aidlc_ids  # noqa: E402  (the shared copy: the id map of the bundle's `ids`)
 import gate_bundle  # noqa: E402  (same folder: record_root, load_graph, state_field, slugify)
 import validate_bundle  # noqa: E402
 
@@ -814,6 +817,32 @@ def default_facts(bundle):
     head["facts"] = facts
 
 
+def bundle_texts(value, skip=("provenance", "source", "ids")):
+    """Every string the page may show, in order."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key not in skip:
+                yield from bundle_texts(item, skip)
+    elif isinstance(value, list):
+        for item in value:
+            yield from bundle_texts(item, skip)
+    elif isinstance(value, str):
+        yield value
+
+
+def id_map(bundle, project):
+    """{id: definition} of the ids the bundle's text mentions, as the shared aidlc_ids.py defines them, nearest the
+    Unit's stage folders. A failure leaves the map empty and warns: the page still links what it shows itself."""
+    try:
+        unit = Unit(project, (bundle.get("header") or {}).get("unit", ""))
+        near = [unit.stage_folder(s) for s in DESIGN_STAGES + ("code-generation",) if os.path.isdir(unit.stage_folder(s))]
+        aidlc_ids.sync(unit.root)
+        return aidlc_ids.refs(unit.root, "\n".join(bundle_texts(bundle)), near)
+    except (BundleError, gate_bundle.BundleError, OSError, ValueError) as why:
+        print(f"unit_bundle.py: the id map could not be built ({why}); the page links only the ids it shows", file=sys.stderr)
+        return {}
+
+
 def finalize(args):
     bundle = load_json(args.bundle)
     if not isinstance(bundle, dict):
@@ -833,6 +862,10 @@ def finalize(args):
         previous = None
     missing = mark_revisions(bundle, previous)
     default_facts(bundle)
+    bundle.pop("ids", None)
+    ids = id_map(bundle, os.path.abspath(args.project_dir or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()))
+    if ids:
+        bundle["ids"] = ids
     problems = validate_bundle.validate(bundle)
     if missing:
         problems.append(f"say what changed in v{head.get('revision')} (revNote) for: {', '.join(missing)}")

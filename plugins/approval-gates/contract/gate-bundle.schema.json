@@ -16,9 +16,29 @@
     "plan": { "$ref": "#/$defs/plan" },
     "answers": { "type": "array", "items": { "$ref": "#/$defs/answerGroup" } },
     "design": { "$ref": "#/$defs/design" },
+    "ids": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9._-]*$" },
+      "additionalProperties": { "$ref": "#/$defs/idDefinition" },
+      "description": "What each id the page shows is (US1.1, FR1.4, BR1.2, Q3, R-01, ADR-009, ...), keyed by the id: the shared aidlc_ids.py refs over every text of the bundle, nearest the Unit's stage folders. The page makes every id a link with this as its tooltip. unit_bundle.py finalize writes it."
+    },
     "provenance": { "$ref": "#/$defs/provenance" }
   },
   "$defs": {
+    "idDefinition": {
+      "type": "object",
+      "required": ["title"],
+      "additionalProperties": false,
+      "description": "One id's definition in the project's documents, as aidlc_ids.py gives it.",
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "type": "string", "description": "The kind in plain words: Story, Functional requirement, Business rule, Question, Review finding, ..." },
+        "title": { "type": "string" },
+        "text": { "type": "string", "description": "The start of what the document says of it." },
+        "doc": { "type": "string", "description": "The document it is defined in, relative to the intent folder." },
+        "line": { "type": "integer", "minimum": 1 }
+      }
+    },
     "line": { "type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[^\\n\\r]*[^\\s…]$", "description": "One line: no line break, not ending in a space or an ellipsis (the renderer cuts it off)." },
     "text": { "type": "string", "minLength": 1, "maxLength": 4000 },
     "anchorId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._:-]{0,31}$", "description": "A row id as shown (FD R-06, A-2, E-1). Its anchor is the id with every run of characters outside [A-Za-z0-9._-] replaced by a hyphen." },

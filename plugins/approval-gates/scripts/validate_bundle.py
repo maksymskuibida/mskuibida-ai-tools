@@ -6,7 +6,8 @@
 The contract is `contract/gate-bundle.schema.json` (the shape) and `contract/README.md` (the cross-field rules).
 This script reads the schema file itself, so the two cannot drift: it interprets the subset of JSON Schema that
 file uses (type, const, enum, pattern, minLength, maxLength, minimum, maximum, required, properties,
-additionalProperties: false, items, minItems, maxItems and local $ref), then checks the rules a schema cannot say:
+additionalProperties (false, or a schema every other value holds to), propertyNames, items, minItems, maxItems and
+local $ref), then checks the rules a schema cannot say:
 
   - a plan page has `plan` and no `design`; a unit-end page has `design` and no `plan`;
   - each page uses only its own section kinds, and every section key is unique and not plan/answers/design;
@@ -118,12 +119,16 @@ def check_schema(value, schema, root, where, out):
         for name in schema.get("required", []):
             if name not in value:
                 out.append(f"{where}: `{name}` is missing")
-        props = schema.get("properties", {})
+        props, extra = schema.get("properties", {}), schema.get("additionalProperties")
         for name, item in value.items():
+            if "propertyNames" in schema:
+                check_schema(name, schema["propertyNames"], root, f"{where} key", out)
             if name in props:
                 check_schema(item, props[name], root, f"{where}.{name}", out)
-            elif schema.get("additionalProperties") is False:
+            elif extra is False:
                 out.append(f"{where}: unknown field `{name}`")
+            elif isinstance(extra, dict):
+                check_schema(item, extra, root, f"{where}.{name}", out)
 
 
 # ---------------------------------------------------------------- the cross-field rules
