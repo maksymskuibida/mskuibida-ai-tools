@@ -13,6 +13,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.path.join(HERE, "..", "hooks", "findings_guard.py")
 HOOKS_JSON = os.path.join(HERE, "..", "hooks", "hooks.json")
 FIXTURES = os.path.join(HERE, "fixtures")
+FINDINGS = os.path.join(HERE, "..", "scripts", "findings.py")
+SORTED = {"R-02": {"k": ["fix"], "note": "Checkout wins."}, "R-03": {"k": ["reject"], "note": "The name is deliberate."}}
 
 STAGE = "domain-design"
 BRIEF_COMMAND = f"aidlc engine review-brief review --stage {STAGE} --why first"
@@ -110,9 +112,19 @@ class Harness:
                   {"op": "set", "collection": f"forms/{form_id}/questions", "doc_id": "R-02", "data": {"n": 1, "kind": "card"}}]
         return self.post("ArtifactData", {"action": "batch", "url": URL, "writes": writes}, {"ok": True})
 
-    def read_form(self, status, form_id=FORM_ID):
-        return self.post("ArtifactData", {"action": "get", "url": URL, "collection": "forms", "doc_id": form_id},
-                         {"id": form_id, "status": status})
+    def read_form(self, status, form_id=FORM_ID, answers=None):
+        doc = {"id": form_id, "status": status, **({"answers": answers} if answers is not None else {})}
+        return self.post("ArtifactData", {"action": "get", "url": URL, "collection": "forms", "doc_id": form_id}, doc)
+
+    def summary(self, *args, session="s1"):
+        """Run `findings.py answers` on the saved findings as the agent does, and report the call to the hook."""
+        file = os.path.join(self.state, session + ".findings")
+        command = f"python3 {FINDINGS} answers --findings {file}" + "".join(f" {a}" for a in args)
+        env = dict(os.environ, REVIEW_FINDINGS_DIR=self.state)
+        done = subprocess.run([sys.executable, FINDINGS, "answers", "--findings", file, *args], capture_output=True,
+                              text=True, env=env, check=False)
+        result = self.post("Bash", {"command": command}, {"stdout": done.stdout, "stderr": done.stderr}, session=session)
+        return result, done
 
 
 def context(stdout):
@@ -225,7 +237,28 @@ class Triage(GuardCase):
         self.assertEqual((pend["asked"], pend["answer"]), (True, "fix"))
         self.assertIn("R-02, R-03", context(out))
         self.assertIn("review-freeze", context(out))
+        self.assertIn("answers --findings", context(out))
+        self.assertRefused(self.h.pre("AskUserQuestion", gate_input()), "Send the summary of the developer's answers")
+        self.assertRefused(self.h.pre("Bash", {"command": report_command("approved")}), "Send the summary")
+        (_, out, _), done = self.h.summary()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue(done.stdout.startswith("## Review Findings: User Answer\n### R-02: Fix\n#### Action items:\n"))
+        self.assertIn("exactly as printed", context(out))
+        self.assertTrue(self.h.pending()["summarized"])
         self.assertAllowed(self.h.pre("AskUserQuestion", gate_input()))
+
+    def test_a_summary_that_does_not_match_the_answer_is_not_recorded(self):
+        self.h.triage("Fix")
+        (_, out, _), done = self.h.summary("--choice", "accept")
+        self.assertEqual(done.returncode, 0)
+        self.assertIn("does not match the recorded answers (R-02, R-03)", context(out))
+        self.assertFalse(self.h.pending()["summarized"])
+        self.assertRefused(self.h.pre("AskUserQuestion", gate_input()), "Send the summary")
+
+    def test_other_output_is_no_summary(self):
+        self.h.triage("Fix")
+        self.h.post("Bash", {"command": f"python3 {FINDINGS} answers --findings x"}, {"stdout": "### R-02: Fix\n"})
+        self.assertFalse(self.h.pending()["summarized"])
 
     def test_a_free_text_answer_decides_nothing(self):
         _, out, _ = self.h.triage("do whatever")
@@ -246,6 +279,9 @@ class Triage(GuardCase):
         _, out, _ = h.triage("Accept", accept=True)
         self.assertEqual(h.pending()["answer"], "accept")
         self.assertIn("Accepted risk", context(out))
+        self.assertRefused(h.pre("AskUserQuestion", gate_input()), "Send the summary")
+        _, done = h.summary()
+        self.assertEqual(done.stdout, "## Review Findings: User Answer\n### R-02: Accept\n### R-03: Accept\n")
         self.assertAllowed(h.pre("AskUserQuestion", gate_input()))
 
     def test_a_pull_request_gate_is_not_this_gate(self):
@@ -274,6 +310,7 @@ class Reports(GuardCase):
 
     def test_fix_requires_every_id_in_the_reason(self):
         self.h.triage("Fix")
+        self.h.summary()
         self.assertRefused(self.bash(report_command("rejected", "R-02: state the winning event")), "Missing: R-03")
         self.assertRefused(self.bash(report_command("rejected", "see the review")), "R-02, R-03")
         self.assertAllowed(self.bash(report_command("rejected", "R-02: state the winner; R-03: rename the event")))
@@ -281,10 +318,12 @@ class Reports(GuardCase):
 
     def test_an_id_is_not_matched_inside_a_longer_one(self):
         self.h.triage("Fix")
+        self.h.summary()
         self.assertRefused(self.bash(report_command("rejected", "R-02 and R-031")), "R-03")
 
     def test_approve_is_allowed_after_the_answer_and_clears_the_pending(self):
         self.h.triage("Fix")
+        self.h.summary()
         self.assertAllowed(self.bash(report_command("approved") + " --user-input Approve"))
         self.h.post("Bash", {"command": report_command("approved")}, {"stdout": "ok"})
         self.assertIsNone(self.h.pending())
@@ -296,6 +335,7 @@ class Reports(GuardCase):
 
     def test_an_unbalanced_quote_is_read_from_the_raw_text(self):
         self.h.triage("Fix")
+        self.h.summary()
         self.assertAllowed(self.bash('aidlc engine orchestrate report --stage domain-design --result rejected --reason "R-02 R-03'))
         self.assertRefused(self.bash('aidlc engine orchestrate report --stage domain-design --result rejected --reason "R-02'), "R-03")
 
@@ -336,11 +376,39 @@ class Form(GuardCase):
         _, out, _ = self.h.read_form("open")
         self.assertIn("not marked Done", context(out))
         self.assertRefused(self.h.pre("AskUserQuestion", gate_input()), "Answer the form")
-        _, out, _ = self.h.read_form("done")
-        self.assertIn("Summary of your answers", context(out))
+        _, out, _ = self.h.read_form("done", answers=SORTED)
+        self.assertIn("answers --findings", context(out))
         self.assertTrue(self.h.pending()["form"]["done"])
+        self.assertEqual(self.h.pending()["form"]["answers"], SORTED)
+        self.assertRefused(self.h.pre("AskUserQuestion", gate_input()), "Send the summary")
+        _, done = self.h.summary()
+        self.assertEqual(done.stdout, "## Review Findings: User Answer\n### R-02: Fix\n#### Action items:\n"
+                                      "- State the winning event.\n- Add one line on what happens to reserved stock.\n"
+                                      "#### User Note:\nCheckout wins.\n### R-03: Reject\n#### User Note:\n"
+                                      "The name is deliberate.\n")
         self.assertAllowed(self.h.pre("AskUserQuestion", gate_input()))
         self.assertAllowed(self.h.pre("Bash", {"command": report_command("approved")}))
+
+    def test_a_done_read_without_the_answers_asks_for_a_get(self):
+        self.h.triage("Open in form")
+        self.h.write_form()
+        _, out, _ = self.h.read_form("done")
+        self.assertIn("answers were not in this result", context(out))
+        _, done = self.h.summary()
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("not read as done yet", done.stderr)
+        self.assertRefused(self.h.pre("AskUserQuestion", gate_input()), "Send the summary")
+        self.h.read_form("done", answers=SORTED)
+        self.h.summary()
+        self.assertAllowed(self.h.pre("AskUserQuestion", gate_input()))
+
+    def test_a_summary_must_follow_the_form_answers(self):
+        self.h.triage("Open in form")
+        self.h.write_form()
+        self.h.read_form("done", answers=SORTED)
+        (_, out, _), _ = self.h.summary("--choice", "fix")
+        self.assertIn("does not match the recorded answers (R-03)", context(out))
+        self.assertFalse(self.h.pending()["summarized"])
 
     def test_a_query_that_lists_the_form_marks_it_done(self):
         self.h.triage("Open in form")
@@ -381,7 +449,8 @@ class Form(GuardCase):
     def test_a_rejected_report_after_the_form_names_an_open_id(self):
         self.h.triage("Open in form")
         self.h.write_form()
-        self.h.read_form("done")
+        self.h.read_form("done", answers=SORTED)
+        self.h.summary()
         self.assertRefused(self.h.pre("Bash", {"command": report_command("rejected", "please fix it")}), "R-02, R-03")
         self.assertAllowed(self.h.pre("Bash", {"command": report_command("rejected", "R-02 needs a winner")
                                                + ' --reject-finding "x.md#R-03=deliberate"'}))
@@ -435,9 +504,14 @@ class CodeReview(GuardCase):
         self.assertAllowed(self.h.pre("AskUserQuestion", triage_input()))
         self.assertRefused(self.h.pre("AskUserQuestion", triage_input(accept=True)), "Accept is offered only")
 
-    def test_fix_releases_edits(self):
+    def test_fix_releases_edits_after_the_summary(self):
         _, out, _ = self.h.triage("Fix")
         self.assertIn("--fix flow", context(out))
+        self.assertRefused(self.h.pre("Edit", self.edit), "Send the summary")
+        self.assertRefused(self.h.pre("Bash", {"command": "git commit -m fix"}), "Send the summary")
+        (_, out, _), done = self.h.summary()
+        self.assertTrue(done.stdout.startswith("## Review Findings: User Answer\n### F-01: Fix\n"))
+        self.assertIn("Fix items now", context(out))
         self.assertIsNone(self.h.pending())
         self.assertAllowed(self.h.pre("Edit", self.edit))
         self.assertAllowed(self.h.pre("Bash", {"command": "git commit -m fix"}))
@@ -449,6 +523,9 @@ class CodeReview(GuardCase):
         self.assertIn("Fix, Accept, Open in form", context(out))
         self.assertAllowed(h.pre("AskUserQuestion", triage_input(accept=True, text="1 review finding is open (none blocking). What should I do with them?")))
         h.triage("Accept", accept=True)
+        self.assertRefused(h.pre("Edit", dict(self.EDIT, file_path=os.path.join(h.project, "src", "cart.py"))),
+                           "Send the summary")
+        h.summary()
         self.assertIsNone(h.pending())
         self.assertAllowed(h.pre("Edit", self.edit))
 
@@ -460,8 +537,11 @@ class CodeReview(GuardCase):
         self.assertRefused(self.h.pre("Bash", {"command": "git push"}), "Answer the form to continue")
         self.h.read_form("open", CODE_FORM_ID)
         self.assertRefused(self.h.pre("Edit", self.edit))
-        _, out, _ = self.h.read_form("done", CODE_FORM_ID)
+        sorted_ = {"F-01": {"k": ["fix"]}, "F-02": {"k": ["accept"], "note": ""}, "F-03": {"k": ["reject"], "note": "By design."}}
+        _, out, _ = self.h.read_form("done", CODE_FORM_ID, answers=sorted_)
         self.assertIn("Fix cards are fixed now", context(out))
+        self.assertRefused(self.h.pre("Edit", self.edit), "Send the summary")
+        self.h.summary()
         self.assertIsNone(self.h.pending())
         self.assertAllowed(self.h.pre("Edit", self.edit))
 

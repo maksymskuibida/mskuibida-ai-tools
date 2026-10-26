@@ -1,6 +1,7 @@
 name: regression
 
-# Gates for the plugins. worktree-cleanup: its regression suite. model-fit, project-panel and ask-guard:
+# Gates for the plugins. worktree-cleanup: its regression suite. model-fit, project-panel, ask-guard, unit-claim
+# and review-findings:
 # the Claude Code CLI validates the manifests and the mods, then runs each mod's own tests. Every plugin: versions
 # are consistent, and bumped on PRs that change what users receive (scripts/check-versions.py); so is the
 # marketplace's own version, which names the tag tag-main.yml puts on main.
@@ -60,8 +61,9 @@ jobs:
       - name: Install the Claude Code CLI
         # Pinned on purpose: the mod API is early-access and moves between releases, so a
         # new CLI must be adopted by bumping this version, not by a CI run that broke overnight.
-        # 2.1.295 is also the oldest build that knows the models model-fit routes to.
-        run: npm install -g @anthropic-ai/claude-code@2.1.295
+        # 2.1.295 is the oldest build that knows the models model-fit routes to; 2.1.295 refuses, and 2.1.302 draws, a
+        # Markdown block above the question dialog (review-findings and unit-claim draw one there).
+        run: npm install -g @anthropic-ai/claude-code@2.1.302
 
       - name: Check the classifier prompt matches the one the evals measure
         # plugins/model-fit/hooks/classify.ts must carry evals/prompts/candidate.txt byte for byte.
@@ -100,6 +102,12 @@ jobs:
           claude plugin validate plugins/unit-claim
           claude plugin test plugins/unit-claim
 
+      - name: Validate and test review-findings
+        # Not best effort, same as model-fit: the findings drawn above the triage dialog are the mod's.
+        run: |
+          claude plugin validate plugins/review-findings
+          claude plugin test plugins/review-findings
+
       - name: Validate and test aidlc-ids
         # Not best effort, same as model-fit.
         run: |
@@ -113,7 +121,6 @@ jobs:
           claude plugin validate plugins/question-forms
           claude plugin validate plugins/story-points
           claude plugin validate plugins/approval-gates
-          claude plugin validate plugins/review-findings
           claude plugin validate plugins/aidlc-session-titles
           claude plugin validate plugins/aidlc-patches
 
