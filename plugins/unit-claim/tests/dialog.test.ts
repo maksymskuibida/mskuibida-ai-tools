@@ -32,9 +32,9 @@ function world(on: On, answers: Record<string, string>[], resolver = '{}'): Worl
   })
   on('session.cwd', () => ({ value: '/project' }))
   on('process.spawn', async function* (_, e) {
-    if (e.argv[0] === 'aidlc') {
-      yield { stream: 'stderr' as const, text: '{"error":"Usage: aidlc-unit claim <unit> [--team <label>] [--rhythm per-stage|unit-end]"}' }
-      return { value: { code: 1, signal: null } }
+    if (e.argv[2] === 'engine') {
+      yield { stream: 'stdout' as const, text: JSON.stringify({ rhythms: ['per-stage', 'unit-end'], skipStages: true }) }
+      return { value: { code: 0, signal: null } }
     }
     if (e.argv[2] === 'brief') {
       yield { stream: 'stdout' as const, text: '{"unit": "u4-day-navigation", "entry": "### U4", "stories": [], "stages": []}' }
@@ -43,7 +43,12 @@ function world(on: On, answers: Record<string, string>[], resolver = '{}'): Worl
     if (e.argv[2] === 'record') {
       w.recorded.push([...e.argv.slice(3)])
       const stages = e.argv[e.argv.indexOf('--stages') + 1] ?? 'none'
-      yield { stream: 'stdout' as const, text: JSON.stringify({ choice: { stages: stages === 'none' ? [] : stages.split(',') }, notes: [] }) }
+      const rhythm = e.argv[e.argv.indexOf('--rhythm') + 1] ?? ''
+      const kept = stages === 'none' ? [] : stages.split(',')
+      const all = ['functional-design', 'nfr-requirements', 'nfr-design', 'infrastructure-design']
+      const out = all.filter(s => !kept.includes(s))
+      const claimFlags = `--rhythm ${rhythm}` + (out.length ? ` --skip-stages ${out.join(',')}` : '')
+      yield { stream: 'stdout' as const, text: JSON.stringify({ choice: { stages: kept }, notes: [], claimFlags }) }
       return { value: { code: 0, signal: null } }
     }
     return { value: { code: 1, signal: null } }
@@ -113,7 +118,7 @@ describe('the claim dialog', () => {
     expect(w.resolverSaw[0]).toContain('Stages input: "funtional desgn, infra"')
     expect(w.resolverSaw[0]).not.toContain('Rhythm input')
     expect(w.recorded).toEqual([['--unit', UNIT, '--stages', 'functional-design,infrastructure-design', '--rhythm', 'per-stage']])
-    expect(result.context?.join(' ')).toContain('Claim with `--rhythm per-stage`')
+    expect(result.context?.join(' ')).toContain('Claim with `--rhythm per-stage --skip-stages nfr-requirements,nfr-design`')
   })
 
   test('a refusal records nothing and asks for the same questions again', async ($, on) => {

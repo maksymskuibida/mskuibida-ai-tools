@@ -19,8 +19,11 @@ desgn, nfr reqs", "infra", "per stag"). An answer that names something that isn'
 twice, is refused. The refusal and a suggestion of what you probably meant are shown above the same two questions,
 asked again.
 
-The Unit is then claimed with `--rhythm <your choice>`. Each stage you left out is skipped **for that Unit only**,
-through the engine's per-Unit conditional skip:
+The Unit is then claimed with `--rhythm <your choice> --skip-stages <the stages you left out>`. The claim itself
+skips those stages **for that Unit only**, and the Unit starts at its first stage that runs. This needs AI-DLC engine
+2.11.2-preview.20261026.101 or later. The plugin reads the claim's usage line from the project's own harness
+(`.claude/tools/aidlc-unit.ts`) to tell. On an older engine the Unit is claimed with `--rhythm` alone, and each
+left-out stage is skipped when the engine's directive reaches it:
 
 ```
 aidlc engine orchestrate report --stage <slug> --unit <unit> --result skipped --reason "skipped at claim by the developer"
@@ -33,7 +36,7 @@ Nothing is saved across Units: every claim asks.
 hooks/register.tsx           the mod: the dialog's questions, the recommendation above it, reading typed answers, recording
 hooks/claim_guard.py         the guard (PreToolUse, PostToolUse, UserPromptSubmit)
 hooks/hooks.json             registers both
-scripts/claim_choice.py      the stage conditions, the Unit's brief, the recorded answer, the skip commands
+scripts/claim_choice.py      the stage conditions, the Unit's brief, the recorded answer, what the engine takes at a claim, the claim's flags
 skills/unit-claim/SKILL.md   the procedure the agent follows before a claim
 ```
 
@@ -48,7 +51,8 @@ claim with `--rhythm`, or refused and ask again. Nothing reads the session trans
 ## What the hook refuses
 
 - **The claim**: `aidlc unit claim <unit>`, `aidlc --claim <unit>`, or `aidlc-unit.ts claim <unit>`. It is refused
-  until that Unit has a recorded answer, and also when the command lacks `--rhythm <the chosen rhythm>`. The refusal
+  until that Unit has a recorded answer, and also when its `--rhythm` or `--skip-stages` differs from the answer (an
+  engine without `--skip-stages` takes `--rhythm` alone). The refusal
   tells the agent how to open the dialog.
 - **Recording an answer by the agent**: `claim_choice.py record` from Bash, and writing an answer file by hand. An
   answer is recorded only by the mod, after you answer.

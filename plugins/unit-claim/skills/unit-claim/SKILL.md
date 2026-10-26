@@ -44,24 +44,31 @@ Never record an answer yourself: the hook refuses `claim_choice.py record` from 
 
 ## 3. Claim with the choice
 
-Claim as the engine asks, and add the chosen rhythm:
+Claim as the engine asks, with the flags the Unit's answer gives. The mod's `unit-claim:` line names them, and so does
+`claim_choice.py status --unit <unit>` (`claimFlags`):
 
 ```
-aidlc unit claim <unit> --team "<label>" --rhythm <unit-end|per-stage>
+aidlc unit claim <unit> --team "<label>" --rhythm <unit-end|per-stage> --skip-stages <left-out stages>
 ```
 
-The hook refuses a claim without `--rhythm` or with a different one.
+`--skip-stages` lists exactly the stages the developer left out, comma-separated (any of `functional-design`,
+`nfr-requirements`, `nfr-design`, `infrastructure-design`). Leave it out when every stage runs. The hook refuses a claim
+whose rhythm or left-out stages differ from the answer.
 
-After the claim, a stage the choice leaves out is skipped for **this Unit only**. Use the engine's per-Unit
-conditional skip when its directive names that stage for the Unit:
+The claim itself skips those stages for **this Unit only**. Run `aidlc engine orchestrate next`: the Unit starts at its
+first stage that runs, and Unit Progress shows the skipped ones as `[S]`. The hook refuses
+`aidlc engine state unit start` of a left-out stage.
+
+**An engine without `--skip-stages`** (older than 2.11.2-preview.20261026.101; `claim_choice.py engine` says
+`skipStages: false`): claim with `--rhythm` alone. Each left-out stage is then skipped when the engine's directive names
+it for the Unit:
 
 ```
 aidlc engine orchestrate report --stage <slug> --unit <unit> --result skipped --reason "skipped at claim by the developer"
 ```
 
-Then run `next`. `claim_choice.py skips --unit <unit>` prints these commands. The hook refuses
-`aidlc engine state unit start` of a left-out stage and names the skip to run instead. Never skip a stage whose files
-for the Unit are already written: the engine refuses that, so tell the developer and run the stage.
+Then run `next`. `claim_choice.py skips --unit <unit>` prints these commands. Never skip a stage whose files for the
+Unit are already written: the engine refuses that, so tell the developer and run the stage.
 
 ## 4. Asking again
 

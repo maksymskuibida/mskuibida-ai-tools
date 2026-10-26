@@ -57,10 +57,12 @@ function jsonOf(text: string): unknown {
   }
 }
 
-/** The rhythms the pinned engine accepts, read from `aidlc unit claim --help`; the plugin's two when it says none. */
+/** The rhythms the pinned engine accepts, read from its claim usage line by `claim_choice.py engine` (not by running
+ *  `aidlc`, which fails while the project's pin is not registered); the plugin's two when it names none. */
 async function rhythmsOf($: EngineInterface, cwd: string): Promise<string[]> {
-  const help = await run($, ['aidlc', 'unit', 'claim', '--help'], cwd).catch(() => ({ out: '', err: '' }))
-  const found = /--rhythm\s+([a-z|-]+)/.exec(help.out + help.err)?.[1]?.split('|').filter(Boolean) ?? []
+  const script = `${$.plugin.root}/scripts/claim_choice.py`
+  const eng = await run($, ['python3', script, 'engine'], cwd).catch(() => ({ code: 1, out: '', err: '' }))
+  const found = ((jsonOf(eng.out) as { rhythms?: string[] } | undefined)?.rhythms ?? []).filter(Boolean)
 
   // unit-end first: the rhythm the plugin exists for.
   return (found.length >= 2 ? found : Object.keys(RHYTHM_NOTES)).sort((a, b) => Number(b === 'unit-end') - Number(a === 'unit-end'))
@@ -219,13 +221,17 @@ async function settle(
     return `The answer could not be recorded (${recorded.err.trim() || 'no output'}). Tell the developer in one line; do not claim.`
   }
   claims.delete(unit)
-  const { choice, notes } = (jsonOf(recorded.out) ?? {}) as { choice?: { stages: string[] }; notes?: string[] }
+  const { choice, notes, claimFlags } = (jsonOf(recorded.out) ?? {}) as {
+    choice?: { stages: string[] }
+    notes?: string[]
+    claimFlags?: string
+  }
   const chosen = STAGES.filter(s => choice?.stages.includes(s.slug)).map(s => s.name)
 
   return (
     `Recorded for ${unit}: ${chosen.join(', ') || 'no design stage'}; rhythm ${rhythm}. ` +
     (notes?.length ? `Tell the developer in one line: ${notes.join(' ')} ` : '') +
-    `Claim with \`--rhythm ${rhythm}\` added to the engine's claim command.`
+    `Claim with \`${claimFlags || `--rhythm ${rhythm}`}\` added to the engine's claim command.`
   )
 }
 

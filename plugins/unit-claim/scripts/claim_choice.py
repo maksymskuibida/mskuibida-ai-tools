@@ -4,7 +4,10 @@
     claim_choice.py stages   [--project-dir <dir>]                 the four design stages and their `condition:`
     claim_choice.py brief    --unit <u> [--project-dir <dir>]      what the recommendation reads: the stages, the
                                                                    Unit's entry in unit-of-work.md and its stories
-    claim_choice.py status   --unit <u> [--project-dir <dir>]      the choice recorded for the Unit, or null
+    claim_choice.py status   --unit <u> [--project-dir <dir>]      the choice recorded for the Unit, or null, and the
+                                                                   flags its claim takes (`claimFlags`)
+    claim_choice.py engine   [--project-dir <dir>]                 what the project's pinned engine accepts at a claim:
+                                                                   its rhythms, and whether it takes --skip-stages
     claim_choice.py record   --unit <u> --stages <a,b|none> --rhythm <r> [--project-dir <dir>]
                              record the developer's answer; run by the plugin's mod after the claim dialog, never by
                              the agent (the hook refuses it from Bash)
@@ -252,6 +255,34 @@ def stage_info(project):
     return out
 
 
+def engine(project):
+    """What the project's pinned engine accepts at a claim, from the claim's usage line in its harness
+    (`<harness>/tools/aidlc-unit.ts`): {"rhythms": [...], "skipStages": bool, "usage": str}. Read from the file, not
+    by running `aidlc`, which fails while the project's pin is not registered on the machine."""
+    usage = ""
+    for harness in (".claude", ".kiro", ".codex"):
+        try:
+            with open(os.path.join(project, harness, "tools", "aidlc-unit.ts"), encoding="utf-8") as f:
+                found = re.search(r"Usage: aidlc-unit claim[^\"'`\n]*", f.read())
+        except OSError:
+            continue
+        if found:
+            usage = found.group(0).strip()
+            break
+    rhythms = re.search(r"--rhythm\s+([a-z|-]+)", usage)
+    return {"rhythms": [r for r in rhythms.group(1).split("|") if r] if rhythms else list(RHYTHMS),
+            "skipStages": "--skip-stages" in usage, "usage": usage}
+
+
+def claim_flags(choice, eng):
+    """The flags a claim of the Unit carries: its rhythm and, where the engine takes it, the stages left out."""
+    flags = f"--rhythm {choice['rhythm']}"
+    out = left_out(choice)
+    if eng["skipStages"] and out:
+        flags += " --skip-stages " + ",".join(out)
+    return flags
+
+
 def intent_dir(project):
     return os.path.join(project, "aidlc", "spaces", active_space(project), "intents", intent_of(project))
 
@@ -293,10 +324,10 @@ def brief(project, unit):
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="claim_choice.py", description="The claim choice of a team Unit.")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("stages", "brief", "status", "record", "skips", "forget"):
+    for name in ("stages", "engine", "brief", "status", "record", "skips", "forget"):
         p = sub.add_parser(name)
         p.add_argument("--project-dir")
-        if name != "stages":
+        if name not in ("stages", "engine"):
             p.add_argument("--unit", required=True)
         if name == "record":
             p.add_argument("--stages", required=True)
@@ -306,16 +337,22 @@ def main(argv=None):
     try:
         if args.cmd == "stages":
             print(json.dumps(stage_info(project), indent=2))
+        elif args.cmd == "engine":
+            print(json.dumps(engine(project), indent=2))
         elif args.cmd == "brief":
             print(json.dumps(brief(project, args.unit), indent=2))
         elif args.cmd == "status":
-            print(json.dumps({"unit": args.unit, "choice": choice_for(project, args.unit)}, indent=2))
+            choice = choice_for(project, args.unit)
+            flags = claim_flags(choice, engine(project)) if choice else None
+            print(json.dumps({"unit": args.unit, "choice": choice, "claimFlags": flags}, indent=2))
         elif args.cmd == "record":
             stages = parse_stages(args.stages)
             if stages is None:
                 raise ChoiceError(f"cannot read the stages {args.stages!r}; name them by slug, comma-separated, or none")
             choice, notes = record_answer(project, args.unit, stages, args.rhythm)
-            print(json.dumps({"choice": choice, "notes": notes, "skips": [skip_command(s, args.unit) for s in left_out(choice)]}, indent=2))
+            eng = engine(project)
+            skips = [] if eng["skipStages"] else [skip_command(s, args.unit) for s in left_out(choice)]
+            print(json.dumps({"choice": choice, "notes": notes, "claimFlags": claim_flags(choice, eng), "skips": skips}, indent=2))
         elif args.cmd == "skips":
             choice = choice_for(project, args.unit)
             if not choice:
