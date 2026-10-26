@@ -14,9 +14,11 @@ edit a form page per stage.
 
 `Artifact` → `action: "list"` → the artifact titled **AI-DLC question forms**. If the
 developer has none, publish `question-form.html` from this skill's directory once:
-`capabilities: {db: {}}`, `icon: "form"`, description "Fill a stage's AI-DLC questions file in
-a form; Claude copies the saved answers word for word into the file." Reuse its URL for every
-form from then on.
+`capabilities: {db: {}, user: {}}`, `icon: "form"`, description "Fill a stage's AI-DLC questions
+file in a form; Claude copies the saved answers word for word into the file." Reuse its URL for
+every form from then on. After a plugin update, republish the page from this file to the same URL
+once, with the same capabilities: the rows stay. (`user` keeps each viewer's "new since you
+looked" marks with their account; without it they stay in that browser.)
 
 ## 2. Open a form (at every questions file)
 
@@ -49,6 +51,47 @@ questions. Nothing is pre-selected (a board's cards are the one exception, § 5)
 press; the engine's own mode question is unchanged, and answers from the form count as the
 developer editing the file.
 
+### What the page does with the rows, and the optional fields that feed it
+
+The page has a sticky bar (filters for unanswered and for new or changed questions, the answered
+count, save state, Done, and a chip per question that jumps to it), tooltips on ids, terms and
+badges, and links. None of it needs extra rows; these optional fields make it better:
+
+- `refs: [{label, tip, target}]` on a question or card — what it refers to: another question
+  (`target: "#Q3"`, a live link), a page (`https://…`), or a source the page does not hold
+  (`path:<repo path>`, or any other text such as `story:US2.1`): that one is still a link, its
+  `tip` is all the developer gets, and a press says the source isn't in the form. `tip` is plain
+  words ("The story about guests filtering dishes by diet"), never just the id again.
+- `terms: {"<word>": "<plain meaning>"}` on the form — words and abbreviations that get a
+  tooltip wherever they appear. The page knows common ones (AC, API, CI, MVP, NFR, PR, SSO, UI …);
+  add the project's own (a Unit name, a domain word).
+- `revNote` on a question — one line on why a follow-up was added or a question changed.
+- `ids` on the form — what every id in the form's text is, from the shared id map (below).
+- `records: "https://github.com/<owner>/<repo>/blob/<branch>/"` on the form, when the repository is
+  on a code host — `refs` with `path:` targets, file paths in `` `code` `` and the questions file
+  then open there. Leave it out for a repository with no web address. Ids don't use it: they keep
+  the shared tooltip.
+
+**Ids: the `ids` map.** Every id in the page's text (`US1.1`, `AC1.1.2`, `FR1.4`, `NFR3`, `BR1.2`,
+`Q4`, `U31`, `C2`, `E7`, `ADR-009`, `R-01` and every kind the project's documents define) is a link
+with a tooltip, found by the shared `aidlc-ids` piece the same way on every plugin's page
+(`shared/aidlc-ids/README.md` in this repository is the contract). Before the batch that opens or
+changes a form:
+
+1. `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/aidlc_ids.py" sync` — keeps the checkout's id map, outside
+   the project; fast when nothing changed.
+2. Write all the text you put into the form (titles, `text`, `ctx`, options, hints, proposals, a
+   board's cards) into one scratch file, and run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/aidlc_ids.py"
+   refs --text-file <that file> --near <the questions file>`.
+3. Store its output, `{id: {kind, title, text, doc, line}}`, as the form's `ids` in the same batch.
+   When a later change adds text with a new id, run `refs` again and update `ids` with it.
+
+The page links ids to questions and cards it shows by itself (a live jump), and shows an id no
+document defines as not defined; a form opened before `ids` existed still gets every id linked,
+as not defined. A `` `code` `` span that is a file path becomes a file link. In
+`text`, `from`, `plain` and option labels say things in words, not by id: "Guests can't tell
+which dish is vegan", not "AC 3 of US2.1"; put the id in `refs`.
+
 ## 3. Change a form
 
 Adding, changing or removing a question, follow-ups included, is a row write to the same form
@@ -76,7 +119,8 @@ One `ArtifactData` `get` of `forms/<id>`. `answers[qid]` is `{k: [letters], note
 When the developer has to sort items rather than answer questions — a pull request review, on both
 sides (`pr-review` plugin: `review-pr` for the reviewer, `address-review` for the author, both followed by § 5b; `self-review` for the author's own AI review pass, a Fix now / Dismiss board that gets the form check of § 5b A and is not part of the flow guard) — the form is a board: 2–4 boxes
 side by side on a wide page, stacked on a narrow one, each item a card that starts in the box the
-agent proposes and can be moved by button or drag.
+agent proposes and can be moved by its buttons or by dragging its handle; the rest of the card is
+plain text that can be selected and copied.
 
 - `forms/<id>` adds `view: "board"` and `boxes: [{k, t, hint?, tone?, group?, sink?}]`; `tone` is
   `ink`, `accent`, `warn` or `muted`. The box labels are data, written by the skill that opens the
@@ -88,11 +132,15 @@ agent proposes and can be moved by button or drag.
   board fills the screen; then each box scrolls on its own. Cards show their id, title and move
   buttons; details open per card or all at once from the bar.
 - `forms/<id>/questions/<qid>` per card — `{n, text, ctx?, kind: "card", from?, group?, proposed:
-  {k, why?}, outcomes?: {<box k>: "…"}}`; `group` is needed only when the proposed box is a sink. `text` is a short title a person understands without
+  {k, why?}, outcomes?: {<box k>: "…"}, plain?, action?, detail?, refs?}`; `group` is needed only when the proposed box is a sink. `text` is a short title a person understands without
   knowing the IDs (not "AC 3 of US2.1", but "Guests can't tell which dish is vegan"); `from` one
   line on who asked for what; `outcomes` says what happens when the card sits in each box. A
-  card's `ctx` follows the § 2 rule: paragraphs and `- ` bullets with **bold** lead-ins, never
-  one run-on paragraph; `text`, `from`, `outcomes` and `proposed.why` take the inline subset only. On a
+  card's optional `plain` says what it means in plain words (shown on the card under the
+  title), `action` the suggested action (shown in its details), `detail` the `ctx` without those
+  two (shown instead of `ctx` when the card has `plain` or `action`; `ctx` stays complete), and `refs` what it refers to (§ 2;
+  the `review-findings` board uses `#<qid>` for another card, and `doc:`, `path:` or `finding:` for
+  what the form does not hold). A card's `ctx` follows the § 2 rule: paragraphs and `- ` bullets with **bold** lead-ins, never
+  one run-on paragraph; `text`, `from`, `outcomes`, `plain`, `action` and `proposed.why` take the inline subset only. On a
   grouped board the group alone decides where a card can go; on a board without groups,
   `outcomes` also limits the boxes offered to its keys (plus the proposed box).
 - A board is never opened with zero cards: when there is nothing to sort, no board and no follow-up
