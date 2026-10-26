@@ -12,8 +12,15 @@
   Data contract (what the agent writes):
 
     reviews/<id>                 {title, intent, file, scale: [1, 2, 3, 5, 8],
-                                  status: "open"|"done", createdAt (ISO), picks: {}, savedAt?}
+                                  status: "open"|"done", createdAt (ISO), picks: {}, savedAt?,
+                                  ids?: {"FR1.4": {kind, title, text, doc, line}}}
       id: [a-z0-9._-]+ — the intent's directory name, lowercased.
+      ids: what each id the cards mention is, the output of the shared `aidlc_ids.py refs` over all
+        the text the rows show (shared/aidlc-ids/README.md is its contract). The shared AidlcIds
+        script makes every id in the page a link with this tooltip: live when the page shows its
+        card (each Unit card carries data-aidlc-id), dotted when it is defined elsewhere, dashed when
+        no document defines it. A review written before `ids` existed still gets every id linked;
+        the rows' own titles fill in for the ids they name.
     reviews/<id>/units/<Unit>    {n: 3, unit: "U3", name: "api-billing", title, ctx?,
                                   points: 5 | null, source: "ai" | "human" | null,
                                   dependsOn?: ["U1" | {unit: "U1", title}],
@@ -21,17 +28,16 @@
                                   requirements?: [{id: "FR-4", title, text?}]}
       points/source: the row that counts in unit-points.csv now; null/null without a row.
       title: one line a person understands without the ids. name: the Unit's slug.
-      dependsOn: the Units it depends on. A Unit in this review links to its card; for one that is
-        not, give its title in the object form, or the link can only show the id.
-      stories, requirements (optional): what the Unit delivers. They are not cards on this page, so
-        their links show the title and, in the tooltip, the id and text; a click says the source is
-        not in this document.
+      dependsOn: the Units it depends on, each shown as its id (a link) and title. A Unit in this
+        review links to its card; for one that is not, give its title in the object form.
+      stories, requirements (optional): what the Unit delivers, each shown as its id (a link) and
+        title. They are not cards on this page, so their links say so on a click.
       A string entry ("US-3.1") is accepted wherever an object is, and shows only the id.
 
     Markdown the page renders in ctx: blocks separated by a blank line; a block whose every line
-    starts with "- " is a one-level list; inside both, `code` and **bold**. A Unit id (U3) or a
-    story or requirement id named on any card becomes a link labelled with its title. title: `code`
-    and **bold** only. Nothing else renders.
+    starts with "- " is a one-level list; inside both, `code` and **bold**. title: `code` and
+    **bold** only. Nothing else renders. Any id in any of it (U3, US-2.1, FR1.4, BR1.2, ADR-009)
+    becomes a link with a tooltip, found by the shared AidlcIds script, not here.
 
   What the page writes:
 
@@ -54,6 +60,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
+/* Dark mode keeps the band, the tooltip and the toast dark surfaces (raised, with a line), never inverted to light;
+   text on an accent fill is --on-accent in both themes. */
 /* Layout: one reading column, the approval-gates family. A header card with the review's facts and the legend; a sticky
    bar (filters, counts, save state, Done, one chip per Unit); then one card per Unit ending in its hand of points. */
 :root {
@@ -64,7 +72,7 @@
   --low-bg: #EEF0F3; --low-fg: #4A5160;
   --ok-bg: #E6F4EA; --ok-fg: #1F6B36; --warn-bg: #FFF4DB; --warn-fg: #7A4B00; --warn-dot: #B26B00;
   --crit-bg: #FDE4E4; --crit-fg: #9B1C1C;
-  --band-bg: #171A21; --band-fg: #FFFFFF; --band-muted: #C9CDD6; --tip-bg: #171A21; --tip-fg: #FFFFFF;
+  --band-bg: #171A21; --band-fg: #FFFFFF; --band-muted: #C9CDD6; --band-line: #171A21; --tip-bg: #171A21; --tip-fg: #FFFFFF; --tip-line: #171A21;
   --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
   --bar-h: 120px;
@@ -77,7 +85,7 @@
   --low-bg: #262A33; --low-fg: #AEB4C0;
   --ok-bg: #183024; --ok-fg: #8FD3A6; --warn-bg: #3A2C12; --warn-fg: #F0C36B; --warn-dot: #F0A93B;
   --crit-bg: #3D1D1D; --crit-fg: #F4A4A4;
-  --band-bg: #E6E8EE; --band-fg: #111318; --band-muted: #3D4350; --tip-bg: #E6E8EE; --tip-fg: #111318;
+  --band-bg: #252A34; --band-fg: #E6E8EE; --band-muted: #C3C8D2; --band-line: #343946; --tip-bg: #2B303B; --tip-fg: #E6E8EE; --tip-line: #3A3F4B;
   color-scheme: dark } }
 :root[data-theme="dark"] {
   --bg: #111318; --surface: #1A1D24; --raised: #20232B; --fg: #E6E8EE; --fg-2: #C3C8D2; --muted: #9AA1AF;
@@ -87,7 +95,7 @@
   --low-bg: #262A33; --low-fg: #AEB4C0;
   --ok-bg: #183024; --ok-fg: #8FD3A6; --warn-bg: #3A2C12; --warn-fg: #F0C36B; --warn-dot: #F0A93B;
   --crit-bg: #3D1D1D; --crit-fg: #F4A4A4;
-  --band-bg: #E6E8EE; --band-fg: #111318; --band-muted: #3D4350; --tip-bg: #E6E8EE; --tip-fg: #111318;
+  --band-bg: #252A34; --band-fg: #E6E8EE; --band-muted: #C3C8D2; --band-line: #343946; --tip-bg: #2B303B; --tip-fg: #E6E8EE; --tip-line: #3A3F4B;
   color-scheme: dark }
 
 * { box-sizing: border-box; }
@@ -193,11 +201,10 @@ h2 { flex: 1 1 auto; min-width: 0; margin: 0; padding-top: 2px; font-size: 16px;
 code { font-family: var(--mono); font-size: 12.5px; background: var(--line-soft); padding: 1px 5px; border-radius: 4px; }
 .refs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .refs > span { width: 100px; font-size: 12px; color: var(--muted); }
-.ref { display: inline-flex; align-items: center; min-height: 24px; max-width: 100%; padding: 0 8px; border-radius: 5px; background: var(--accent-soft); color: var(--accent); font-size: 13px; text-decoration: none; overflow-wrap: anywhere; }
-.ref:hover { color: var(--accent-strong); text-decoration: underline; }
-.ref.out { background: transparent; box-shadow: inset 0 0 0 1px var(--control); color: var(--fg-2); text-decoration: underline dotted; text-underline-offset: 3px; }
-.ref.out:hover { color: var(--accent); }
-.ctx .ref { display: inline; min-height: 0; padding: 1px 5px; }
+.ref { display: inline-flex; align-items: baseline; gap: 7px; min-height: 26px; max-width: 100%; padding: 3px 9px; border-radius: 6px; background: var(--raised); box-shadow: inset 0 0 0 1px var(--line); color: var(--fg-2); font-size: 13px; overflow-wrap: anywhere; cursor: pointer; }
+.ref:hover { box-shadow: inset 0 0 0 1px var(--accent); color: var(--fg); }
+.ref .rid { font-family: var(--mono); font-size: 12px; flex: none; }
+.ref:has(.aidlc-id:not(.aidlc-id-out):not(.aidlc-id-unknown)) { background: var(--accent-tint); }
 .handrow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding-top: 4px; }
 .hand { display: flex; flex-wrap: wrap; gap: 8px; }
 .pt { position: relative; width: 48px; height: 56px; border-radius: 8px; border: 1px solid var(--pt-line); background: var(--surface); color: var(--fg); font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; display: grid; place-items: center; padding: 0; transition: transform .12s ease, border-color .12s ease, background-color .12s ease; }
@@ -222,7 +229,7 @@ code { font-family: var(--mono); font-size: 12.5px; background: var(--line-soft)
 .flash { animation: flash 1.6s ease-out; }
 @keyframes flash { 0% { background: var(--accent-soft); } 100% { background: var(--surface); } }
 
-.band { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 14px 18px; border-radius: 12px; background: var(--band-bg); color: var(--band-fg); }
+.band { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 14px 18px; border-radius: 12px; background: var(--band-bg); color: var(--band-fg); border: 1px solid var(--band-line); }
 .band span { color: var(--band-muted); } .band b { font-weight: 500; } .band .end { margin-left: auto; font-family: var(--mono); font-size: 12px; }
 .list h2 { padding: 16px 16px 4px; }
 .lrow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 10px 16px; border-top: 1px solid var(--line-soft); color: var(--fg); text-decoration: none; }
@@ -231,8 +238,8 @@ code { font-family: var(--mono); font-size: 12.5px; background: var(--line-soft)
 .lrow .end { margin-left: auto; }
 .msg { padding: 28px 24px; display: flex; flex-direction: column; gap: 6px; }
 .msg p { margin: 0; color: var(--fg-2); max-width: 70ch; }
-#toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); max-width: calc(100vw - 32px); background: var(--tip-bg); color: var(--tip-fg); padding: 8px 14px; border-radius: 8px; font-size: 13px; z-index: 20; }
-#tip { position: fixed; z-index: 30; max-width: min(340px, calc(100vw - 24px)); padding: 8px 10px; border-radius: 6px; background: var(--tip-bg); color: var(--tip-fg); font-size: 12px; line-height: 1.45; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
+#toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); max-width: calc(100vw - 32px); background: var(--tip-bg); color: var(--tip-fg); border: 1px solid var(--tip-line); padding: 8px 14px; border-radius: 8px; font-size: 13px; z-index: 20; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
+#tip { position: fixed; z-index: 30; max-width: min(340px, calc(100vw - 24px)); padding: 8px 10px; border-radius: 6px; background: var(--tip-bg); color: var(--tip-fg); border: 1px solid var(--tip-line); font-size: 12px; line-height: 1.45; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
 
 @media (max-width: 767px) {
   .head { padding: 16px; }
@@ -247,6 +254,19 @@ code { font-family: var(--mono); font-size: 12.5px; background: var(--line-soft)
   .legend .file { margin-left: 0; }
 }
 @media (max-width: 420px) { .hand { gap: 6px; } .pt { width: 42px; height: 50px; font-size: 18px; } }
+/* aidlc-ids.css:begin */
+/* Shared: the canonical copy is shared/aidlc-ids/aidlc-ids.css; scripts/sync-shared.py copies it into every page.
+   It uses the page's own tokens: --accent, --muted, --tip-bg (each page defines them). */
+a.aidlc-id { color: var(--accent, currentColor); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; cursor: pointer; white-space: nowrap; font-variant-numeric: tabular-nums; }
+a.aidlc-id:hover, a.aidlc-id:focus-visible { text-decoration-thickness: 2px; }
+a.aidlc-id.aidlc-id-out { text-decoration-style: dotted; }
+a.aidlc-id.aidlc-id-unknown { color: var(--muted, currentColor); text-decoration-style: dashed; }
+a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outline-offset: 2px; border-radius: 3px; }
+[data-aidlc-id] { scroll-margin-top: 96px; }
+@keyframes aidlc-flash { from { box-shadow: 0 0 0 3px var(--accent, #3b82f6); } to { box-shadow: 0 0 0 3px transparent; } }
+.aidlc-flash { animation: aidlc-flash 1.6s ease-out; border-radius: 6px; }
+@media (prefers-reduced-motion: reduce) { .aidlc-flash { animation: none; outline: 2px solid var(--accent, #3b82f6); } }
+/* aidlc-ids.css:end */
 </style>
 
 <div class="wrap">
@@ -255,6 +275,162 @@ code { font-family: var(--mono); font-size: 12.5px; background: var(--line-soft)
 <div id="tip" role="tooltip" hidden></div>
 <div id="toast" role="status" aria-live="polite" hidden></div>
 
+<script>
+/* aidlc-ids.js:begin */
+/* The ids an AI-DLC page shows (US1.1, AC1.1.2, FR1.4, NFR3, BR1.2, Q4, U31, C2, ADR-009, R-01, ...), each a link with
+   a tooltip saying what it is. Shared: the canonical copy is shared/aidlc-ids/aidlc-ids.js in mskuibida-ai-tools,
+   copied into every page by scripts/sync-shared.py. Edit it there.
+
+   The page gives it a map of what each id is, `ids` = {"FR1.4": {kind, title, text, doc}}, the output of
+   `aidlc_ids.py refs` written with the page's data, and marks each element that shows an id's own definition with
+   data-aidlc-id="<id>". Then:
+
+     AidlcIds.linkify(root, ids, { toast: fn })   turn every id in root's text into a link; run after each render
+     AidlcIds.observe(root, getIds, { toast: fn }) the same, again whenever root's content changes
+
+   A link whose id is shown in the page jumps there and flashes it. One that is not shown still looks like a link: its
+   tooltip says what it is, and a click shows a toast that it is not in this page. An id no document defines says so.
+   The tooltip is the page's own: the link carries data-tip and aria-label, which every page's tooltip reads. */
+var AidlcIds = (function () {
+  "use strict";
+  var ID = /(^|[^\w-])([A-Z][A-Z]{0,4}-?\d+[a-z]?(?:[.-]\d+[a-z]?)*(?:-[A-Z]{1,4}\d+[a-z]?)?)(?![\w-])/g;
+  var NOT_IDS = /^(UTF-?\d+|SHA-?\d+|ISO-?\d+|RFC-?\d+|HTTP-?\d+|TLS-?\d|H[1-6]|V\d+|X\d+|P\d|ES\d+|ID\d*)$/;
+  var KINDS = { US: "Story", AC: "Acceptance criterion", FR: "Functional requirement", NFR: "Non-functional requirement",
+    BR: "Business rule", Q: "Question", U: "Unit", C: "Contract", E: "External interface", ADR: "Decision record",
+    R: "Review finding", D: "Decision", DR: "Design rule", S: "Screen", M: "Mockup", T: "Task" };
+  var SKIP = "a, button, code, pre, script, style, textarea, input, select, option, [data-aidlc-noids]";
+
+  function prefix(id) { return (/^[A-Z]+/.exec(id) || [""])[0]; }
+  function docName(doc) { return String(doc || "").split("/").pop(); }
+
+  function anchorOf(id) {
+    var css = window.CSS && CSS.escape ? CSS.escape(id) : id.replace(/["\\]/g, "\\$&");
+    return document.querySelector('[data-aidlc-id="' + css + '"]');
+  }
+
+  /** The tooltip of an id: what it is, in plain words, and where it is written. */
+  function tip(id, def) {
+    if (!def) return id + ": not found in this project's documents.";
+    var kind = def.kind || KINDS[prefix(id)] || "";
+    var head = (kind ? kind + " " : "") + id + (def.title ? ": " + def.title : "");
+    var body = def.text && def.text !== def.title ? " " + def.text : "";
+    return head + (/[.!?…]$/.test(head) || !body ? "" : ".") + body + (def.doc ? " (" + docName(def.doc) + ")" : "");
+  }
+
+  /** Whether a word is an id this page knows of, or looks like one of a kind it knows. */
+  function isId(word, ids, prefixes) {
+    if (NOT_IDS.test(word)) return false;
+    return Object.prototype.hasOwnProperty.call(ids, word) || prefixes[prefix(word)] === true;
+  }
+
+  function linkify(root, ids, opts) {
+    if (!root) return;
+    ids = ids || {};
+    opts = opts || {};
+    var prefixes = {};
+    Object.keys(ids).forEach(function (k) { prefixes[prefix(k)] = true; });
+    Object.keys(KINDS).forEach(function (k) { prefixes[k] = true; });
+    // Keys of the page's own map that are not id-shaped (a form's q1, a card's f-3) are linked by their exact text.
+    var own = Object.keys(ids).filter(function (k) { return !/^[A-Z]/.test(k) && /^[\w.-]+$/.test(k); })
+      .sort(function (a, b) { return b.length - a.length; })
+      .map(function (k) { return k.replace(/[.-]/g, "\\$&"); });
+    var OWN = own.length ? new RegExp("(^|[^\\w-])(" + own.join("|") + ")(?![\\w-])", "g") : null;
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (n) {
+        if (!n.nodeValue || !(OWN ? /\d/ : /[A-Z]-?\d/).test(n.nodeValue)) return NodeFilter.FILTER_REJECT;
+        var p = n.parentElement;
+        return p && !p.closest(SKIP) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      }
+    });
+    var nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(function (node) {
+      var text = node.nodeValue, last = 0, frag = null, m;
+      var self = node.parentElement.closest("[data-aidlc-id]");
+      var found = [];
+      [ID, OWN].forEach(function (re) {
+        if (!re) return;
+        re.lastIndex = 0;
+        while ((m = re.exec(text))) found.push({ word: m[2], start: m.index + m[1].length, own: re === OWN });
+      });
+      found.sort(function (a, b) { return a.start - b.start; });
+      for (var i = 0; i < found.length; i++) {
+        var word = found[i].word, start = found[i].start;
+        if (start < last) continue;
+        if (!found[i].own && !isId(word, ids, prefixes)) continue;
+        if (self && self.getAttribute("data-aidlc-id") === word) continue;
+        frag = frag || document.createDocumentFragment();
+        frag.appendChild(document.createTextNode(text.slice(last, start)));
+        var a = document.createElement("a");
+        var def = ids[word];
+        a.className = "aidlc-id" + (def ? "" : " aidlc-id-unknown");
+        a.href = "#" + encodeURIComponent(word);
+        a.textContent = word;
+        a.setAttribute("data-aidlc-ref", word);
+        a.setAttribute("data-tip", tip(word, def));
+        a.setAttribute("aria-label", tip(word, def));
+        frag.appendChild(a);
+        last = start + word.length;
+      }
+      if (frag) {
+        frag.appendChild(document.createTextNode(text.slice(last)));
+        node.parentNode.replaceChild(frag, node);
+      }
+    });
+    markLive(root);
+    bind(root, opts);
+  }
+
+  /** Links whose id is shown in the page get the live look; the rest the out-of-page one. */
+  function markLive(root) {
+    Array.prototype.forEach.call(root.querySelectorAll("a.aidlc-id"), function (a) {
+      a.classList.toggle("aidlc-id-out", !anchorOf(a.getAttribute("data-aidlc-ref")));
+    });
+  }
+
+  function bind(root, opts) {
+    if (root.__aidlcIds) { root.__aidlcIds.opts = opts; return; }
+    root.__aidlcIds = { opts: opts };
+    root.addEventListener("click", function (e) {
+      var a = e.target.closest && e.target.closest("a.aidlc-id");
+      if (!a || !root.contains(a)) return;
+      e.preventDefault();
+      var id = a.getAttribute("data-aidlc-ref"), target = anchorOf(id);
+      var say = root.__aidlcIds.opts.toast || function (t) { window.alert(t); };
+      if (target) {
+        var closed = target.closest("details:not([open])");
+        if (closed) closed.open = true;
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+        target.classList.remove("aidlc-flash");
+        void target.offsetWidth;
+        target.classList.add("aidlc-flash");
+        if (target.tabIndex < 0 && !target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+        target.focus({ preventScroll: true });
+      } else if (a.classList.contains("aidlc-id-unknown")) {
+        say(id + " isn't defined in this project's documents.");
+      } else {
+        say(id + " isn't in this page. What it is: in its tooltip.");
+      }
+    });
+  }
+
+  function observe(root, getIds, opts) {
+    if (!root) return;
+    var busy = false;
+    var run = function () {
+      if (busy) return;
+      busy = true;
+      try { linkify(root, getIds(), opts); } finally { busy = false; }
+    };
+    run();
+    new MutationObserver(function () { if (!busy) window.requestAnimationFrame(run); })
+      .observe(root, { childList: true, subtree: true, characterData: true });
+  }
+
+  return { linkify: linkify, observe: observe, tip: tip, KINDS: KINDS };
+})();
+/* aidlc-ids.js:end */
+</script>
 <script>
 /* RENDER-START: no DOM below, until RENDER-END */
 var PointsView = (function () {
@@ -276,7 +452,6 @@ var PointsView = (function () {
   function anchorOf(id) { return "u-" + String(id).replace(/[^A-Za-z0-9._-]+/g, "-"); }
   function fmt(iso) { try { return iso ? new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : ""; } catch (e) { return iso || ""; } }
   function mark(kind) { return '<i class="mark ' + kind + '">' + ICON[kind] + "</i>"; }
-  function reRx(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
   /* A short hash of what a card shows: a read mark holds it, so a Unit whose row changed turns unread. */
   function stamp(u) {
     var s = JSON.stringify([u.title, u.ctx, u.points, u.source, u.dependsOn, u.stories, u.requirements]), h = 5381;
@@ -308,43 +483,36 @@ var PointsView = (function () {
     return t;
   }
 
-  /* ---------- links: live inside the page, a toast otherwise ---------- */
-  function link(label, tip, target, extra) {
-    if (target) return '<a class="ref' + (extra || "") + '" href="#' + esc(target) + '" data-jump="' + esc(target) + '" data-tip="' + esc(tip) + '">' + esc(label) + "</a>";
-    return '<a class="ref out' + (extra || "") + '" href="#" data-missing="1" data-tip="' + esc(tip + " Not in this document.") + '">' + esc(label) + "</a>";
+  /* ---------- ids: shown as text here; the shared AidlcIds script makes each one a link with a tooltip ---------- */
+  /* One reference: its id, then its title in words. Clicking the title follows the id's link. */
+  function ref(id, title) {
+    return '<span class="ref"><span class="rid">' + esc(id) + "</span>" + (title ? "<span>" + inline(title) + "</span>" : "") + "</span>";
   }
-  function unitLink(byId, id, title) {
-    var u = byId[id];
-    if (u) return link(u.title || u.name || id, "Unit " + id + (u.name ? " · " + u.name : "") + ". Jump to its card.", anchorOf(id));
-    return link(title || id, "Unit " + id + (title ? ": " + title : "") + ". It isn’t part of this review.", null);
-  }
-  function srcLink(kind, x) {
-    return link(x.title || x.id, kind + " " + x.id + (x.title ? ": " + x.title : "") + (x.text ? " — " + x.text : "") + ".", null);
-  }
-  /* Ids a card's prose may name: every Unit in the review, and every story and requirement on any card. */
-  function linker(units, byId) {
-    var known = {};
+  /* What AidlcIds links from: the review's `ids` (aidlc_ids.py refs), filled in from the rows for ids it lacks. */
+  function idMap(review, units) {
+    var own = review && review.ids && typeof review.ids === "object" ? review.ids : {}, map = Object.assign({}, own);
+    function add(id, def) { if (id && !Object.prototype.hasOwnProperty.call(map, id)) map[id] = def; }
     units.forEach(function (u) {
-      items(u.stories).forEach(function (s) { known[s.id] = function () { return srcLink("Story", s); }; });
-      items(u.requirements).forEach(function (r) { known[r.id] = function () { return srcLink("Requirement", r); }; });
+      add(uidOf(u), { kind: "Unit", title: u.title || u.name || "", text: u.name && u.title ? u.name : "", doc: "" });
     });
-    Object.keys(byId).forEach(function (id) { known[id] = function () { return unitLink(byId, id); }; });
-    var keys = Object.keys(known).sort(function (a, b) { return b.length - a.length; }).map(reRx);
-    var rx = new RegExp("(?<![\\w-])(" + keys.concat(["U\\d+"]).join("|") + ")(?![\\w-])", "g");
-    return function (html) { return html.replace(rx, function (m) { return known[m] ? known[m]() : unitLink(byId, m); }); };
+    units.forEach(function (u) {
+      items(u.dependsOn, "unit").forEach(function (d) { if (d.title) add(d.id, { kind: "Unit", title: d.title, text: "", doc: "" }); });
+      items(u.stories).forEach(function (x) { if (x.title || x.text) add(x.id, { kind: "Story", title: x.title, text: x.text, doc: "" }); });
+      items(u.requirements).forEach(function (x) { if (x.title || x.text) add(x.id, { title: x.title, text: x.text, doc: "" }); });
+    });
+    return map;
   }
-  function inline(s, L) {
+  function inline(s) {
     return String(s == null ? "" : s).split(/(`[^`]+`)/).map(function (part, i) {
       if (i % 2) return "<code>" + esc(part.slice(1, -1)) + "</code>";
-      var out = esc(part).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-      return L ? L(out) : out;
+      return esc(part).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
     }).join("");
   }
-  function md(s, L) {
+  function md(s) {
     return String(s == null ? "" : s).trim().split(/\n\s*\n/).filter(Boolean).map(function (b) {
       var lines = b.split("\n");
-      if (lines.every(function (l) { return /^\s*-\s+/.test(l); })) return "<ul>" + lines.map(function (l) { return "<li>" + inline(l.replace(/^\s*-\s+/, ""), L) + "</li>"; }).join("") + "</ul>";
-      return "<p>" + lines.map(function (l) { return inline(l, L); }).join("<br>") + "</p>";
+      if (lines.every(function (l) { return /^\s*-\s+/.test(l); })) return "<ul>" + lines.map(function (l) { return "<li>" + inline(l.replace(/^\s*-\s+/, "")) + "</li>"; }).join("") + "</ul>";
+      return "<p>" + lines.map(function (l) { return inline(l); }).join("<br>") + "</p>";
     }).join("");
   }
 
@@ -355,7 +523,7 @@ var PointsView = (function () {
     if (src === "ai") return '<span class="state ai" tabindex="0" data-tip="' + esc(TIP.ai + " Press " + cur + " to keep it.") + '">' + mark("ai") + "AI suggests " + cur + "</span>";
     return '<span class="state none" tabindex="0" data-tip="' + esc(TIP.none) + '">No estimate</span>';
   }
-  function unitHtml(st, review, u, byId, L) {
+  function unitHtml(st, review, u, byId) {
     var id = uidOf(u), cur = num(u.points), src = srcOf(u), pick = pickOf(st, u), scale = scaleOf(review), top = Math.max.apply(null, scale);
     var values = scale.slice(), off = cur !== null && values.indexOf(cur) < 0;
     if (off) values.push(cur);
@@ -384,15 +552,15 @@ var PointsView = (function () {
     else if (save === "failed") ustat = '<span class="ustat failed">Not saved. <button type="button" id="rt-' + esc(id) + '" data-act="retry">Retry</button></span>';
 
     var deps = items(u.dependsOn, "unit"), stories = items(u.stories), reqs = items(u.requirements);
-    var refs = (deps.length ? '<div class="refs"><span>Depends on</span>' + deps.map(function (d) { return unitLink(byId, d.id, d.title); }).join("") + "</div>" : "") +
-      (stories.length ? '<div class="refs"><span>Stories</span>' + stories.map(function (s) { return srcLink("Story", s); }).join("") + "</div>" : "") +
-      (reqs.length ? '<div class="refs"><span>Requirements</span>' + reqs.map(function (r) { return srcLink("Requirement", r); }).join("") + "</div>" : "");
+    var refs = (deps.length ? '<div class="refs"><span>Depends on</span>' + deps.map(function (d) { var b = byId[d.id]; return ref(d.id, b ? b.title || b.name : d.title); }).join("") + "</div>" : "") +
+      (stories.length ? '<div class="refs"><span>Stories</span>' + stories.map(function (x) { return ref(x.id, x.title); }).join("") + "</div>" : "") +
+      (reqs.length ? '<div class="refs"><span>Requirements</span>' + reqs.map(function (x) { return ref(x.id, x.title); }).join("") + "</div>" : "");
     var kind = kindOf(st, u);
-    return '<section class="card unit' + (read ? " read" : "") + (kind !== "human" ? " need" : "") + '" id="' + esc(anchorOf(id)) + '" data-unit="' + esc(id) + '" tabindex="-1" aria-labelledby="h-' + esc(id) + '">' +
+    return '<section class="card unit' + (read ? " read" : "") + (kind !== "human" ? " need" : "") + '" id="' + esc(anchorOf(id)) + '" data-unit="' + esc(id) + '" data-aidlc-id="' + esc(id) + '" tabindex="-1" aria-labelledby="h-' + esc(id) + '">' +
       '<div class="uhead"><span class="uid" tabindex="0" data-tip="' + esc("Unit " + id + (u.name ? " · " + u.name : "") + ". The id the AI-DLC documents and unit-points.csv use for this Unit.") + '">' + esc(id) + "</span>" +
       '<h2 id="h-' + esc(id) + '">' + inline(label) + "</h2>" + stateTag(st, u, cur, src, pick) +
       '<button type="button" class="dot" id="rd-' + esc(id) + '" data-act="read" data-unit="' + esc(id) + '" aria-pressed="' + read + '" aria-label="' + esc("Read: " + label) + '" data-tip="' + (read ? "Read. Press to mark it unread." : "Unread. Press when you have read this Unit; only you see the mark.") + '"><i></i></button></div>' +
-      '<div class="ubody">' + (u.ctx ? '<div class="ctx">' + md(u.ctx, L) + "</div>" : "") + refs +
+      '<div class="ubody">' + (u.ctx ? '<div class="ctx">' + md(u.ctx) + "</div>" : "") + refs +
       '<div class="handrow"><div class="hand" role="group" aria-label="' + esc("Story points for " + label) + '">' + hand + "</div>" + ustat + "</div>" +
       '<div class="ufoot">' + foot + "</div></div></section>";
   }
@@ -450,11 +618,11 @@ var PointsView = (function () {
     units = units.slice().sort(function (a, b) { return (a.n || 0) - (b.n || 0); });
     var byId = {};
     units.forEach(function (u) { byId[uidOf(u)] = u; });
-    var t = tally(st, units), L = linker(units, byId);
+    var t = tally(st, units);
     var shown = units.filter(function (u) { return passes(st, u); });
     var body = !units.length ? '<div class="card msg"><b>No Units in this review yet.</b><p>Claude adds them as rows; they appear here as soon as they are written.</p></div>'
       : !shown.length ? '<div class="card msg"><b>' + (st.filter === "need" ? "Every Unit has a developer estimate." : "Nothing unread.") + '</b><p><a href="#" data-act="filter" data-val="all">Show all Units</a></p></div>'
-      : shown.map(function (u) { return unitHtml(st, review, u, byId, L); }).join("");
+      : shown.map(function (u) { return unitHtml(st, review, u, byId); }).join("");
     var done = review.status === "done";
     var band = '<footer class="band"><b>' + (done ? "Marked done. Tell Claude in chat: form is done." : "When you are finished, press Done, then tell Claude in chat: form is done.") + "</b><span>Claude writes each pick into unit-points.csv as a developer estimate. Units you leave alone keep their row.</span>" +
       '<span class="end num">' + t.human + "/" + t.all + " estimated</span></footer>";
@@ -470,7 +638,7 @@ var PointsView = (function () {
     }).join("") + "</section>";
   }
 
-  return { render: render, listHtml: listHtml, anchorOf: anchorOf, stamp: stamp, uidOf: uidOf, pickOf: pickOf, passes: passes, esc: esc };
+  return { render: render, listHtml: listHtml, idMap: idMap, anchorOf: anchorOf, stamp: stamp, uidOf: uidOf, pickOf: pickOf, passes: passes, esc: esc };
 })();
 if (typeof module !== "undefined") module.exports = PointsView;
 /* RENDER-END */
@@ -497,10 +665,22 @@ if (typeof module !== "undefined") module.exports = PointsView;
     var y = window.scrollY, focusId = document.activeElement && document.activeElement.id;
     hideTip();
     app.innerHTML = PointsView.render(view.review, view.units, view.st);
+    AidlcIds.linkify(app, idMap(), { toast: toast });  /* at once, so ids don't show unlinked for a frame */
     barHeight();
     window.scrollTo(0, y);
     if (focusId) { var f = document.getElementById(focusId); if (f) f.focus({ preventScroll: true }); }
   }
+
+  function idMap() { return view.review ? PointsView.idMap(view.review, view.units) : {}; }
+  AidlcIds.observe(app, idMap, { toast: toast });
+  /* A link to a Unit of this review whose card the filter hides shows all Units, then jumps to it. */
+  app.addEventListener("click", function (e) {
+    var a = e.target.closest && e.target.closest("a.aidlc-id");
+    var u = a && unitById(a.getAttribute("data-aidlc-ref"));
+    if (!u || PointsView.passes(view.st, u)) return;
+    e.preventDefault(); e.stopPropagation();
+    reveal(PointsView.anchorOf(PointsView.uidOf(u)));
+  }, true);
 
   /* ---------- tooltips: one element, on hover and on keyboard focus ---------- */
   var tipFor = null;
@@ -615,7 +795,8 @@ if (typeof module !== "undefined") module.exports = PointsView;
     if (nav) { e.preventDefault(); history.pushState(null, "", location.pathname + location.search); route(); return; }
     var jump = e.target.closest("[data-jump]");
     if (jump) { e.preventDefault(); reveal(jump.dataset.jump); return; }
-    if (e.target.closest("[data-missing]")) { e.preventDefault(); toast("That source isn’t in this document. Its text is in the link’s tooltip."); return; }
+    var chip = e.target.closest(".ref");
+    if (chip && !e.target.closest("a")) { var link = chip.querySelector("a.aidlc-id"); if (link) link.click(); return; }
     var btn = e.target.closest("[data-act]");
     if (!btn || !view.review) return;
     var act = btn.dataset.act, unit = btn.dataset.unit, st = view.st;

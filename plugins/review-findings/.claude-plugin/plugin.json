@@ -1,9 +1,17 @@
 {
   "name": "review-findings",
   "displayName": "Review findings",
-  "version": "1.0.1",
-  "description": "When review findings reach the developer (an AI-DLC stage review at its approval gate, or a code review), shows a compact summary and asks one question first: Fix, Accept (only when nothing blocks) or Open in form. A hook keeps the order.",
+  "version": "1.1.0",
+  "description": "When review findings reach the developer (an AI-DLC stage review at its approval gate, or a code review), shows each open finding in plain words with a suggested action, above one question: Fix, Accept (only when nothing blocks) or Open in form. A hook keeps the order.",
   "author": {
     "name": "Maksym Skuibida"
+  },
+  "userConfig": {
+    "suggestModel": {
+      "type": "string",
+      "title": "Suggestion model",
+      "description": "Full model id that writes a one-sentence suggested action for each finding whose reviewer named none (a code review's findings, mostly). \"off\" leaves the fixed line.",
+      "default": "claude-haiku-5-5"
+    }
   }
 }

@@ -9,11 +9,19 @@ Sources
 A findings document is JSON:
   {"source": "aidlc" | "code-review", "stage": "<slug>", "stage_name": "Domain Design", "artifact": "<path>",
    "reviewer"?, "findings": [{"id", "severity", "where", "finding", "action", "status", "blocking", "title",
-                              "scenario"?, "category"?}]}
+                              "scenario"?, "category"?, "suggested"?}]}
 `findings` holds the OPEN findings only (AI-DLC: Status New or Unresolved; code review: all of them).
 Blocking is severity Critical or Major (AI-DLC), or verdict CONFIRMED (code review).
 
-  summary --findings FILE   the inline summary block for the chat
+  summary --findings FILE   the inline summary block for the chat: each finding in plain words with "Suggested: …"
+  dialog --findings FILE | --session ID
+                            what the plugin's mod draws above the triage question and asks, as JSON (`--session`
+                            reads the findings the guard saved for that session)
+  answers --findings FILE [--choice fix|accept | --form FILE]
+                            the summary of the developer's answers ("## Review Findings: User Answer"), from what the
+                            guard recorded for the session (or the given chat answer, or a done form's document)
+  suggest --findings FILE --set JSON
+                            record a model's suggested action ({"<id>": "…"}) on findings that have no required action
   question --findings FILE  the triage AskUserQuestion input (header Findings), as JSON
   board --findings FILE [--id ID] [--title T] [--project-dir D] --out DIR
                             forms.json, cards/<qid>.json and writes.json for one ArtifactData batch that
@@ -24,6 +32,7 @@ Blocking is severity Critical or Major (AI-DLC), or verdict CONFIRMED (code revi
 
 import argparse
 import datetime
+import importlib.util
 import json
 import os
 import re
@@ -35,11 +44,11 @@ FINDING_ID = re.compile(r"^[A-Za-z]+-\d+$")
 QUOTE = re.compile(r"^>\s*([A-Za-z]+-\d+)\s+(Finding|Where|Required action):\s*(.*)$")
 FIELD_NAMES = {"finding": "finding", "where": "where", "required action": "action"}
 SUMMARY_LIMIT = 140
-WHERE_LIMIT = 80
 TITLE_LIMIT = 90
 
 TRIAGE_HEADER = "Findings"
 FIX_LABEL, ACCEPT_LABEL, FORM_LABEL = "Fix", "Accept", "Open in form"
+SOURCE = "review-findings"  # the triage question's `metadata.source`: the plugin's mod draws the findings above it
 
 
 # ---------------------------------------------------------------- text helpers
@@ -58,11 +67,6 @@ def first_sentence(text, limit):
     text = one_line(text)
     found = re.search(r"(?<=[.!?])\s+(?=[A-Z0-9`\"'(])", text)
     return clip(text[:found.start()] if found else text, limit)
-
-
-def cell(text):
-    """One markdown table cell: one line, pipes escaped."""
-    return one_line(text).replace("|", "\\|")
 
 
 def slug(text):
@@ -217,21 +221,219 @@ def counts(doc):
     return len(found), sum(1 for f in found if f.get("blocking"))
 
 
+# ---------------------------------------------------------------- plain words
+
+# The findings above the triage dialog: the mod's tree is held to 48 rows on desktop (Markdown) and 12 on the
+# terminal (plain lines), counting a row per line and one more per 40 columns it runs to.
+DIALOG_ROWS, TERMINAL_ROWS, ROW_COLUMNS = 48, 12, 40
+TERMINAL_LINE = 79
+FINDING_REF = re.compile(r"(?<![\w-])R-\d+(?![\w-])")
+FILE_LINE = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)*([\w-][\w.-]*\.[A-Za-z]\w*)):(\d+)(?:-\d+)?(?![\w:])")
+DOC_EXT = re.compile(r"\.(?:md|markdown|txt)$", re.I)
+NO_ACTION = "No change was named by the reviewer: decide in the form whether to fix, accept or reject it."
+
+
+def rows(text):
+    """The rows a text takes around the question dialog: a row per line and one more per 40 columns."""
+    return sum(1 + len(line) // ROW_COLUMNS for line in str(text).split("\n"))
+
+
+def unticked(text):
+    """Plain text without markdown code ticks and bold marks, for the terminal."""
+    return re.sub(r"\*\*([^*]+)\*\*", r"\1", str(text).replace("`", ""))
+
+
+def doc_name(name):
+    """`domain-model.md` -> `domain model`; a name that is no document stays as it is."""
+    base = os.path.basename(name.strip())
+    return re.sub(r"[-_]+", " ", DOC_EXT.sub("", base)).strip() if DOC_EXT.search(base) else name.strip()
+
+
+def place(f, code):
+    """(plain words for where a finding is, the reference behind them) — the path and line go to the reference."""
+    raw = one_line(f.get("where")).rstrip(". ").removesuffix("...").removesuffix("…").strip()
+    if not raw:
+        return "", None
+    if code:
+        found = re.fullmatch(r"(.+?):(\d+)", raw)
+        path, line = (found.group(1), found.group(2)) if found else (raw, "")
+        tip = f"{path}, line {line}" if line else path
+        return f"in {os.path.basename(path)}", {"label": os.path.basename(path), "tip": tip, "target": f"path:{path}"}
+    head, _, section = raw.partition(" > ")
+    name = doc_name(head)
+    plain = f"{name} › {section.strip()}" if section.strip() else name
+    return plain, {"label": plain, "tip": raw, "target": f"doc:{raw}"}
+
+
+def plain(text, numbers, refs):
+    """A finding's words without internal ids: another finding's id becomes "finding N" (its number in this list),
+    a `path/file.py:42` becomes the file's name. Each becomes a reference (`refs`, `{label, tip, target}`): target
+    `#<qid>` is another card of the same form, a live link; `path:`, `doc:` and `finding:` targets are not in the form."""
+    def finding(m):
+        fid = m.group(0)
+        n = numbers.get(fid)
+        add(refs, {"label": f"finding {n}" if n else "an earlier finding",
+                   "tip": f"{fid}, card {n} in this form" if n else f"{fid}, closed before this round; not in this form",
+                   "target": f"#{fid}" if n else f"finding:{fid}"})
+        return f"finding {n}" if n else "an earlier finding"
+
+    def file_line(m):
+        add(refs, {"label": m.group(2), "tip": f"{m.group(1)}, line {m.group(3)}", "target": f"path:{m.group(1)}"})
+        return m.group(2)
+
+    return FILE_LINE.sub(file_line, FINDING_REF.sub(finding, one_line(text)))
+
+
+def add(refs, ref):
+    if ref and all((r["target"], r["tip"]) != (ref["target"], ref["tip"]) for r in refs):
+        refs.append(ref)
+
+
+def readable(doc):
+    """Each open finding in plain words, in the order of the form's cards:
+    [{id, n, title, rest, what, suggested, suggested_by, where, blocking, scenario, refs}].
+    `title` is the first sentence (a code review's short summary), `rest` what the finding says after it, `what` the
+    whole finding, `suggested` the reviewer's required action, else the one the mod's model wrote, else a fixed line."""
+    code = doc.get("source") == "code-review"
+    found = doc.get("findings") or []
+    numbers = {f.get("id"): n for n, f in enumerate(found, 1)}
+    out = []
+    for n, f in enumerate(found, 1):
+        refs = []
+        where, ref = place(f, code)
+        add(refs, ref)
+        what = plain(f.get("finding"), numbers, refs)
+        title = plain(f.get("title") or first_sentence(f.get("finding"), TITLE_LIMIT), numbers, refs)
+        head = title.removesuffix("…")
+        rest = what[len(head):].strip() if what.startswith(head) else what
+        action = one_line(f.get("action"))
+        model = one_line(f.get("suggested"))
+        suggested, by = ((plain(action, numbers, refs), "reviewer") if action else
+                         (plain(model, numbers, refs), "model") if model else ("", "none"))
+        if not suggested:
+            scenario = one_line(f.get("scenario"))
+            word = scenario.split(" ", 1)[0]
+            scenario = scenario[:1].lower() + scenario[1:] if word[:1].isupper() and word[1:] == word[1:].lower() else scenario
+            suggested = f"Change it so that this no longer happens: {scenario}" if code and scenario else NO_ACTION
+        out.append({"id": f.get("id"), "n": n, "title": title, "rest": rest, "what": what, "suggested": suggested,
+                    "suggested_by": by, "where": where, "blocking": bool(f.get("blocking")),
+                    "scenario": plain(f.get("scenario"), numbers, refs) if f.get("scenario") else "", "refs": refs})
+    return out
+
+
+def needs_suggestion(doc):
+    """The ids of the open findings that have neither a required action nor a model's suggestion yet."""
+    return [f["id"] for f in doc.get("findings") or [] if not one_line(f.get("action")) and not one_line(f.get("suggested"))]
+
+
+def label_of(doc):
+    return "code review" if doc.get("source") == "code-review" else (doc.get("stage_name") or doc.get("stage") or "review")
+
+
+def status_word(item):
+    return "Blocking" if item["blocking"] else "Not blocking"
+
+
+def item_block(item, rest_limit, suggested_limit):
+    """One finding as Markdown: a heading, then its status and place, what is wrong and the suggested action."""
+    meta = f"**{status_word(item)}**" + (f" · {item['where']}" if item["where"] else "")
+    lines = [f"### {item['n']} · {item['title']}", f"- {meta}"]
+    if item["rest"] and rest_limit:
+        lines.append(f"- {clip(item['rest'], rest_limit)}")
+    lines.append(f"- **Suggested:** {clip(item['suggested'], suggested_limit)}")
+    return "\n".join(lines)
+
+
+def more_line(left):
+    noun = "finding" if left == 1 else "findings"
+    return f"…and {left} more {noun}. Pick **Open in form** to see every one."
+
+
+def fitted(blocks, header, budget, more):
+    """The header and as many findings as fit `budget` rows; each finding takes its fullest form that fits, the
+    rest are counted on one closing line. `blocks` is a list of [fullest form, …, shortest form] per finding."""
+    out, used = [header], rows(header)
+    for i, forms in enumerate(blocks):
+        left = len(blocks) - i - 1
+        reserve = rows(more(left)) + 1 if left else 0
+        pick = next((b for b in forms if used + 1 + rows(b) + reserve <= budget), None)
+        if pick is None:
+            out.append(more(len(blocks) - i))
+            return out
+        out.append(pick)
+        used += 1 + rows(pick)
+    return out
+
+
+def dialog_markdown(doc, budget=DIALOG_ROWS):
+    """The findings above the triage dialog on desktop, vscode and mobile: at most `budget` rows."""
+    items = readable(doc)
+    total, blocking = counts(doc)
+    header = (f"## Review findings · {label_of(doc)}\n{total} open, {blocking or 'none'} blocking. "
+              "Choose below what happens to them.")
+    forms = [[item_block(it, 260, 220), item_block(it, 120, 140), item_block(it, 0, 100)] for it in items]
+    return "\n\n".join(fitted(forms, header, budget, more_line))
+
+
+def dialog_lines(doc, budget=TERMINAL_ROWS):
+    """The findings above the triage dialog on the terminal, as plain lines: at most `budget` rows."""
+    items = readable(doc)
+    total, blocking = counts(doc)
+    out = [f"Review findings · {label_of(doc)}: {total} open, {blocking or 'none'} blocking"]
+    used = rows(out[0])
+    for i, it in enumerate(items):
+        head = clip(f"{it['n']}. {unticked(it['title'])}" + (" (blocking)" if it["blocking"] else ""), TERMINAL_LINE)
+        tip = "   " + clip(f"Suggested: {unticked(it['suggested'])}", TERMINAL_LINE - 3)
+        left = len(items) - i - 1
+        tail = clip(unticked(more_line(left)), TERMINAL_LINE) if left else ""
+        need = rows(head) + rows(tip) + (rows(tail) if tail else 0)
+        if used + need > budget:
+            if used + rows(head) + (rows(tail) if tail else 0) <= budget:
+                out.append(head)
+                used += rows(head)
+                continue
+            out.append(clip(unticked(more_line(len(items) - i)), TERMINAL_LINE))
+            return out
+        out += [head, tip]
+        used += rows(head) + rows(tip)
+    return out
+
+
+def dialog(doc, findings_file=""):
+    """What the mod draws and asks: the triage question (tagged for the mod), the Markdown and the terminal lines."""
+    question = triage(doc)
+    return {"findings": findings_file, "question": question, "markdown": dialog_markdown(doc),
+            "lines": dialog_lines(doc), "needs_suggestion": needs_suggestion(doc),
+            "items": [{k: it[k] for k in ("id", "n", "title", "what", "where", "scenario")} for it in readable(doc)]}
+
+
+def suggest(doc, suggestions):
+    """Set the model's suggested action on the findings that have no required action; returns the ids set.
+    A finding with the reviewer's own action keeps it, and an empty or over-long suggestion is ignored."""
+    done = []
+    for f in doc.get("findings") or []:
+        text = one_line((suggestions or {}).get(f.get("id")))
+        if text and len(text) <= 400 and not one_line(f.get("action")):
+            f["suggested"] = text
+            done.append(f["id"])
+    return done
+
+
 # ---------------------------------------------------------------- the chat side
 
 def summary(doc):
-    """The inline summary block the agent prints before it asks."""
+    """The inline summary block the agent prints before it asks: each finding in plain words, with its suggested
+    action; ids, rule codes and paths stay out of the sentences."""
     total, blocking = counts(doc)
-    label = "code review" if doc.get("source") == "code-review" else (doc.get("stage_name") or doc.get("stage") or "review")
-    head = f"**Review findings — {label}:** {total} open, {blocking} blocking"
+    head = f"**Review findings — {label_of(doc)}:** {total} open, {blocking} blocking"
     if not total:
         return head
-    rows = ["| ID | Severity | Where | Finding |", "|---|---|---|---|"]
-    for f in doc["findings"]:
-        text = f.get("finding") or f.get("title") or ""
-        rows.append("| " + " | ".join([cell(f["id"]), cell(f["severity"]), cell(clip(f.get("where"), WHERE_LIMIT)),
-                                       cell(first_sentence(text, SUMMARY_LIMIT))]) + " |")
-    return head + "\n" + "\n".join(rows)
+    lines = []
+    for it in readable(doc):
+        meta = status_word(it) + (f", {it['where']}" if it["where"] else "")
+        lines.append(f"{it['n']}. **{it['title']}** ({meta})" + (f" {clip(it['rest'], SUMMARY_LIMIT)}" if it["rest"] else ""))
+        lines.append(f"   Suggested: {it['suggested']}")
+    return head + "\n\n" + "\n".join(lines)
 
 
 def question_text(total, blocking):
@@ -250,7 +452,99 @@ def triage(doc):
         options.append({"label": ACCEPT_LABEL, "description": "Accept all as known risks and go on."})
     options.append({"label": FORM_LABEL, "description": "Sort each finding in a form: fix, accept or reject with a reason."})
     return {"questions": [{"question": question_text(total, blocking), "header": TRIAGE_HEADER,
-                           "options": options, "multiSelect": False}]}
+                           "options": options, "multiSelect": False}], "metadata": {"source": SOURCE}}
+
+
+# ---------------------------------------------------------------- the developer's answers
+
+ANSWERS_HEADING = "## Review Findings: User Answer"
+BOX_WORDS = {"fix": "Fix", "accept": "Accept", "reject": "Reject"}
+
+
+def sentences(text):
+    """A text's sentences, on one line each; a line break also ends one."""
+    out = []
+    for line in str(text or "").splitlines():
+        line = one_line(line)
+        out += [p for p in re.split(r"(?<=[.!?])\s+(?=[A-Z0-9`\"'(])", line) if p]
+    return out
+
+
+def action_items(item):
+    """What will be done for a finding the developer sorted into Fix, in plain words: the suggested action, one item
+    per sentence. With no suggested action, the finding itself is the thing to change."""
+    if item["suggested_by"] != "none" or item["scenario"]:
+        return sentences(item["suggested"])
+    return [f"Fix in {item['where']}: {item['title']}" if item["where"] else f"Fix: {item['title']}"]
+
+
+def answer_summary(doc, picks):
+    """The structured summary of the developer's answers, sent in chat as written:
+
+        ## Review Findings: User Answer
+        ### R-01: Fix
+        #### Action items:
+        <one item as a line, several as a bullet list>
+        #### User Note:
+        <the developer's note, as written>
+
+    `picks` is {finding id: (box, note)}, box fix, accept or reject. Action items only where something is done (Fix);
+    the note only where the developer wrote one."""
+    lines = [ANSWERS_HEADING]
+    for item in readable(doc):
+        box, note = picks[item["id"]]
+        lines.append(f"### {item['id']}: {BOX_WORDS[box]}")
+        if box == "fix":
+            items = action_items(item)
+            lines.append("#### Action items:")
+            lines += items if len(items) == 1 else [f"- {i}" for i in items]
+        note = str(note or "").strip()
+        if note:
+            lines += ["#### User Note:", note]
+    return "\n".join(lines)
+
+
+def picks_of(doc, choice=None, answers=None):
+    """{finding id: (box, note)} from a chat answer (`choice` fix or accept, the same for every finding) or a done
+    board form's `answers` ({qid: {k: [box], note}})."""
+    ids = [f["id"] for f in doc.get("findings") or []]
+    if choice:
+        if choice not in ("fix", "accept"):
+            raise ValueError(f"a chat answer is fix or accept, not {choice!r}")
+        return {i: (choice, "") for i in ids}
+    answers = answers or {}
+    out, missing = {}, []
+    for i in ids:
+        a = answers.get(i) if isinstance(answers.get(i), dict) else {}
+        box = (a.get("k") or [""])[0] if isinstance(a.get("k"), list) else ""
+        if box not in BOX_WORDS:
+            missing.append(i)
+            continue
+        out[i] = (box, a.get("note") or "")
+    if missing:
+        raise ValueError("the form has no box for " + ", ".join(missing) + ": read the form again (ArtifactData get "
+                         "of forms/<id>) once the developer pressed Done")
+    return out
+
+
+def answers_in(data):
+    """The `answers` map ({qid: {k, note}}) anywhere in a form document or an ArtifactData result, or None."""
+    if isinstance(data, dict):
+        found = data.get("answers")
+        if isinstance(found, dict) and all(isinstance(v, dict) for v in found.values()):
+            return found
+        data = list(data.values())
+    if isinstance(data, list):
+        for value in data:
+            found = answers_in(value)
+            if found is not None:
+                return found
+    if isinstance(data, str) and '"answers"' in data:
+        try:
+            return answers_in(json.loads(data))
+        except ValueError:
+            return None
+    return None
 
 
 # ---------------------------------------------------------------- the board
@@ -294,23 +588,77 @@ def block(label, text):
     return f"**{label}:** {text}" if text else ""
 
 
-def card(n, f, code, reviewer=""):
-    ctx = [block("Where", f.get("where")), block("Finding", f.get("finding"))]
-    ctx.append(block("What goes wrong", f.get("scenario")) if code else block("Required action", f.get("action")))
+def why(f, code):
+    """Why the card starts where it does, in plain words."""
+    if code:
+        return ("Confirmed by the review, so it starts in Fix" if f.get("blocking") else
+                "Possible, not confirmed by the review, so it starts in Accept")
+    sev = f.get("severity") or "Unrated"
+    return (f"{sev}: it blocks approval until it is fixed or rejected, so it starts in Fix" if f.get("blocking") else
+            f"{sev}: it can be carried as a known risk, so it starts in Accept")
+
+
+def card(item, f, code, reviewer=""):
+    """One board card. `ctx` holds the plain words for a page that draws only it. The optional `plain` (what the
+    finding means, under the title), `action` (the suggested action), `refs` and `detail` (ctx without the two) are
+    for a page that draws them apart (question-forms § 5)."""
+    detail = [block("Where", item["where"])]
+    if code:
+        detail.append(block("What goes wrong", item["scenario"]))
+    detail = [b for b in detail if b]
     who = reviewer or ("Code review" if code else "AI review")
     return {
-        "n": n, "text": f.get("title") or first_sentence(f.get("finding", ""), TITLE_LIMIT) or f["id"],
-        "ctx": "\n\n".join(b for b in ctx if b), "kind": "card",
+        "n": item["n"], "text": item["title"] or item["id"],
+        "ctx": "\n\n".join(b for b in [block("What's wrong", item["what"]), block("Suggested", item["suggested"])] + detail if b),
+        "kind": "card",
+        **({"plain": item["rest"]} if item["rest"] else {}), "action": item["suggested"],
+        "detail": "\n\n".join(detail), "refs": item["refs"],
         "from": ", ".join(p for p in (who, f.get("severity"), f.get("category")) if p),
-        "proposed": {"k": "fix" if f.get("blocking") else "accept", "why": f.get("severity", "")},
+        "proposed": {"k": "fix" if f.get("blocking") else "accept", "why": why(f, code)},
         "outcomes": {"fix": "Fixed now, in the code." if code else "Goes into Request Changes; fixed, then reviewed again.",
                      "accept": "Carried as a known risk; no change.",
                      "reject": "Not applicable; your note says why."},
     }
 
 
-def board(doc, fid, title, out_dir, now=None):
-    """Write forms.json, cards/<qid>.json and writes.json for one ArtifactData batch; returns a summary dict."""
+def ids_lib():
+    """The shared id map (aidlc_ids.py beside this file, a copy of shared/aidlc-ids/aidlc_ids.py), or None."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aidlc_ids.py")
+    spec = importlib.util.spec_from_file_location("aidlc_ids", path)
+    if spec is None or not os.path.isfile(path):
+        return None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def card_text(c):
+    """Every text a card shows, for the ids it mentions."""
+    refs = " ".join(f"{r.get('label', '')} {r.get('tip', '')}" for r in c.get("refs") or [])
+    return "\n".join(str(c.get(k) or "") for k in ("text", "plain", "action", "ctx", "detail", "from")) + "\n" + refs
+
+
+def ids_for(doc, cards, project_dir):
+    """The form's `ids` map ({id: {kind, title, text, doc, line}}) for the ids the cards mention, from the project's
+    id map (synced first), each defined nearest the reviewed document; ({}, why) when there is none."""
+    lib = ids_lib()
+    if lib is None:
+        return {}, "aidlc_ids.py is missing"
+    project = lib.project_dir(project_dir or None)
+    folder = lib.intent_dir(project)
+    if not folder or not os.path.isdir(folder):
+        return {}, "no active AI-DLC intent"
+    lib.sync(folder)
+    near = []
+    if doc.get("artifact"):
+        art = doc["artifact"] if os.path.isabs(doc["artifact"]) else os.path.join(project, doc["artifact"])
+        near += [art, os.path.dirname(art)]
+    return lib.refs(folder, "\n\n".join(card_text(c) for c in cards), near), ""
+
+
+def board(doc, fid, title, out_dir, now=None, project_dir=""):
+    """Write forms.json, cards/<qid>.json and writes.json for one ArtifactData batch; returns a summary dict.
+    The form's `ids` maps every id the cards mention to its definition, for the page's tooltips and links."""
     if not doc.get("findings"):
         raise ValueError("there are no open findings, so there is nothing to sort")
     if incomplete(doc):
@@ -324,21 +672,61 @@ def board(doc, fid, title, out_dir, now=None):
         row["stage"] = doc["stage_name"]
     if doc.get("artifact"):
         row["file"] = doc["artifact"]
+    cards = [(f["id"], card(item, f, code, doc.get("reviewer", ""))) for item, f in zip(readable(doc), doc["findings"])]
+    try:
+        ids, why = ids_for(doc, [c for _, c in cards], project_dir)
+    except Exception as exc:  # noqa: BLE001 - the board is written without tooltips rather than not at all
+        ids, why = {}, f"the id map could not be read ({exc})"
+    if ids:
+        row["ids"] = ids
     writes = [{"op": "set", "collection": "forms", "doc_id": fid, "file_path": os.path.join(out, "forms.json")}]
     dump(os.path.join(out, "forms.json"), row)
-    for n, f in enumerate(doc["findings"], 1):
-        name = re.sub(r"[^A-Za-z0-9._-]", "_", f["id"])
-        path = os.path.join(out, "cards", name + ".json")
-        dump(path, card(n, f, code, doc.get("reviewer", "")))
-        writes.append({"op": "set", "collection": f"forms/{fid}/questions", "doc_id": f["id"], "file_path": path})
+    for qid, c in cards:
+        path = os.path.join(out, "cards", re.sub(r"[^A-Za-z0-9._-]", "_", qid) + ".json")
+        dump(path, c)
+        writes.append({"op": "set", "collection": f"forms/{fid}/questions", "doc_id": qid, "file_path": path})
     dump(os.path.join(out, "writes.json"), writes, indent=2)
-    return {"id": fid, "cards": len(doc["findings"]), "writes": os.path.join(out, "writes.json")}
+    result = {"id": fid, "cards": len(cards), "writes": os.path.join(out, "writes.json"), "ids": len(ids)}
+    if why:
+        result["ids_note"] = why
+    return result
 
 
 def dump(path, data, indent=2):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=indent, ensure_ascii=False)
         f.write("\n")
+
+
+# ---------------------------------------------------------------- the guard's saved findings
+
+def state_dir():
+    return os.environ.get("REVIEW_FINDINGS_DIR") or os.path.join(os.path.expanduser("~"), ".claude", "review-findings")
+
+
+def recorded(findings_file):
+    """(chat choice, form answers) the guard recorded beside a saved findings file (`<session>.json`)."""
+    state_file = re.sub(r"\.findings$", "", findings_file) + ".json"
+    try:
+        with open(state_file, encoding="utf-8") as f:
+            pend = (json.load(f) or {}).get("pending") or {}
+    except (OSError, ValueError):
+        raise ValueError("no recorded answer beside this findings file: pass --choice fix|accept or --form FILE") from None
+    if pend.get("answer") in ("fix", "accept"):
+        return pend["answer"], None
+    form = pend.get("form") or {}
+    if pend.get("answer") == "form" and form.get("done") and isinstance(form.get("answers"), dict):
+        return None, form["answers"]
+    if pend.get("answer") == "form":
+        raise ValueError("the form is not read as done yet: read forms/<id> with ArtifactData get once the developer "
+                         "pressed Done")
+    raise ValueError("the developer has not answered the Findings question yet")
+
+
+def session_findings(session):
+    """Where the guard saves a session's pending findings (`<state dir>/<session>.findings`)."""
+    sid = re.sub(r"[^A-Za-z0-9_.-]", "_", str(session or "default"))
+    return os.path.join(state_dir(), sid + ".findings")
 
 
 # ---------------------------------------------------------------- command line
@@ -369,6 +757,18 @@ def main(argv=None):
     p.add_argument("--unit")
     for name in ("summary", "question"):
         sub.add_parser(name).add_argument("--findings", required=True)
+    a = sub.add_parser("answers")
+    a.add_argument("--findings", required=True)
+    pick = a.add_mutually_exclusive_group()
+    pick.add_argument("--choice", choices=("fix", "accept"), help="the chat answer, for every finding")
+    pick.add_argument("--form", help="the done form's document (or the ArtifactData get result) as JSON")
+    d = sub.add_parser("dialog")
+    which = d.add_mutually_exclusive_group(required=True)
+    which.add_argument("--findings")
+    which.add_argument("--session", help="the session id: reads the findings the guard saved for it")
+    g = sub.add_parser("suggest")
+    g.add_argument("--findings", required=True)
+    g.add_argument("--set", required=True, help='JSON {"<finding id>": "<suggested action>"}')
     b = sub.add_parser("board")
     b.add_argument("--findings", required=True)
     b.add_argument("--id")
@@ -392,6 +792,30 @@ def main(argv=None):
             if incomplete(doc):
                 raise ValueError(incomplete(doc))
             print(summary(doc))
+        elif args.cmd == "answers":
+            doc = load_findings(args.findings)
+            choice, answers = args.choice, None
+            if args.form:
+                answers = answers_in(json.loads(read(args.form)))
+                if answers is None:
+                    raise ValueError(f"{args.form} holds no form answers")
+            elif not choice:
+                choice, answers = recorded(args.findings)
+            print(answer_summary(doc, picks_of(doc, choice, answers)))
+        elif args.cmd == "dialog":
+            path = args.findings or session_findings(args.session)
+            doc = load_findings(path)
+            if incomplete(doc):
+                raise ValueError(incomplete(doc))
+            if not doc["findings"]:
+                raise ValueError("there are no open findings")
+            print(json.dumps(dialog(doc, os.path.abspath(path)), ensure_ascii=False))
+        elif args.cmd == "suggest":
+            doc = load_findings(args.findings)
+            done = suggest(doc, json.loads(args.set))
+            if done:
+                dump(args.findings, doc, indent=1)
+            print(json.dumps({"set": done}))
         elif args.cmd == "question":
             doc = load_findings(args.findings)
             if incomplete(doc):
@@ -401,7 +825,7 @@ def main(argv=None):
             doc = load_findings(args.findings)
             code = doc.get("source") == "code-review"
             title = args.title or "Review findings · " + ("code review" if code else doc.get("stage_name") or doc.get("stage") or "review")
-            result = board(doc, args.id or form_id(doc, args.project_dir), title, args.out)
+            result = board(doc, args.id or form_id(doc, args.project_dir), title, args.out, project_dir=args.project_dir)
             print(json.dumps(result))
     except (OSError, ValueError) as why:
         print(f"findings.py: {why}", file=sys.stderr)
