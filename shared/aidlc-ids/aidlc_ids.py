@@ -57,7 +57,7 @@ KINDS = {
     "M": "Mockup",
     "T": "Task",
 }
-STRENGTH = {"heading": 3, "bold": 2, "table": 1}
+STRENGTH = {"heading": 3, "bold": 2, "comment": 2, "table": 1}
 # Kinds every stage numbers afresh (its own Q1, its own R-01): resolved only inside the page's own stage folder.
 STAGE_LOCAL = {"Q", "R"}
 # Kinds Inception defines for the whole intent: its definition wins over a Unit document that restates one.
@@ -65,6 +65,8 @@ INTENT_WIDE = {"U", "US", "AC", "FR", "NFR", "ADR", "C", "E"}
 
 HEADING = re.compile(r"^(#{1,6})\s+(?:\*\*)?" + ID + r"(?:\*\*)?\s*(?:[:.—–-]\s*)?(.*)$")
 BOLD = re.compile(r"^\s*(?:[-*+]|\d+\.)?\s*\*\*" + ID + r"(?:\s+([^*]*?))?:?\*\*\s*:?\s*(.*)$")
+# A group label written as an indented comment inside a YAML or code block: `  # BR1 — Preferences store (C4, E3)`.
+COMMENT = re.compile(r"^\s+#\s+" + ID + r"\s*[:—–-]\s*(.+)$")
 ROW = re.compile(r"^\s*\|\s*(?:\*\*)?" + ID + r"(?:\*\*)?\s*\|(.*)$")
 
 
@@ -117,6 +119,9 @@ def definitions(path, rel):
             if bold:
                 ident, title, rest = bold.group(1), bold.group(2) or "", bold.group(3) or ""
                 found = (ident, title or rest, rest if title else "", "bold")
+            elif COMMENT.match(line):
+                comment = COMMENT.match(line)
+                found = (comment.group(1), comment.group(2), "", "comment")
             else:
                 row = ROW.match(line)
                 if row:
@@ -188,7 +193,8 @@ def intent_dir(project):
     return os.path.join(project, "aidlc", "spaces", space, "intents", intent) if intent else ""
 
 
-MAP_VERSION = 1
+# Raise with any change to how definitions are read: a map of another version is rebuilt from scratch.
+MAP_VERSION = 2
 
 
 def data_dir():
@@ -320,9 +326,10 @@ def pick(candidates, near):
         and (prefix(d["id"]) not in STAGE_LOCAL or stage_of(d["doc"]) in stages))]
     if not usable:
         return None
-    # The page's own file first; then a real definition (a heading) over a mention in a table; then the nearest.
-    return max(usable, key=lambda d: (nearness(d["doc"], near) == 10_000,
-                                      prefix(d["id"]) in INTENT_WIDE and d["doc"].startswith("inception" + os.sep),
+    # Inception's definition of an intent-wide id (a Unit, a story, a contract) first, even when the page's own file
+    # restates it in a table; then the page's own file; then a heading over a bold lead over a table row; then nearest.
+    return max(usable, key=lambda d: (prefix(d["id"]) in INTENT_WIDE and d["doc"].startswith("inception" + os.sep),
+                                      nearness(d["doc"], near) == 10_000,
                                       STRENGTH[d["form"]], nearness(d["doc"], near), -len(d["doc"])))
 
 
