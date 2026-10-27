@@ -141,38 +141,41 @@ One `ArtifactData` `get` of `forms/<id>`. `answers[qid]` is `{k: [letters], note
 
 ## 5. Board forms (sorting items into boxes)
 
-When the developer has to sort items rather than answer questions — a pull request review, on both
-sides (`pr-review` plugin: `review-pr` for the reviewer, `address-review` for the author, both followed by § 5b; `self-review` for the author's own AI review pass, a Fix now / Dismiss board that gets the form check of § 5b A and is not part of the flow guard) — the form is a board: 2–4 boxes
-side by side on a wide page, stacked on a narrow one, each item a card that starts in the box the
-agent proposes and can be moved by its buttons or by dragging its handle; the rest of the card is
-plain text that can be selected and copied.
+When the developer has to decide items rather than answer questions — a pull request review, on both
+sides (`pr-review` plugin: `review-pr` for the reviewer, `address-review` for the author, both followed by § 5b; `self-review` for the author's own AI review pass, a Fix now / Dismiss board that gets the form check of § 5b A and is not part of the flow guard) — the form is a board: one list of cards (in sections, when the form has `groups`), each card with one button per box it may use. Nothing is
+chosen for the developer: a card has no answer until the developer presses a button. The agent's
+suggestion (`proposed`) is marked on the card, in bold in its details, never selected. A card with its
+decision folds to one line; the bar filters by Unanswered or by box, "take the suggestion" buttons press the
+proposed box on the undecided cards (never a box that needs a reason or has tone `warn`), and Done stays
+off until every card has its decision. The rest of the card is plain text that can be selected and copied.
 
-- `forms/<id>` adds `view: "board"` and `boxes: [{k, t, hint?, tone?, group?, sink?}]`; `tone` is
-  `ink`, `accent`, `warn` or `muted`. The box labels are data, written by the skill that opens the
-  board.
-- A grouped board adds `groups: [{k, t, hint?}]` and gives each box a `group`, or `sink: true`.
-  Groups stand side by side with their boxes stacked; sink boxes take a full-width row below. A
-  card can move only between the boxes of its proposed box's group, or to a sink box, and the page
-  shows that while dragging. On a wide window the page scrolls until the header is gone and the
-  board fills the screen; then each box scrolls on its own. Cards show their id, title and move
-  buttons; details open per card or all at once from the bar.
-- `forms/<id>/questions/<qid>` per card — `{n, text, ctx?, kind: "card", from?, group?, proposed:
-  {k, why?}, outcomes?: {<box k>: "…"}, plain?, action?, detail?, refs?}`; `group` is needed only when the proposed box is a sink. `text` is a short title a person understands without
+- `forms/<id>` adds `view: "board"` and `boxes: [{k, t, hint?, tone?, note?, group?, sink?}]`; `tone` is
+  `ink`, `accent`, `warn` or `muted` (the colour of the button once chosen). `note: {required?: true,
+  label?}` makes a written reason part of the decision: the note field opens when the box is chosen, the
+  card stays open until it is written, and Done waits for it. The box labels are data, written by the skill
+  that opens the board.
+- `groups: [{k, t, hint?}]` are the sections of the list, in that order; a card is in the section of its
+  `group`. With `group` (or `sink: true`) on the boxes, a card can only choose the boxes of its group, plus sink
+  boxes and boxes with no group — what `pr-review` uses for "this pull request" and "earlier, settled stages".
+- `forms/<id>/questions/<qid>` per card — `{n, text, ctx?, kind: "card", from?, group?, proposed?:
+  {k, why?}, outcomes?: {<box k>: "…"}, severity?, blocking?, plain?, action?, detail?, refs?}`; `group`
+  is needed only when the proposed box is a sink. `text` is a short title a person understands without
   knowing the IDs (not "AC 3 of US2.1", but "Guests can't tell which dish is vegan"); `from` one
-  line on who asked for what; `outcomes` says what happens when the card sits in each box. A
-  card's optional `plain` says what it means in plain words (shown on the card under the
-  title), `action` the suggested action (shown in its details), `detail` the `ctx` without those
+  line on who asked for what; `outcomes` is shown inside each button: what happens when the card is decided
+  that way, and what it costs. `severity` is a short word drawn as a tag, `blocking` a short text ("Blocks
+  approval") that marks a card as holding something up and enables the bar's "<box> all blocking" button.
+  A card's optional `plain` says what it means in plain words (shown in its details), `action` the
+  suggested action (shown in bold in the suggestion), `detail` the `ctx` without those
   two (shown instead of `ctx` when the card has `plain` or `action`; `ctx` stays complete), and `refs` what it refers to (§ 2;
   the `review-findings` board uses `#<qid>` for another card, and `doc:`, `path:` or `finding:` for
   what the form does not hold). A card's `ctx` follows the § 2 rule: paragraphs and `- ` bullets with **bold** lead-ins, never
-  one run-on paragraph; `text`, `from`, `outcomes`, `plain`, `action` and `proposed.why` take the inline subset only. On a
-  grouped board the group alone decides where a card can go; on a board without groups,
-  `outcomes` also limits the boxes offered to its keys (plus the proposed box).
+  one run-on paragraph; `text`, `from`, `outcomes`, `plain`, `action` and `proposed.why` take the inline subset only. On a board
+  without grouped boxes, `outcomes` also limits the boxes offered to its keys (plus the proposed box).
 - A board is never opened with zero cards: when there is nothing to sort, no board and no follow-up
   form are made and the skill that would open it goes on to its next step.
 - A board has no questions file; the skill that opens it says where its result is recorded.
-  Read-back: `answers[qid].k[0]` is the card's box, `note` the developer's note. On Done every
-  card is written, moved or not.
+  Read-back: `answers[qid].k[0]` is the card's box, `note` the developer's note. Every card has an answer
+  once the form is done: Done stays off until each card is decided.
 
 ### 5b. After a review board is sent: the form check and the summary
 

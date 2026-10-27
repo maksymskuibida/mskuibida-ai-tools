@@ -513,7 +513,7 @@ def picks_of(doc, choice=None, answers=None):
             raise ValueError(f"a chat answer is fix or accept, not {choice!r}")
         return {i: (choice, "") for i in ids}
     answers = answers or {}
-    out, missing = {}, []
+    out, missing, unreasoned = {}, [], []
     for i in ids:
         a = answers.get(i) if isinstance(answers.get(i), dict) else {}
         box = (a.get("k") or [""])[0] if isinstance(a.get("k"), list) else ""
@@ -521,9 +521,14 @@ def picks_of(doc, choice=None, answers=None):
             missing.append(i)
             continue
         out[i] = (box, a.get("note") or "")
+        if box == "reject" and not out[i][1].strip():
+            unreasoned.append(i)
     if missing:
         raise ValueError("the form has no box for " + ", ".join(missing) + ": read the form again (ArtifactData get "
                          "of forms/<id>) once the developer pressed Done")
+    if unreasoned:
+        raise ValueError("the form rejects " + ", ".join(unreasoned) + " without a reason: a Reject needs its note; read the "
+                         "form again (ArtifactData get of forms/<id>) once the developer wrote it")
     return out
 
 
@@ -578,9 +583,18 @@ def boxes(code):
     return [
         {"k": "fix", "t": "Fix", "hint": "Fixed now" if code else "Fixed before approval", "tone": "ink"},
         {"k": "accept", "t": "Accept", "hint": "Carried as a known risk", "tone": "muted"},
-        {"k": "reject", "t": "Reject (reason required)", "hint": "Not applicable; write why in the note",
-         "tone": "warn", "sink": True},
+        {"k": "reject", "t": "Reject", "hint": "Not applicable; write why in the note", "tone": "warn",
+         "note": {"required": True, "label": "Why does this not apply?"}},
     ]
+
+
+def groups(code):
+    """The sections of the form's list: what holds the work up, then what can be carried."""
+    if code:
+        return [{"k": "blocking", "t": "Confirmed", "hint": "The review reproduced these"},
+                {"k": "carried", "t": "Possible", "hint": "Not confirmed by the review"}]
+    return [{"k": "blocking", "t": "Blocking", "hint": "Approval waits for these"},
+            {"k": "carried", "t": "Can be carried", "hint": "Not blocking"}]
 
 
 def block(label, text):
@@ -589,13 +603,13 @@ def block(label, text):
 
 
 def why(f, code):
-    """Why the card starts where it does, in plain words."""
+    """Why the review suggests what it suggests, in plain words. The card starts undecided: this is only the reason."""
     if code:
-        return ("Confirmed by the review, so it starts in Fix" if f.get("blocking") else
-                "Possible, not confirmed by the review, so it starts in Accept")
+        return ("Confirmed by the review, so it is worth fixing" if f.get("blocking") else
+                "Possible, not confirmed by the review, so it can be carried")
     sev = f.get("severity") or "Unrated"
-    return (f"{sev}: it blocks approval until it is fixed or rejected, so it starts in Fix" if f.get("blocking") else
-            f"{sev}: it can be carried as a known risk, so it starts in Accept")
+    return (f"{sev}: it blocks approval until it is fixed or rejected" if f.get("blocking") else
+            f"{sev}: it can be carried as a known risk")
 
 
 def card(item, f, code, reviewer=""):
@@ -610,7 +624,9 @@ def card(item, f, code, reviewer=""):
     return {
         "n": item["n"], "text": item["title"] or item["id"],
         "ctx": "\n\n".join(b for b in [block("What's wrong", item["what"]), block("Suggested", item["suggested"])] + detail if b),
-        "kind": "card",
+        "kind": "card", "group": "blocking" if f.get("blocking") else "carried",
+        "severity": f.get("severity") or (("Confirmed" if f.get("blocking") else "Possible") if code else "Unrated"),
+        **({"blocking": "Blocking" if code else "Blocks approval"} if f.get("blocking") else {}),
         **({"plain": item["rest"]} if item["rest"] else {}), "action": item["suggested"],
         "detail": "\n\n".join(detail), "refs": item["refs"],
         "from": ", ".join(p for p in (who, f.get("severity"), f.get("category")) if p),
@@ -667,7 +683,7 @@ def board(doc, fid, title, out_dir, now=None, project_dir=""):
     out = os.path.abspath(out_dir)
     os.makedirs(os.path.join(out, "cards"), exist_ok=True)
     row = {"title": title, "status": "open", "createdAt": (now or now_utc()).strftime("%Y-%m-%dT%H:%M:%SZ"),
-           "view": "board", "boxes": boxes(code)}
+           "view": "board", "boxes": boxes(code), "groups": groups(code)}
     if doc.get("stage_name") and not code:
         row["stage"] = doc["stage_name"]
     if doc.get("artifact"):

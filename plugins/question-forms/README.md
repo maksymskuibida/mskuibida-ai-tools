@@ -4,7 +4,7 @@ Every AI-DLC questions file becomes a form in one private artifact, **AI-DLC que
 forms**, published once per developer from the template in this plugin. The agent writes the
 questions as rows, the developer answers in the page, the agent reads one document back and
 copies the answers word for word into the file's `[Answer]:` tags. Besides questions with options it
-renders text-only questions and board forms (cards sorted into 2–4 boxes, used by `pr-review` and
+renders text-only questions and board forms (cards decided one by one with 2–4 buttons, used by `pr-review` and
 `review-findings`). One template, so every form looks the same on every machine; no HTML is generated per stage.
 
 The page shares its look and its habits with the approval-gates pages: a sticky bar with filters
