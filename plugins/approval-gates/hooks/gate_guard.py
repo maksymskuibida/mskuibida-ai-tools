@@ -511,7 +511,8 @@ def publish_instruction(stage, unit, page=None):
         return (f"this Unit has the unit-end rhythm, so its {'plan' if page == 'plan' else 'unit-end'} page is one gate bundle: run "
                 f"`python3 \"{script}\" draft --page {page} --unit {unit} --out <a scratch file>`, do what it lists under todo, "
                 f"run `... finalize --bundle <that file> --out <a scratch folder>`, write its writes.json with one ArtifactData "
-                "batch into the AI-DLC unit approvals artifact, and give the developer the link `<artifact url>#<bundle id>` in "
+                "batch into the AI-DLC unit approvals artifact (a `bundles/<id>` row; never a per-stage `gates/` row, never "
+                "the AI-DLC approval gates artifact), and give the developer the link `<artifact url>#<bundle id>` in "
                 "a message of its own before the question (never inside the question)")
     script = os.path.join(PLUGIN_ROOT, "scripts", "gate_bundle.py")
     cmd = f'python3 "{script}" --stage {stage}' + (f" --unit {unit}" if unit else "")
@@ -573,6 +574,31 @@ def require_published(state, project, stage, unit, opened):
         raise Refusal("The developer reads the stage's documents in the AI-DLC approval gates page before being "
                       f"asked. Publish them first: {publish_instruction(stage, unit)}.")
     return pub
+
+
+def unit_end_flow_for(state, project, doc_id):
+    """(stage, unit) when a `gates/<doc_id>` row is the per-stage page of a gate that a unit-end Unit has as a bundle
+    page (its Code Generation plan approval or unit-end gate), else None."""
+    intent, _root = intent_root(project)
+    pending = state["pending"]
+    candidates = []
+    for cand in ((pending.get("stage"), pending.get("unit")) if pending else None, current_stage(project)):
+        if cand and cand[0] and cand not in candidates:
+            candidates.append(cand)
+    for stage, unit in candidates:
+        if not unit or not id_matches(doc_id, intent, stage, unit):
+            continue
+        in_hand = bool(pending and pending.get("stage") == stage and pending.get("unit") == unit)
+        if (in_hand and pending.get("rhythm") == "unit-end") or unit_rhythm(project, unit, stage) == "unit-end":
+            return stage, unit
+    return None
+
+
+def wrong_flow_message(doc_id, stage, unit):
+    return (f"gates/{doc_id} is the wrong page: {unit} was claimed with the unit-end rhythm, so its {stage} plan approval and "
+            "its unit-end gate are `bundles/<id>` rows in the \"AI-DLC unit approvals\" artifact, built by unit_bundle.py, not "
+            f"`gates/` rows of gate_bundle.py in the \"AI-DLC approval gates\" artifact. Nothing was written. Run the unit-end "
+            f"flow: {publish_instruction(stage, unit, 'plan')} (page `unit-end` at the unit-end gate)")
 
 
 def check_gate_rows(tool_input):
@@ -650,6 +676,38 @@ def link_sent(event, pub):
     return False, counts
 
 
+def link_wait():
+    try:
+        return max(0.0, float(os.environ.get("APPROVAL_GATES_LINK_WAIT", "3")))
+    except ValueError:
+        return 3.0
+
+
+def call_written(event):
+    """True when the transcript already holds this very tool call: the response that makes it is then on disk whole."""
+    call_id, path = event.get("tool_use_id"), event.get("transcript_path")
+    if not call_id or not path:
+        return False
+    try:
+        with open(path, encoding="utf-8") as f:
+            return any(call_id in line for line in f if '"tool_use"' in line)
+    except OSError:
+        return False
+
+
+def wait_for_link(event, pub):
+    """link_sent, tried again for a moment when the link is missing. Claude Code writes the blocks of a response to the
+    transcript as they stream, and the hook of a tool call can run before the text block of the same response (one
+    entry per block, one message id) has reached the file; a link sent in the response that asks the question would be
+    refused for good. It waits for the text to land, and stops waiting once the question's own tool call is on disk."""
+    deadline = time.time() + link_wait()
+    while True:
+        sent, counts = link_sent(event, pub)
+        if sent or time.time() >= deadline or call_written(event):
+            return sent, counts
+        time.sleep(0.2)
+
+
 def guard_question(event, state, project, questions):
     for q in questions:
         stage, unit, opened = target_of(state, project)
@@ -662,7 +720,7 @@ def guard_question(event, state, project, questions):
             raise Refusal("The page's link goes to the developer in a message of its own, before the question; the "
                           "question text carries no link. Send the link "
                           f"{link_of(pub)} as a message, then ask the engine's question as it is.")
-        sent, counts = link_sent(event, pub)
+        sent, counts = wait_for_link(event, pub)
         if not sent:
             raise Refusal("The developer gets the page's link before the question, and no message of yours carries "
                           f"it yet. Since {pub.get('id', '')} was published, your transcript holds "
@@ -683,6 +741,16 @@ def pre(event, project):
     tool, ti = event.get("tool_name"), event.get("tool_input") or {}
     if tool == "ArtifactData":
         check_gate_rows(ti)
+        try:
+            state = load(event)
+        except Refusal:
+            return
+        sync_pending(state, project)
+        for _op, collection, doc_id, _data, _url in writes_of(ti):
+            if collection == "gates" and doc_id:
+                wrong = unit_end_flow_for(state, project, doc_id)
+                if wrong:
+                    raise Refusal(wrong_flow_message(doc_id, *wrong))
         return
     if tool == "AskUserQuestion":
         state = load(event)
@@ -816,6 +884,10 @@ def record_artifact(project, state, tool_input, response):
             continue
         if op not in ("set", "update") or collection != "gates":
             continue
+        wrong = unit_end_flow_for(state, project, doc_id)
+        if wrong:
+            say("PostToolUse", wrong_flow_message(doc_id, *wrong).replace("Nothing was written.", "It does not count for the gate."))
+            continue
         key = next((make_key(stage, unit) for stage, unit in candidates if id_matches(doc_id, intent, stage, unit)), None)
         if key is None and not candidates and re.fullmatch(r"\d{6}-[a-z0-9-]+-\d{8}[Tt]\d{4}", doc_id or ""):
             key = "id:" + doc_id  # no stage is known here: the row is kept by its id and matched by it later
@@ -880,7 +952,7 @@ def record_bundle(state, project, intent, doc_id, url):
         return False
     pub = {"id": doc_id, "url": str(url or "").rstrip("/"), "at": time.time(), "page": page}
     state["published"][make_key(pending["stage"], unit) + "@" + page] = pub
-    say("PostToolUse", f"bundles/{doc_id} is published. Send the developer the link `{link_of(pub)}` in a message of its "
+    say("PostToolUse", f"bundles/{doc_id} is published in the AI-DLC unit approvals artifact. Send the developer the link `{link_of(pub)}` in a message of its "
                        "own, then ask the engine's Approval question with no link in it; the question is refused until "
                        "that message was sent.")
     return True

@@ -440,16 +440,46 @@ def findings(unit, stages, defs, questions, steps_raw):
     return rows
 
 
+FACT_VALUE_MAX = 32  # contract/gate-bundle.schema.json: a header fact's value is a chip, not a sentence
+CHECK_STEP = re.compile(r"^(?P<indent>[ \t]*)[-*]\s+(?:\[[ xX]\]\s+)?\*\*Step\s+(?P<n>\d+)\s*[:.\u2014-]\s*(?P<title>.+?)\*\*\s*(?P<rest>.*)$")
+BULLET = re.compile(r"^(?P<indent>[ \t]*)[-*]\s+(?:\[[ xX]\]\s+)?(?P<text>.+)$")
+
+
 def parse_steps(path):
-    """[{n, title, subs: [text]}] of a code plan's `### Step N: title` headings and their `- [ ]` items."""
+    """[{n, title, subs: [text], text}] of a code plan's steps. Two forms: a `### Step N: title` heading with its bullets
+    (`- [ ] item`) under it, or a checkbox line `- [ ] **Step N: title.**` with the more deeply indented bullets under it
+    as its sub-steps (text after the bold title on the same line is the first sub-step). `text` is the step's source."""
+    body = read(path)
     steps = []
-    for block in re.split(r"(?m)^(?=### Step )", read(path)):
-        head = re.match(r"### Step (\d+)\s*[:.—-]\s*(.+)", block)
+    for block in re.split(r"(?m)^(?=### Step )", body):
+        head = re.match(r"### Step (\d+)\s*[:.\u2014-]\s*(.+)", block)
         if not head:
             continue
         block = re.split(r"(?m)^## ", block, maxsplit=1)[0]
         subs = [plain(s) for s in re.findall(r"(?m)^\s*[-*]\s+(?:\[[ xX]\]\s+)?(.+)$", block)]
-        steps.append({"n": int(head.group(1)), "title": head.group(2).strip(), "subs": subs})
+        steps.append({"n": int(head.group(1)), "title": head.group(2).strip(), "subs": subs, "text": block})
+    if steps:
+        return steps
+    current = None
+    for line in body.splitlines():
+        found = CHECK_STEP.match(line)
+        if found:
+            title = found.group("title").strip().rstrip(".:").strip()
+            current = {"n": int(found.group("n")), "title": title, "subs": [], "text": line + "\n",
+                       "indent": len(found.group("indent").expandtabs(4))}
+            if found.group("rest").strip():
+                current["subs"].append(plain(found.group("rest")))
+            steps.append(current)
+            continue
+        if current is None:
+            continue
+        if re.match(r"^#{1,6} ", line):
+            current = None
+            continue
+        current["text"] += line + "\n"
+        bullet = BULLET.match(line)
+        if bullet and len(bullet.group("indent").expandtabs(4)) > current["indent"]:
+            current["subs"].append(plain(bullet.group("text")))
     return steps
 
 
@@ -465,7 +495,7 @@ def plan_steps(path, unit, defs, questions):
     out = []
     for i, st in enumerate(raw, 1):
         text = " ".join(st["subs"])
-        files = {m for m in FILE_TOKEN.findall(read_step_source(path, st["n"])) if "/" in m or "." in m}
+        files = {m for m in FILE_TOKEN.findall(st["text"]) if "/" in m or "." in m}
         implements = [r for r in make_refs(text, defs, "code-generation", questions, limit=8)]
         out.append({
             "n": i, "title": one_line(st["title"], 120), "layer": layer_of(st["title"]), "files": len(files),
@@ -474,11 +504,6 @@ def plan_steps(path, unit, defs, questions):
             "source": {"path": rel(path, unit.project), "key": "step:" + gate_bundle.slugify(st["title"]), "digest": digest(st["title"], *st["subs"])},
         })
     return out, raw
-
-
-def read_step_source(path, n):
-    found = re.search(r"(?ms)^### Step " + str(n) + r"\b.*?(?=^### |^## |\Z)", read(path))
-    return found.group(0) if found else ""
 
 
 # ---------------------------------------------------------------- unit-end rows
@@ -729,6 +754,9 @@ def draft(args):
     if revision > 1:
         todo.append(f"header.revisions: say in one line what v{revision} changes")
     todo.append("rewrite every title and body the script took from the records in plain words (titles one line)")
+    todo.append("limits finalize enforces: every plan step keeps at least one sub-item (`subs`); every header fact `value` is "
+                f"{FACT_VALUE_MAX} characters or fewer (put detail in the fact's `note`, 80 characters or fewer, not in the value); "
+                "at most 6 facts")
     os.makedirs(os.path.dirname(os.path.abspath(args.out)) or ".", exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(bundle, f, indent=2, ensure_ascii=False)

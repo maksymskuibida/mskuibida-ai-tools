@@ -22,6 +22,7 @@ FIXTURE = os.path.join(HERE, "fixtures", "project")
 INTENT = "260101-bakery-preorder"
 URL = "https://claude.ai/artifact/abc123"
 os.environ.pop("CLAUDE_PROJECT_DIR", None)
+os.environ["APPROVAL_GATES_LINK_WAIT"] = "0"  # no waiting for a transcript flush, except in the tests of it
 
 
 def load_module():

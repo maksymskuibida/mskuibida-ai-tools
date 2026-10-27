@@ -135,6 +135,57 @@ class TestPlanDraft(Base):
         self.assertIn("is not one of", out)
 
 
+class TestPlanStepForms(Base):
+    """The code plan's steps, in each form a plan is written in."""
+
+    def plan_with(self, text):
+        path = os.path.join(self.project, "aidlc", "spaces", "default", "intents", "260101-bakery-preorder", "construction",
+                            UNIT, "code-generation", "code-generation-plan.md")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        return self.draft()
+
+    def test_checkbox_steps_in_bold(self):
+        _p, b, info = self.plan_with(
+            "# Code plan\n\n## Steps\n\n"
+            "- [ ] **Step 1: Slot model and capacity.**\n  - [ ] add `src/slots.py`\n  - [ ] check capacity\n"
+            "- [ ] **Step 2: Pickup endpoint.** wire `src/api.py`\n  - [x] return 409 when full\n"
+            "- [ ] **Step 3: Tests**\n\n## Notes\n\n  - not a sub-step\n")
+        steps = b["plan"]["steps"]
+        self.assertEqual([(s["n"], s["title"]) for s in steps],
+                         [(1, "Slot model and capacity"), (2, "Pickup endpoint"), (3, "Tests")])
+        self.assertEqual([s["text"] for s in steps[0]["subs"]], ["add src/slots.py", "check capacity"])
+        self.assertEqual([s["text"] for s in steps[1]["subs"]], ["wire src/api.py", "return 409 when full"])
+        self.assertEqual([s["text"] for s in steps[2]["subs"]], ["Tests"], "a step with no sub-items takes its title")
+        self.assertEqual(steps[0]["files"], 1)
+        self.assertEqual(b["plan"]["hint"].split(" ")[0], "3")
+
+    def test_heading_steps_still_parse(self):
+        _p, b, _i = self.plan_with("# Plan\n\n### Step 1: One\n- [ ] a\n- [ ] b\n\n### Step 2 - Two\n- c\n")
+        self.assertEqual([(s["n"], s["title"], len(s["subs"])) for s in b["plan"]["steps"]], [(1, "One", 2), (2, "Two", 1)])
+
+    def test_a_draft_of_checkbox_steps_finalizes(self):
+        path, b, _i = self.plan_with("# Plan\n\n- [ ] **Step 1: Only step.**\n  - [ ] do it\n")
+        self.save(path, agent_pass(b))
+        self.finalize(path)
+
+    def test_the_todo_states_what_finalize_enforces(self):
+        _p, _b, info = self.plan_with("# Plan\n\n### Step 1: One\n- [ ] a\n")
+        todo = " ".join(info["todo"])
+        self.assertIn("at least one sub-item", todo)
+        self.assertIn("32 characters or fewer", todo)
+
+    def test_finalize_refuses_a_long_fact_value_and_a_step_without_subs(self):
+        path, b, _i = self.draft()
+        b = agent_pass(b)
+        b["header"]["facts"] = [{"label": "Tests", "value": "x" * 33}]
+        b["plan"]["steps"][0]["subs"] = []
+        self.save(path, b)
+        out = self.finalize(path, ok=False)
+        self.assertIn("32", out)
+        self.assertIn("at least 1 item", out)
+
+
 class TestFinalize(Base):
     def test_ids_say_what_each_id_of_the_page_is_from_this_units_records(self):
         _path, b, _info = self.finished()

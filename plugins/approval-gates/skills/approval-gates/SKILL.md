@@ -1,9 +1,25 @@
 ---
 name: approval-gates
-description: Use at every AI-DLC approval gate, right after `aidlc engine orchestrate report --result awaiting-approval` (or `--result revised`) and before the Approval question — publish the stage's documents as a page in the developer's "AI-DLC approval gates" artifact and send its link in a message of its own before the gate question. For a Unit claimed with the unit-end rhythm, at its Code Generation plan approval and at its one unit-end gate, build the Unit's gate bundle instead and publish it in the "AI-DLC unit approvals" artifact. Also when the developer answered, to read the notes they left in the page.
+description: Use at every AI-DLC approval gate. First read aidlc/.aidlc-unit-scope.json: for the Code Generation plan approval and the unit-end gate of a Unit claimed with gate_rhythm "unit-end" go straight to the unit-end flow (unit_bundle.py, a bundles/ row in "AI-DLC unit approvals"); every other gate follows the per-stage flow. Per-stage flow: right after `aidlc engine orchestrate report --result awaiting-approval` (or `--result revised`) and before the Approval question — publish the stage's documents as a page in the developer's "AI-DLC approval gates" artifact and send its link in a message of its own before the gate question. Also when the developer answered, to read the notes they left in the page.
 ---
 
 # Approval gates
+
+## 0. Decide the flow first — before anything else
+
+There are two flows with different scripts, different rows and a different artifact. Read
+`aidlc/.aidlc-unit-scope.json` in the project (the claim's stamp) and pick:
+
+| The gate in hand | Flow |
+|---|---|
+| `"gate_rhythm": "unit-end"` **and** it is the Unit's Code Generation **plan approval** (Approve Plan) **or** its **unit-end gate** (`directive.unit_gate: "unit-end"`) | **Unit-end flow → § 5.** `unit_bundle.py`, a `bundles/<id>` row, the artifact **AI-DLC unit approvals**. Go straight there; do not read §§ 1–4 for it. |
+| Any other gate: every gate of a `per-stage` Unit or of a project with no claim, and every design-stage gate of a unit-end Unit (the stages that run with no approval between them) | **Per-stage flow → §§ 1–4.** `gate_bundle.py`, a `gates/<id>` row, the artifact **AI-DLC approval gates**. |
+
+A `gates/` row written for a unit-end Unit's plan approval or unit-end gate is the wrong page: the hook refuses
+the write and says so. The hook's message at the gate names the flow too; when it and this table disagree, the
+stamp wins.
+
+## Per-stage flow
 
 Every approval gate gets a page, always. The engine's gate stays exactly as the engine prescribes:
 the completion message, then the Approval question with `AskUserQuestion`, then the end of your turn.
@@ -12,7 +28,7 @@ documents, each in a view made for its kind, and may leave a note per document. 
 is given in chat; the page holds none. Its header comment is the data contract. Never generate,
 restyle or edit a page per stage.
 
-## 1. The artifact (once per developer)
+## 1. The artifact (once per developer) — per-stage flow
 
 `Artifact` → `action: "list"` → the artifact titled **AI-DLC approval gates**. If the developer
 has none, publish `approval-gate.html` from this skill's directory once: `capabilities: {db: {}, user: {}}`,
@@ -21,7 +37,7 @@ to Claude." Reuse its URL for every gate from then on. After a plugin update, re
 this file to the same URL once, with `capabilities: {db: {}, user: {}}` (the `user` capability keeps each
 viewer's read marks; an artifact published before 1.5.0 has only `db`): the rows stay.
 
-## 2. At every gate
+## 2. At every per-stage gate
 
 After the `awaiting-approval` (or `revised`) report, and after the review brief was printed when the
 stage has a reviewer:
@@ -68,9 +84,9 @@ The plan checkpoint of Code Generation (Approve Plan) is a gate too: the same st
 Never write `notes` (they are the developer's) or any decision field (the decision is given in chat),
 and never update a row: each presentation is a fresh id.
 
-## 5. A Unit with the unit-end rhythm
+## 5. Unit-end flow: a Unit with the unit-end rhythm
 
-A team Unit claimed with `--rhythm unit-end` (the claim's stamp `aidlc/.aidlc-unit-scope.json` says
+*(You are here from § 0: the Unit's plan approval or its unit-end gate.)* A team Unit claimed with `--rhythm unit-end` (the claim's stamp `aidlc/.aidlc-unit-scope.json` says
 `"gate_rhythm": "unit-end"`) stops for the developer twice, not once per stage: the design stages run with their
 reviewer rounds and no approval between them, then the **plan page** at the Code Generation plan approval (the
 developer's one look at every design stage), then the code, then the **unit-end page** at the Unit's one gate
