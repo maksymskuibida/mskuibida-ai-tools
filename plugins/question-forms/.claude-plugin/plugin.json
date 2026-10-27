@@ -1,7 +1,7 @@
 {
   "name": "question-forms",
   "displayName": "Question forms",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Every AI-DLC questions file as a form in one private artifact: rows in, the developer's answers out, copied word for word into the file.",
   "author": {
     "name": "Maksym Skuibida"

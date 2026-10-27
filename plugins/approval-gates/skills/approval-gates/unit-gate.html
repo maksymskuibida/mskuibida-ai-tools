@@ -638,7 +638,6 @@ var GateView = (function () {
     if (open) {
       body = '<div class="secbody">' + (s.map && st.filter === "all" ? mapHtml(s.map) : "") +
         (s.asApproved ? '<p class="asapproved">The design stays as approved.</p>' : "") +
-        (!s.asApproved && !shownRows.length ? '<p class="empty">' + (rows.length ? "Nothing here for this filter." : "Nothing in this section.") + "</p>" : "") +
         shownRows.map(function (r) { return rowHtml(st, bundle, s, r); }).join("") + "</div>";
     }
     return '<section class="card" id="' + esc(s.key) + '" data-sec="' + esc(s.key) + '">' + sectionHead(s.key, s.title, s.hint, open, right) + body + "</section>";
@@ -679,7 +678,7 @@ var GateView = (function () {
       var t = revTone(+v); return '<span class="lc" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">v' + int(v) + "<b>" + steps.filter(function (s) { return s.rev === +v; }).length + "</b></span>";
     }).join("");
     var right = layers + revs + '<span class="shown">' + (st.filter === "all" ? steps.length : shown.length + "/" + steps.length) + "</span>";
-    var body = open ? '<div class="secbody">' + (shown.length ? shown.map(function (s) { return stepHtml(st, bundle, s); }).join("") : '<p class="empty">' + (/^(look|top)$/.test(st.filter) ? "Steps carry no label; switch to All to read them." : "Nothing here for this filter.") + "</p>") + "</div>" : "";
+    var body = open ? '<div class="secbody">' + shown.map(function (s) { return stepHtml(st, bundle, s); }).join("") + "</div>" : "";
     return '<section class="card" id="plan" data-sec="plan">' + sectionHead("plan", p.title || "Code plan", p.hint || "", open, right) + body + "</section>";
   }
 
@@ -775,15 +774,28 @@ var GateView = (function () {
     return '<footer class="band"><b>' + esc(lead) + "</b><span>" + esc(rest) + '</span><span class="end num">read ' + read + "/" + items.length + "</span></footer>";
   }
 
+  /* A section with nothing to show is left out, with its heading, counts and nav chip: it has no rows, or the filter hides
+     every one. A section that says something without rows (the design stays as approved, a map) stays. */
+  function hasContent(st, bundle, key) {
+    if (key === "plan") { var steps = bundle.plan.steps || []; return steps.some(function (x) { return passes(st, x, stepKey(x), true); }); }
+    if (key === "answers") return (bundle.answers || []).length > 0;
+    if (key === "design") return !!((bundle.design.rows || []).length || bundle.design.bundle || bundle.design.url);
+    var s = (bundle.sections || []).filter(function (x) { return x.key === key; })[0];
+    if (!s) return false;
+    if (s.asApproved || (s.map && st.filter === "all")) return true;
+    return (s.rows || []).some(function (r) { return passes(st, r, anchor(r.id), false); });
+  }
+
   /* The whole page for one bundle. st: {mode, filter, open, sec, read, notes, picks, noteStat}. */
   function render(bundle, st) {
     st = Object.assign({ mode: "summary", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {} }, st || {});
-    var keys = order(bundle), parts = {};
+    var keys = order(bundle).filter(function (k) { return hasContent(st, bundle, k); }), parts = {};
     (bundle.sections || []).forEach(function (s) { parts[s.key] = sectionHtml(st, bundle, s); });
     if (bundle.plan) parts.plan = planHtml(st, bundle);
     if ((bundle.answers || []).length) parts.answers = answersHtml(st, bundle);
     if (bundle.design) parts.design = designHtml(st, bundle);
-    return headerHtml(st, bundle) + barHtml(st, bundle, keys) + "<main>" + keys.map(function (k) { return parts[k]; }).join("") + footerHtml(st, bundle) + idIndex(bundle) + "</main>";
+    var empty = keys.length || st.filter === "all" ? "" : '<p class="empty card">Nothing here for this filter.</p>';
+    return headerHtml(st, bundle) + barHtml(st, bundle, keys) + "<main>" + keys.map(function (k) { return parts[k]; }).join("") + empty + footerHtml(st, bundle) + idIndex(bundle) + "</main>";
   }
 
   function listHtml(rows) {
