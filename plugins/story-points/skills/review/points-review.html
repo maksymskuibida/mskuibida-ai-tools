@@ -595,7 +595,7 @@ var PointsView = (function () {
   function barHtml(st, review, units, t) {
     var pct = t.all ? Math.round(t.human / t.all * 100) : 0, done = review.status === "done";
     var filters = [["all", "All", t.all, "Every Unit."], ["need", "Needs your estimate", t.need, "Units without a developer estimate: an AI suggestion only, or nothing."], ["unread", "Unread", t.unread, "Units you haven’t marked read, or whose row changed since."]];
-    var chips = units.map(function (u) {
+    var chips = units.filter(function (u) { return passes(st, u); }).map(function (u) {
       var id = uidOf(u), k = kindOf(st, u), p = pickOf(st, u), v = p !== null ? p : num(u.points);
       var tip = "Unit " + id + ": " + (u.title || u.name || id) + ". " + (k === "human" ? "Developer estimate " + v + "." : k === "ai" ? "AI suggests " + v + "; no developer estimate yet." : "No estimate yet.");
       return '<a class="chip' + (isRead(st, u) ? " read" : "") + '" href="#' + esc(anchorOf(id)) + '" data-jump="' + esc(anchorOf(id)) + '" data-tip="' + esc(tip) + '"><span class="cv ' + k + '" aria-hidden="true">' + (v === null ? "–" : v) + '</span><span class="cl">' + esc(u.title || u.name || id) + "</span></a>";

@@ -930,12 +930,12 @@ var AidlcIds = (function () {
     if (isBoard()) {
       filters = [["all", "All", c.total], ["moved", "Moved", c.moved], ["noted", "With a note", c.noted]].concat(c.fresh ? [["fresh", "New or changed", c.fresh]] : []);
       progress = "";
-      chips = boxes().map((b) => { const n = [...document.querySelectorAll(`[data-cards="${CSS.escape(b.k)}"] .fcard:not(.filtered)`)].length;
+      chips = boxes().filter((b) => !document.getElementById("box-" + b.k)?.hidden).map((b) => { const n = [...document.querySelectorAll(`[data-cards="${CSS.escape(b.k)}"] .fcard:not(.filtered)`)].length;
         return `<a class="chip" href="#" data-jump="box-${esc(b.k)}" style="--tone:var(--${toneVar(b.tone)})" data-tip="${esc(stripMd(b.t) + (b.hint ? " — " + stripMd(b.hint) : "") + `. ${plural(n, "card")} here.`)}"><span class="sw" aria-hidden="true"></span>${esc(stripMd(b.t))}<span class="count">${n}</span></a>`; }).join("");
     } else {
       filters = [["all", "All", c.total], ["open", "Unanswered", c.total - c.ans]].concat(c.fresh ? [["fresh", "New or changed", c.fresh]] : []);
       progress = `<span class="progress"><span class="num">Answered ${c.ans}/${c.total}</span><span class="meter" aria-hidden="true"><i style="width:${pct}%"></i></span></span>`;
-      chips = ordered().map((q) => {
+      chips = ordered().filter(passes).map((q) => {
         const st = (view.answers[q.id]?.k || []).includes("X") && !(view.answers[q.id]?.note || "").trim() ? "need" : (answered(q.id) ? "ans" : "");
         const fr = freshness(q.id), state = st === "need" ? "needs your own words for Other" : (st ? "answered " + answerText(q.id) : "not answered yet");
         return `<a class="chip ${st}${fr ? " fresh" : ""}${!passes(q) ? " dim" : ""}" href="#" data-jump="q-${esc(q.id)}" data-tip="${esc(`${q.id}: ${qLabel(q)} — ${state}${fr ? ` (${fr} since you looked)` : ""}.`)}"><span class="st" aria-hidden="true"></span>${esc(q.id)}</a>`;
@@ -987,7 +987,7 @@ var AidlcIds = (function () {
     const qsEl = $("questions"); if (!qsEl) return;
     let empty = qsEl.querySelector(":scope > .filter-empty");
     const none = view.filter !== "all" && view.questions.size && !qsAll().some(passes);
-    if (none && !isBoard()) { if (!empty) { empty = document.createElement("div"); empty.className = "card msg filter-empty"; qsEl.appendChild(empty); } empty.innerHTML = `<b>${view.filter === "open" ? "Every question is answered." : "Nothing here for this filter."}</b><p><button type="button" class="btn" data-filter="all">Show all questions</button></p>`; }
+    if (none) { if (!empty) { empty = document.createElement("div"); empty.className = "card msg filter-empty"; qsEl.appendChild(empty); } empty.innerHTML = `<b>${view.filter === "open" ? "Every question is answered." : "Nothing here for this filter."}</b><p><button type="button" class="btn" data-filter="all">Show all questions</button></p>`; }
     else if (empty) empty.remove();
     if (isBoard()) paintCounts();
   }
@@ -1154,6 +1154,12 @@ var AidlcIds = (function () {
     if (!isBoard()) return;
     requestAnimationFrame(sizeSinks);
     document.querySelectorAll("[data-count]").forEach((c) => { const list = [...document.querySelectorAll("[data-cards]")].find((n) => n.dataset.cards === c.dataset.count); c.textContent = String(list ? list.querySelectorAll(".fcard:not(.filtered)").length : 0); });
+    /* A box the filter leaves with no card leaves the board with its heading, count and chip, and so does a group whose
+       boxes all left. With every card showing, an empty box stays: it is where a card can be dropped. */
+    document.querySelectorAll(".box").forEach((b) => { b.hidden = view.filter !== "all" && !b.querySelector(".fcard:not(.filtered)"); });
+    document.querySelectorAll(".group").forEach((g) => { g.hidden = !g.querySelector(".box:not([hidden])"); });
+    document.querySelectorAll(".board").forEach((r) => r.style.setProperty("--n", String(Math.max(1, r.querySelectorAll(".box:not([hidden])").length))));
+    document.querySelectorAll(".grow").forEach((r) => r.style.setProperty("--g", String(Math.max(1, r.querySelectorAll(".group:not([hidden])").length))));
   }
 
   /* ---------- question list ---------- */

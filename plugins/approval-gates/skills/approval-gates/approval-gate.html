@@ -976,7 +976,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     el.bar.innerHTML = `<div class="barrow"><div class="filters" role="group" aria-label="Show">${filters.map((x) => `<button type="button" class="fpill" data-filter="${x[0]}" aria-pressed="${view.filter === x[0]}">${x[1]}<span class="n">${x[2]}</span></button>`).join("")}</div>` +
       `<div class="tools"><span class="savestat" id="savestat" role="status" aria-live="polite"></span><span class="progress-r" data-tip="Blocks you marked read with their dot. A block you read turns unread again only when its text changes."><span class="num">Read ${read}/${total}</span><span class="meter" aria-hidden="true"><i style="width:${pct}%"></i></span></span>` +
       `<button type="button" data-all="open">Expand all</button><button type="button" data-all="close">Collapse all</button><button type="button" class="wide" data-allread="1">Mark all read</button><button type="button" class="railtoggle" data-outline="1" aria-controls="rail" aria-expanded="${el.rail.classList.contains("show")}">Outline</button></div></div>` +
-      `<nav class="chips" aria-label="Jump to">${blocks.map((x) => `<a class="jchip${isRead(x.key) ? " read" : ""}" href="#" data-go="${esc(x.go)}" data-tip="${esc("Jump to " + x.tip + (isRead(x.key) ? " (read)" : " (unread)"))}"><span class="udot" aria-hidden="true"></span>${esc(x.short)}${revTag(x.key)}${x.count ? `<span class="count">${esc(x.count)}</span>` : ""}${x.extra || ""}<span class="sr">${isRead(x.key) ? ", read" : ", unread"}</span></a>`).join("")}</nav>`;
+      `<nav class="chips" aria-label="Jump to">${blocks.filter((x) => passes(x.key)).map((x) => `<a class="jchip${isRead(x.key) ? " read" : ""}" href="#" data-go="${esc(x.go)}" data-tip="${esc("Jump to " + x.tip + (isRead(x.key) ? " (read)" : " (unread)"))}"><span class="udot" aria-hidden="true"></span>${esc(x.short)}${revTag(x.key)}${x.count ? `<span class="count">${esc(x.count)}</span>` : ""}${x.extra || ""}<span class="sr">${isRead(x.key) ? ", read" : ", unread"}</span></a>`).join("")}</nav>`;
     if (keep) { const back = el.bar.querySelector(`[${keep}="${CSS.escape(keepVal)}"]`); if (back) back.focus(); }
     paintSave();
     /* blocks: read state and the filter */
@@ -1407,11 +1407,14 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
   const mdDiv = (text) => { const div = document.createElement("div"); div.className = "md smart"; div.innerHTML = mdHtml(foldFallbacks(text)) || esc(text); decorate(div); upgradeIn(div, { noFilter: true }); registerMdRefs(div); return div; };
 
   /* a filter bar: chips over rows' dataset.f, and a search over dataset.q (or text) */
-  function filterBar(rows, label) {
+  function filterBar(rows, label, secs) {
     const counts = new Map(); rows.forEach((r) => { const v = r.dataset.f || ""; counts.set(v, (counts.get(v) || 0) + 1); });
     const bar = node(`<div class="vtools"><span>${esc(label || "")}</span>${(counts.size === 1 && counts.has("") ? [] : [...counts]).map(([v, c]) => `<button type="button" class="fchip" data-v="${esc(v)}" aria-pressed="false">${esc(v || "other")} <span class="hint">${c}</span></button>`).join("")}<input type="search" placeholder="Find…" aria-label="Find"></div>`);
     const state = { f: null, q: "" };
-    const apply = () => rows.forEach((r) => { const ok = (!state.f || r.dataset.f === state.f) && (!state.q || (r.dataset.q || r.textContent).toLowerCase().includes(state.q)); r.hidden = !ok; if (ok && state.q) { let p = r.closest("details"); while (p) { p.open = true; p = p.parentElement && p.parentElement.closest("details"); } } });
+    const applyRows = () => rows.forEach((r) => { const ok = (!state.f || r.dataset.f === state.f) && (!state.q || (r.dataset.q || r.textContent).toLowerCase().includes(state.q)); r.hidden = !ok; if (ok && state.q) { let p = r.closest("details"); while (p) { p.open = true; p = p.parentElement && p.parentElement.closest("details"); } } });
+    /* a section made only of these rows leaves the page, and the outline, while the filter hides every one */
+    const sweep = () => { if (!secs) return; secs.forEach((sec) => { sec.hidden = !rows.some((r) => !r.hidden && sec.contains(r)); }); view.railSig = ""; paintRail(docList()); };
+    const apply = () => { applyRows(); sweep(); };
     bar.querySelectorAll(".fchip").forEach((b) => b.addEventListener("click", () => { state.f = state.f === b.dataset.v ? null : b.dataset.v; bar.querySelectorAll(".fchip").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.v === state.f))); apply(); }));
     bar.querySelector("input").addEventListener("input", (e) => { state.q = e.target.value.trim().toLowerCase(); apply(); });
     return bar;
@@ -1476,7 +1479,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
       });
       sec.secbody.appendChild(table); secs.push(sec);
     });
-    root.appendChild(filterBar(rows, `${rules.length} rules`)); secs.forEach((s) => root.appendChild(s));
+    root.appendChild(filterBar(rows, `${rules.length} rules`, secs)); secs.forEach((s) => root.appendChild(s));
     if (after.trim()) root.appendChild(mdBlocks(d, after, false, 200));
     return root;
   }
@@ -1685,7 +1688,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
       g.rows.forEach((r) => { const w = /^(withdrawn|removed|dropped)/i.test(r.text); const tr = node(`<tr data-f="${esc(g.section)}"${w ? ' class="dim"' : ""}><td class="id">${esc(r.id)}</td><td>${inline(r.text)}${r.subs.length ? `<ul class="rsubs">${r.subs.map((x) => `<li>${inline(x)}</li>`).join("")}</ul>` : ""}</td><td class="dim">${srcCell(r.source)}</td></tr>`); tr.dataset.q = r.id + " " + r.text + " " + r.subs.join(" "); regRef(r.id, tr, r.text); table.querySelector("tbody").appendChild(tr); all.push(tr); });
       sec.secbody.appendChild(table); secs.push(sec);
     });
-    root.appendChild(filterBar(all, `${found} requirements`)); secs.forEach((s) => root.appendChild(s));
+    root.appendChild(filterBar(all, `${found} requirements`, secs)); secs.forEach((s) => root.appendChild(s));
     top.slice(1).filter((s) => s.title && !groups.some((g) => g.section === s.title)).forEach((s) => { const sec = section(d, n++, s.title, false); sec.secbody.appendChild(mdDiv(s.body)); root.appendChild(sec); });
     return root;
   }
@@ -2473,15 +2476,15 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
 
   /* ---------- the outline: every document and its sections ---------- */
   function paintRail(docs) {
-    const sig = JSON.stringify([docs.map((d) => [d.key, d.title, (el.col.querySelector(`#d-${CSS.escape(d.key)} summary h2`) || {}).textContent, [...el.col.querySelectorAll(`#d-${CSS.escape(d.key)} details.sec`)].map((s) => s.dataset.title)]), noted(), Object.keys(view.reads).filter(isRead)]);
+    const sig = JSON.stringify([docs.map((d) => [d.key, d.title, (el.col.querySelector(`#d-${CSS.escape(d.key)} summary h2`) || {}).textContent, [...el.col.querySelectorAll(`#d-${CSS.escape(d.key)} details.sec`)].map((s) => s.dataset.title)]), noted(), Object.keys(view.reads).filter(isRead), view.filter]);
     if (sig === view.railSig) return; view.railSig = sig;
     let html = `<div class="railh">Outline</div>`;
     const top = (go, key, title) => `<div class="rgroup"><button type="button" class="rdoc${isRead(key) ? " read" : ""}" data-go="${go}"><span class="rcaret none" aria-hidden="true"></span><span class="rtitle">${title}</span></button></div>`;
-    if (view.gate && view.gate.summary) html += top("b-summary", "summary", "Summary");
-    if (view.gate && view.gate.brief) html += top("b-brief", "review", "Review");
-    docs.forEach((d) => {
+    if (view.gate && view.gate.summary && passes("summary")) html += top("b-summary", "summary", "Summary");
+    if (view.gate && view.gate.brief && passes("review")) html += top("b-brief", "review", "Review");
+    docs.filter((d) => passes(d.key)).forEach((d) => {
       const shown = el.col.querySelector(`#d-${CSS.escape(d.key)} summary h2`); const title = (shown && shown.textContent.trim()) || d.title || d.key;
-      const secs = [...el.col.querySelectorAll(`#d-${CSS.escape(d.key)} details.sec`)];
+      const secs = [...el.col.querySelectorAll(`#d-${CSS.escape(d.key)} details.sec`)].filter((x) => !x.hidden);
       const block = $("d-" + d.key); const open = Object.prototype.hasOwnProperty.call(view.railOpen, d.key) ? view.railOpen[d.key] : !!(block && block.open);
       html += `<details class="rgroup" data-key="${esc(d.key)}"${open ? " open" : ""}><summary tabindex="-1"><span class="rdoc${isRead(d.key) ? " read" : ""}" data-go="d-${esc(d.key)}" role="button" tabindex="0"><span class="rcaret${secs.length ? "" : " none"}" aria-label="${secs.length ? "Show or hide its sections" : ""}">${secs.length ? CHEV : ""}</span><span class="rtitle">${esc(title)}</span>${(view.notes[d.key] || "").trim() ? '<i class="notedot" aria-label="has your note"></i>' : ""}</span></summary>` +
         secs.map((s) => `<button type="button" class="rsec${s.classList.contains("changed") ? " changed" : ""}" data-go="${esc(s.id)}">${esc(s.dataset.title)}</button>`).join("") + `</details>`;
