@@ -221,6 +221,48 @@ class TestUnitEndPage(UnitCase):
         self.assertEqual(self.state_of()["pending"]["rhythm"], "unit-end")
 
 
+class TestUnitEndGateTheStateDidNotSee(UnitCase):
+    """The u12-local-git session: the plan was approved, the Unit was built and its unit-end gate came without a
+    `report --result awaiting-approval` this session's state saw. The unit-end bundle was written and the developer
+    approved in chat, yet the closing report was refused with a demand for a per-stage gates page."""
+
+    REPORT = f"aidlc engine orchestrate report --stage code-generation --unit {UNIT} --result approved --user-input Approve"
+
+    def approve_plan(self):
+        self.open_plan()
+        self.write_bundle(self.plan_id)
+        self.said(f"**Read:** {URL}#{self.plan_id}")
+        self.post("Bash", {"command": 'aidlc engine log answer --stage code-generation --checkpoint plan-approval --details "Approve Plan"'},
+                  {"stdout": "{}"})
+
+    def test_an_approved_plan_closes_the_plan_gate(self):
+        self.approve_plan()
+        self.assertIsNone(self.state_of()["pending"])
+
+    def test_the_unit_end_bundle_counts_with_no_gate_open(self):
+        self.approve_plan()
+        _code, out = self.write_bundle(self.end_id)
+        self.assertIn(f"{URL}#{self.end_id}", self.context(out))
+        code, _out, err = self.pre("Bash", {"command": self.REPORT})
+        self.assertEqual(code, 0, err)
+
+    def test_with_no_gate_open_the_report_asks_for_the_unit_end_page_not_a_gates_page(self):
+        code, _out, err = self.pre("Bash", {"command": self.REPORT})
+        self.assertEqual(code, 2)
+        self.assertIn("draft --page unit-end", err)
+        self.assertNotIn("gate_bundle.py", err)
+
+    def test_a_closing_report_the_engine_refused_keeps_the_gate_open(self):
+        self.open_end()
+        self.write_bundle(self.end_id)
+        refused = '{"message":"report --result approved requires --user-input with the human\'s reply.","kind":"error"}'
+        self.post("Bash", {"command": f"aidlc engine orchestrate report --stage code-generation --unit {UNIT} --result approved"},
+                  {"stdout": refused})
+        self.assertIsNotNone(self.state_of()["pending"])
+        code, _out, err = self.pre("Bash", {"command": self.REPORT})
+        self.assertEqual(code, 0, err)
+
+
 class TestRowsAndAnswers(UnitCase):
     def test_notes_and_picks_are_the_developers(self):
         self.open_plan()

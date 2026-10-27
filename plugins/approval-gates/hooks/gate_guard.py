@@ -545,7 +545,7 @@ def target_of(state, project, call_stage=None, call_unit=None):
     return stage, unit, opened
 
 
-def require_published(state, stage, unit, opened):
+def require_published(state, project, stage, unit, opened):
     """The record of this stage's gate page, or a Refusal when it was not published since the gate opened. A row
     recorded by its id alone (the stage was unknown when it was written) counts when its id names this stage. Under the
     unit-end rhythm the page is the Unit's bundle of the page the gate needs."""
@@ -556,6 +556,15 @@ def require_published(state, stage, unit, opened):
         if not pub or (isinstance(opened, (int, float)) and pub.get("at", 0) < opened):
             raise Refusal(f"The developer reads the Unit's {'plan' if page == 'plan' else 'unit-end'} page before being asked. "
                           f"Publish it first: {publish_instruction(stage, unit, page)}.")
+        return pub
+    if not (pending and pending.get("stage") == stage and (pending.get("unit") or None) == (unit or None)) \
+            and unit_rhythm(project, unit, stage) == "unit-end":
+        # The gate was opened where this session's state did not see it (another session, a subagent, the engine's
+        # own directive): the Unit's claim still says its gate is the unit-end page.
+        pub = state["published"].get(make_key(stage, unit) + "@unit-end")
+        if not pub:
+            raise Refusal("The developer reads the Unit's unit-end page before being asked. "
+                          f"Publish it first: {publish_instruction(stage, unit, 'unit-end')}.")
         return pub
     pub = state["published"].get(make_key(stage, unit))
     if not pub:
@@ -646,7 +655,7 @@ def guard_question(event, state, project, questions):
         stage, unit, opened = target_of(state, project)
         if not stage:
             continue
-        pub = require_published(state, stage, unit, opened)
+        pub = require_published(state, project, stage, unit, opened)
         text = str(q.get("question", ""))
         url = str(pub.get("url", "")).strip()
         if (url and url in text) or re.search(r"claude\.ai/artifact/|#[0-9]{6}-[a-z0-9.-]+-\d{8}T\d{4}\b", text, re.I):
@@ -667,7 +676,7 @@ def guard_report(state, project, call):
     stage, unit, opened = target_of(state, project, call.get("stage") or (current_stage(project) or (None,))[0],
                                     call.get("unit"))
     if stage:
-        require_published(state, stage, unit, opened)
+        require_published(state, project, stage, unit, opened)
 
 
 def pre(event, project):
@@ -742,9 +751,10 @@ def record_bash(event, project, state, tool_input):
         cur = current_stage(project)
         if call["kind"] == "answer":
             pending = state["pending"]
-            if call.get("checkpoint") == "plan-approval" and pending and pending.get("kind") == "plan" \
-                    and "request changes" in norm(call.get("details") or ""):
-                state["pending"] = None  # the revised plan is a new presentation: the engine's next ask opens it again
+            if call.get("checkpoint") == "plan-approval" and pending and pending.get("kind") == "plan":
+                # Request Changes: the revised plan is a new presentation, the engine's next ask opens it again.
+                # Approve: the plan gate is over; left open, it would stand in for the Unit's later unit-end gate.
+                state["pending"] = None
                 changed = True
             continue
         if call["kind"] == "decision":
@@ -779,6 +789,8 @@ def record_bash(event, project, state, tool_input):
                                    f"question, publish its documents: {publish_instruction(stage, unit)}.")
             changed = True
         elif call["result"] in CLOSING:
+            if engine_refused(event.get("tool_response")):
+                continue
             pending = state["pending"]
             if pending and pending.get("stage") == stage and (not call.get("unit") or pending.get("unit") == call["unit"]):
                 state["pending"] = None
@@ -800,7 +812,7 @@ def record_artifact(project, state, tool_input, response):
         if collection == "bundles":
             if op != "set":
                 continue
-            changed = record_bundle(state, intent, doc_id, url) or changed
+            changed = record_bundle(state, project, intent, doc_id, url) or changed
             continue
         if op not in ("set", "update") or collection != "gates":
             continue
@@ -828,16 +840,38 @@ def stamp_epoch(stamp):
         return None
 
 
-def record_bundle(state, intent, doc_id, url):
-    """A `bundles` row of the Unit whose unit-end-rhythm gate is open, for the page that gate needs."""
+def claimed_unit(project):
+    """The Unit the checkout's claim names (aidlc/.aidlc-unit-scope.json), or None."""
+    try:
+        with open(os.path.join(project, "aidlc", ".aidlc-unit-scope.json"), encoding="utf-8") as f:
+            unit = json.load(f).get("unit")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return unit.strip() if isinstance(unit, str) and unit.strip() else None
+
+
+def record_bundle(state, project, intent, doc_id, url):
+    """A `bundles` row of the Unit whose unit-end-rhythm gate is open, for the page that gate needs. A unit-end page of
+    the claimed Unit counts with no gate open in the state too: its gate may have been opened where this session's state
+    did not see it, and the report that approves it asks for this page."""
     pending = state["pending"]
     found = BUNDLE_ID.match(doc_id or "")
-    if not found or not pending or pending.get("rhythm") != "unit-end" or not pending.get("unit"):
+    if not found:
         return False
     head, page = found.group("head"), found.group("page")
-    unit = pending["unit"]
-    if page != page_of(pending) or not head.endswith("-" + unit.lower()) or (intent and not head.startswith(intent.lower())):
+    if intent and not head.startswith(intent.lower()):
         return False
+    if pending and pending.get("rhythm") == "unit-end" and pending.get("unit") and page == page_of(pending) \
+            and head.endswith("-" + pending["unit"].lower()):
+        unit = pending["unit"]
+    else:
+        unit = claimed_unit(project)
+        if page != "unit-end" or not unit or not head.endswith("-" + unit.lower()) \
+                or unit_rhythm(project, unit, UNIT_END_STAGE) != "unit-end":
+            return False
+        if pending and pending.get("unit") == unit:
+            state["pending"] = None  # a gate of this Unit still open in the state (its plan) is over: the Unit is built
+        pending = {"stage": UNIT_END_STAGE, "unit": unit}
     built = stamp_epoch(found.group("stamp"))
     opened = pending.get("opened_at")
     if built is None or (isinstance(opened, (int, float)) and built < opened - opened % 60):
