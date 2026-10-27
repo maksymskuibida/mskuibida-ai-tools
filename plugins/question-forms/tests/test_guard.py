@@ -79,6 +79,17 @@ class Case(unittest.TestCase):
         return self.post("ArtifactData", {"action": "batch", "writes": [{"op": "set", "path": f"forms/{FORM}", "data": {"file": REL}},
                                                                          {"op": "set", "path": f"forms/{FORM}/questions/q1", "data": {}}]})
 
+    def form_from_files(self, file_value=None, action="batch", doc_id=FORM, form_json=True):
+        """The ArtifactData input real agents send: rows written from JSON files."""
+        form = os.path.join(self.tmp, "form.json")
+        if form_json:
+            with open(form, "w") as f:
+                json.dump({"title": "Functional Design", "stage": "functional-design", "file": file_value or REL, "status": "open"}, f)
+        row = {"op": "set", "collection": "forms", "doc_id": doc_id, "if_version": 1, "file_path": form}
+        q = {"op": "set", "collection": f"forms/{doc_id}/questions", "doc_id": "Q1", "if_version": 1, "file_path": os.path.join(self.tmp, "Q1.json")}
+        ti = {"action": "batch", "url": URL, "writes": [row, q]} if action == "batch" else dict(row, action="set", url=URL)
+        return self.post("ArtifactData", ti)
+
     def say(self, text):
         with open(self.transcript, "a") as f:
             f.write(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}) + "\n")
@@ -181,6 +192,44 @@ class TestStop(Case):
         self.written()
         code, out, _ = self.run_hook({"hook_event_name": "UserPromptSubmit", "prompt": "/question-forms:release"})
         self.assertIn("cleared", self.context(out))
+        self.assertEqual(self.stop(), {})
+
+
+class TestFormRowFromFiles(Case):
+    def setUp(self):
+        super().setUp()
+        self.script("set", "--value", "always")
+        self.written()
+
+    def opened(self):
+        with open(os.path.join(self.data, "sessions", "s1.json")) as f:
+            return "formId" in json.dumps(json.load(f)["files"])
+
+    def test_batch_of_file_payloads_matches_the_row_by_its_file(self):
+        _, out, _ = self.form_from_files()
+        self.assertIn(f"#{FORM}", self.context(out))
+        self.assertTrue(self.opened())
+        self.assertEqual(self.pre("Bash", {"command": "aidlc engine orchestrate next"})[0], 2)
+
+    def test_an_absolute_file_path_matches(self):
+        self.form_from_files(file_value=self.file)
+        self.assertTrue(self.opened())
+
+    def test_a_row_for_another_file_does_not_open_this_one(self):
+        self.form_from_files(file_value="aidlc/spaces/default/other-questions.md")
+        self.assertFalse(self.opened())
+
+    def test_an_unreadable_payload_falls_back_to_the_doc_id(self):
+        self.form_from_files(form_json=False)
+        self.assertTrue(self.opened())
+
+    def test_a_single_set_counts(self):
+        self.form_from_files(action="set")
+        self.assertTrue(self.opened())
+
+    def test_link_then_completes_the_stop(self):
+        self.form_from_files()
+        self.say(f"{URL}#{FORM}")
         self.assertEqual(self.stop(), {})
 
 

@@ -137,6 +137,41 @@ def link_in_transcript(path, form_id, start):
     return False
 
 
+def payload(w):
+    """A write's document: its inline `data`, else the JSON in its `file_path`; None when that cannot be read."""
+    if isinstance(w.get("data"), dict):
+        return w["data"]
+    path = w.get("file_path")
+    if path:
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return None
+    return {}
+
+
+def form_rows(ti):
+    """[(file the row names or None, form id, payload readable)] of the `forms` rows a `set`/`update`/`batch` writes;
+    None when the call has no structured write of a `forms` row."""
+    writes = ti.get("writes") if ti.get("action") == "batch" else [ti]
+    found = []
+    for w in writes if isinstance(writes, list) else []:
+        if not isinstance(w, dict) or w.get("collection") != "forms" or not w.get("doc_id") or w.get("op", w.get("action")) == "delete":
+            continue
+        data = payload(w)
+        file = data.get("file") if isinstance(data, dict) else None
+        found.append((str(file) if file else None, str(w["doc_id"]), data is not None))
+    return found or None
+
+
+def same_file(project, form_file, rel, entry):
+    """Whether the form row's `file` is the pending file: relative to the project or absolute."""
+    given = os.path.abspath(form_file if os.path.isabs(form_file) else os.path.join(project, form_file))
+    return given == os.path.abspath(entry.get("abs") or os.path.join(project, rel)) or form_file.replace(os.sep, "/") == rel.replace(os.sep, "/")
+
+
 def transcript_lines(path):
     try:
         with open(path, encoding="utf-8") as f:
@@ -214,18 +249,25 @@ def post(event, project):
         if text and kind != "never":
             notes.append(text)
     elif tool == "ArtifactData":
-        text = json.dumps(ti)
-        if ti.get("action") in ("get", "list", "query", "delete") or "forms/" not in text:
+        if ti.get("action") in ("get", "list", "query", "delete"):
             return
-        for rel, entry in state["files"].items():
-            if entry.get("formId") or rel not in text:
-                continue
-            found = re.search(r"forms/([a-z0-9._-]+)", text)
-            if not found:
-                continue
-            entry["formId"] = found.group(1)
-            entry["transcriptLine"] = transcript_lines(event.get("transcript_path"))
-            notes.append(next_step("form", rel, entry))
+        rows = form_rows(ti)
+        if rows is None:  # no structured write of a form row: look for one in the call's text
+            text = json.dumps(ti)
+            rows = [(None, m, True) for m in re.findall(r"forms/([a-z0-9._-]+)", text)[:1]] if "forms/" in text else []
+            by_text = text
+        else:
+            by_text = ""
+        for form_file, form_id, readable in rows:
+            todo = [(rel, e) for rel, e in state["files"].items() if not e.get("formId")]
+            hit = [(rel, e) for rel, e in todo if (form_file is not None and same_file(project, form_file, rel, e))
+                   or (form_file is None and readable and rel in by_text)]
+            if not hit and not readable and len(todo) == 1:
+                hit = todo  # the payload could not be read: the form is the one pending file's
+            for rel, entry in hit:
+                entry["formId"] = form_id
+                entry["transcriptLine"] = transcript_lines(event.get("transcript_path"))
+                notes.append(next_step("form", rel, entry))
         pf.save_session(sid, state)
     elif tool == "AskUserQuestion":
         if not str((ti.get("metadata") or {}).get("source", "")).startswith("question-forms:"):

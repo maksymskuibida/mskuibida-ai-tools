@@ -28,7 +28,7 @@ never read or write it; the `question_guard.py` hook tells you the next step aft
   plugin stays out of the way.
 
 What the hooks refuse, so you don't run into it: ending the turn until the dialog is answered, or until the file's
-`forms/<id>` row was written by `ArtifactData` (inline `data`, naming the file path) and a message of yours carries
+`forms/<id>` row (whose `file` is the questions file) was written by `ArtifactData`, from `data` or a `file_path` and a message of yours carries
 `<artifact url>#<id>`; an `AskUserQuestion` with that link inside it (send the link in a message of its own, **before**
 the ask, and write nothing after an ask); `aidlc engine orchestrate next|continue|report` for a stage whose form was
 opened while its file still has empty `[Answer]:` tags; recording the preference from Bash or writing its files by
