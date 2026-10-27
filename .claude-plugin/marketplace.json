@@ -40,7 +40,7 @@
       "name": "question-forms",
       "source": "./plugins/question-forms",
       "description": "Every AI-DLC questions file becomes a form in one private artifact: the agent writes the questions as rows, you answer in the page, and the agent copies your answers word for word into the file's [Answer]: tags. Also renders text-only questions and board forms that sort cards into boxes.",
-      "version": "1.5.0"
+      "version": "1.6.0"
     },
     {
       "name": "story-points",
