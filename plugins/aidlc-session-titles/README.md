@@ -35,6 +35,17 @@ the session's state per Unit, so it is asked once; with no prompt yet nothing is
 answer (no `claude` on the path, a timeout, an unreadable reply) the session counts as a Unit session and is asked
 again after 10 minutes. `AIDLC_SESSION_TITLES_JUDGE_CMD` replaces the command (it reads the prompt on stdin).
 
+## Asking instead of guessing
+
+A Construction session on any stage but Build and Test and CI Pipeline, with no Unit claimed, outside the main
+checkout on its main branch (a linked worktree, or any other branch), cannot be told apart from a Unit checkout. The
+hook tells the assistant — once per folder, on the next prompt or tool call — to ask the developer with
+`AskUserQuestion` (`metadata.source` `aidlc-session-titles:checkout`): **Unit checkout** or **Something else**.
+Until it is answered the title stays as it is. *Unit checkout* names the session by its Unit (the directive's unit,
+else `Active Unit`; with neither, `Construction — <stage>`); *Something else* leaves the title alone. In the main
+checkout on main the title is just `Construction`, and a claimed checkout is settled by the judge above, not by a
+question.
+
 ## When a session counts
 
 Only sessions that run the workflow are renamed: once a session runs an `aidlc engine|unit|--claim` command,

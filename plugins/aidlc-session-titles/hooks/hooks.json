@@ -24,7 +24,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash|Skill|mcp__ccd_session_mgmt__set_session_title",
+        "matcher": "Bash|Skill|AskUserQuestion|mcp__ccd_session_mgmt__set_session_title",
         "hooks": [
           {
             "type": "command",

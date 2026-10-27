@@ -58,6 +58,8 @@ PER_UNIT_STAGES = ("functional-design", "nfr-requirements", "nfr-design", "infra
 # Construction stages that keep their name in the title outside a Unit's checkout; every other Construction stage is
 # titled just `Construction` there.
 NAMED_CONSTRUCTION_STAGES = ("build-and-test", "ci-pipeline")
+CHECKOUT_SOURCE = "aidlc-session-titles:checkout"  # metadata.source of the question asked about a checkout
+CHECKOUT_UNIT, CHECKOUT_OTHER = "Unit checkout", "Something else"  # its two option labels
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 UNIT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 SPACE_NAME = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -84,9 +86,10 @@ def blank():
     """`aidlc`: the session runs the workflow. `emitted`: the title last handed to the harness. `applied`: the title
     the desktop app last confirmed. `asked`, `declined`, `blocked`: the title the assistant was last told to set,
     refused, or was stopped for. `judged`: the Haiku verdict on whether the session is a Unit session,
-    {"unit", "verdict" (true, false, or null when the judge could not answer), "at"}."""
+    {"unit", "verdict" (true, false, or null when the judge could not answer), "at"}. `checkouts`: per project folder,
+    "asked" once the developer was asked whether it is a Unit checkout, then their answer, "unit" or "other"."""
     return {"aidlc": False, "emitted": None, "applied": None, "asked": None, "declined": None, "blocked": None,
-            "judged": None, "updated": time.time()}
+            "judged": None, "checkouts": {}, "updated": time.time()}
 
 
 def load(event):
@@ -105,6 +108,9 @@ def load(event):
         if isinstance(judged, dict) and isinstance(judged.get("unit"), str) and isinstance(judged.get("at"), (int, float)):
             state["judged"] = {"unit": judged["unit"], "verdict": judged.get("verdict") if isinstance(
                 judged.get("verdict"), bool) else None, "at": judged["at"]}
+        checkouts = data.get("checkouts")
+        if isinstance(checkouts, dict):
+            state["checkouts"] = {k: v for k, v in checkouts.items() if v in ("asked", "unit", "other")}
     return state
 
 
@@ -372,15 +378,6 @@ def user_prompts(event, limit=4, width=600):
     return prompts
 
 
-def branch_of(project):
-    try:
-        done = subprocess.run(["git", "-C", project, "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True,
-                              text=True, timeout=5)
-        return done.stdout.strip() if done.returncode == 0 else ""
-    except (OSError, subprocess.SubprocessError):
-        return ""
-
-
 def judge_prompt(project, unit, stage, prompts):
     shown = "\n".join(f"{n}. {text}" for n, text in enumerate(prompts, 1))
     return (
@@ -391,7 +388,7 @@ def judge_prompt(project, unit, stage, prompts):
         "commands for it.\n"
         "NOT A UNIT SESSION: a session that was merely started from the Unit's branch or checkout to change something "
         "else - the workspace, tooling, plugins, config, CI, docs or another project - and does not advance the Unit.\n\n"
-        f"Checkout: {project}\nBranch: {branch_of(project) or 'unknown'}\nClaimed Unit: {unit}\nWorkflow stage: {stage}\n"
+        f"Checkout: {project}\nBranch: {git_out(project, 'rev-parse', '--abbrev-ref', 'HEAD') or 'unknown'}\nClaimed Unit: {unit}\nWorkflow stage: {stage}\n"
         f"The session's first prompts:\n{shown}\n\n"
         "If the prompts are only a bare /aidlc command or say nothing against the Unit, it is a Unit session.\n"
         'Reply with one line of JSON and nothing else: {"unit_session": true|false, "reason": "<short>"}')
@@ -434,39 +431,96 @@ def is_unit_session(event, state, project, unit, stage):
     return verdict is not False
 
 
+def git_out(project, *args):
+    try:
+        done = subprocess.run(["git", "-C", project, *args], capture_output=True, text=True, timeout=5)
+        return done.stdout.strip() if done.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def main_checkout_on_main(project):
+    """The main checkout of a repository on its main branch, or a folder that is not a git checkout at all."""
+    git_dir, common_dir = git_out(project, "rev-parse", "--git-dir"), git_out(project, "rev-parse", "--git-common-dir")
+    if not git_dir:
+        return True
+    if os.path.realpath(os.path.join(project, git_dir)) != os.path.realpath(os.path.join(project, common_dir)):
+        return False  # a linked worktree
+    default = git_out(project, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").split("/", 1)[-1]
+    return git_out(project, "rev-parse", "--abbrev-ref", "HEAD") in {"main", "master", default}
+
+
+def answered(response):
+    """Which option the developer picked in the checkout question: CHECKOUT_UNIT, CHECKOUT_OTHER, or None."""
+    answers = response.get("answers") if isinstance(response, dict) else None
+    text = " ".join(str(v) for v in answers.values()) if isinstance(answers, dict) else (
+        response if isinstance(response, str) else json.dumps(response, ensure_ascii=False))
+    for label in (CHECKOUT_UNIT, CHECKOUT_OTHER):
+        if label in text:
+            return label
+    return None
+
+
 def expected_title(event, state, project):
-    """The title the session should carry, or None when the project does not say what it is on or the session is
-    not a Unit session in a Unit's checkout."""
+    """(title, pending): the title the session should carry, or None when the project does not say what it is on or
+    the session is not working on a Unit; `pending` is set while the developer should be asked whether a Construction
+    session outside the main checkout is a Unit checkout."""
     selected = selected_intent(project, str(event.get("session_id") or ""))
     if not selected:
-        return None
+        return None, None
     space, intent = selected
     intent_dir = os.path.dirname(state_file(project, space, intent))
     text = read_text(state_file(project, space, intent)) or ""
-    stage, _ = step(intent_dir, text)
+    stage, directive_unit = step(intent_dir, text)
     if not stage:
-        return None
+        return None, None
     name, phase = stage_graph(project).get(stage, ("", ""))
     stage_name = name or titled(stage)
     unit = claimed_unit(project, space, intent_uuid(project, space, intent))
     if unit and stage in PER_UNIT_STAGES:
         session = is_unit_session(event, state, project, unit, stage)
-        if session is None or session is False:
-            return None
-        return unit + SEPARATOR + stage_name
+        return (unit + SEPARATOR + stage_name if session else None), None
     phase = phase or phase_in_state(text, stage)
     if not phase:
-        return None
-    if phase.lower() == "construction" and not unit and stage not in NAMED_CONSTRUCTION_STAGES:
-        return titled(phase)  # not in a Unit's checkout: the phase alone
-    return titled(phase) + SEPARATOR + stage_name
+        return None, None
+    full = titled(phase) + SEPARATOR + stage_name
+    if phase.lower() != "construction" or unit or stage in NAMED_CONSTRUCTION_STAGES:
+        return full, None
+    if main_checkout_on_main(project):
+        return titled(phase), None  # not in a Unit's checkout: the phase alone
+    answer = state["checkouts"].get(project)
+    if answer == "other":
+        return None, None
+    if answer == "unit":
+        active = field(text, "Active Unit")
+        candidate = directive_unit or (active if UNIT_NAME.match(active) else "")
+        return (candidate + SEPARATOR + stage_name if candidate and stage in PER_UNIT_STAGES else full), None
+    pending = {"project": project, "stage": stage_name, "unit": directive_unit or field(text, "Active Unit")}
+    return None, (pending if answer is None else None)
 
 
 def title_for(event, state):
     for project in projects(event):
-        title = expected_title(event, state, project)
+        title, _ = expected_title(event, state, project)
         if title:
             return title
+    return None
+
+
+def checkout_question(event, state):
+    """The instruction to ask whether the session is a Unit checkout, once per project folder; marks it asked."""
+    for project in projects(event):
+        _, pending = expected_title(event, state, project)
+        if pending:
+            state["checkouts"][project] = "asked"
+            guess = f' (likely "{pending["unit"]}")' if pending["unit"] else ""
+            return (
+                f'this session is on Construction ({pending["stage"]}) in {project}, branch '
+                f'{git_out(project, "rev-parse", "--abbrev-ref", "HEAD") or "unknown"}, which is not the main '
+                f'checkout on its main branch, so its title cannot be told. Ask the developer now, before anything '
+                f'else, with one AskUserQuestion whose metadata is {{"source": "{CHECKOUT_SOURCE}"}}: '
+                f'"Is this session a Unit\'s checkout, or something else?" Options: "{CHECKOUT_UNIT}" (named after '
+                f'its Unit{guess}) and "{CHECKOUT_OTHER}" (the session title stays as it is). Do not guess the answer.')
     return None
 
 
@@ -529,12 +583,16 @@ def on_prompt(event, state):
             return False
         state["aidlc"] = changed = True
     title = title_for(event, state)
+    ask = checkout_question(event, state)
     if not title or title == state["emitted"]:
+        title = None
+    if not title and not ask:
         return changed
-    state["emitted"] = title
-    if not in_desktop():
-        state["applied"] = title  # outside the desktop app the harness title is the only one
-    emit(event["hook_event_name"], title=title)
+    if title:
+        state["emitted"] = title
+        if not in_desktop():
+            state["applied"] = title  # outside the desktop app the harness title is the only one
+    emit(event["hook_event_name"], title=title, context=ask)
     return True
 
 
@@ -550,16 +608,34 @@ def on_tool(event, state):
         else:
             state["applied"] = title
         return True
+    if tool == "AskUserQuestion":
+        ti = event.get("tool_input") or {}
+        meta = ti.get("metadata") if isinstance(ti, dict) else None
+        if not isinstance(meta, dict) or meta.get("source") != CHECKOUT_SOURCE:
+            return False
+        pick = answered(event.get("tool_response"))
+        if pick is None:
+            return False
+        for project in projects(event):
+            if state["checkouts"].get(project) == "asked":
+                state["checkouts"][project] = "unit" if pick == CHECKOUT_UNIT else "other"
+        return True
     changed = False
     if not state["aidlc"] and (shows_aidlc(event) or bound_here(event)):
         state["aidlc"] = changed = True
-    if not state["aidlc"] or not in_desktop():
+    if not state["aidlc"]:
         return changed
+    parts = []
+    ask = checkout_question(event, state)
+    if ask:
+        parts.append(ask)
     title = title_for(event, state)
-    if not title or title in (state["applied"], state["asked"], state["declined"]):
+    if in_desktop() and title and title not in (state["applied"], state["asked"], state["declined"]):
+        state["asked"] = title
+        parts.append(rename_instruction(title))
+    if not parts:
         return changed
-    state["asked"] = title
-    emit(event["hook_event_name"], context=rename_instruction(title))
+    emit(event["hook_event_name"], context=" Also: ".join(parts))
     return True
 
 
@@ -590,8 +666,8 @@ def main():
     try:
         with state_lock(event):
             state = load(event)
-            before = json.dumps(state["judged"])
-            if handler(event, state) | (json.dumps(state["judged"]) != before):
+            before = json.dumps([state["judged"], state["checkouts"]])
+            if handler(event, state) | (json.dumps([state["judged"], state["checkouts"]]) != before):
                 save(event, state)
     except Exception:  # never break the call this hook sits beside
         return 0

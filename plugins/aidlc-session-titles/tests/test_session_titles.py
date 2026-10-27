@@ -294,6 +294,103 @@ class JudgeTests(Base):
         self.assertEqual((done.returncode, done.stdout), (0, ""))
 
 
+class CheckoutTests(Base):
+    """A Construction session that is not in the main checkout on main is asked about, not guessed."""
+
+    SOURCE = "aidlc-session-titles:checkout"
+
+    def setUp(self):
+        super().setUp()
+        self.bind()
+        self.set_state("functional-design")
+        self.git("init", "-q", "-b", "main")
+        self.git("commit", "-q", "--allow-empty", "-m", "init")
+
+    def git(self, *args, cwd=None):
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=cwd or self.project,
+                       check=True, capture_output=True)
+
+    def answer(self, label, source=None):
+        return self.run_hook({"hook_event_name": "PostToolUse", "tool_name": "AskUserQuestion",
+                              "tool_input": {"metadata": {"source": source or self.SOURCE}, "questions": []},
+                              "tool_response": {"answers": {"Is this session a Unit's checkout, or something else?": label}}})
+
+    def test_main_checkout_on_main_is_just_construction(self):
+        out = self.prompt()
+        self.assertEqual(self.title_of(out), "Construction")
+        self.assertNotIn("AskUserQuestion", self.context_of(out))
+
+    def test_other_branch_asks_and_sets_no_title(self):
+        self.git("checkout", "-q", "-b", "feat/workspace-tweak")
+        out = self.prompt()
+        self.assertIsNone(self.title_of(out))
+        self.assertIn("AskUserQuestion", self.context_of(out))
+        self.assertIn(self.SOURCE, self.context_of(out))
+        self.assertIn("Unit checkout", self.context_of(out))
+        self.assertIsNone(self.prompt())  # asked once
+
+    def test_linked_worktree_asks_even_on_a_main_named_branch(self):
+        wt = os.path.join(self.root, "wt")
+        self.git("worktree", "add", "-q", "-b", "main-copy", wt)
+        self.git("checkout", "-q", "--detach")  # the main checkout leaves main, so the branch name is free to reuse
+        os.symlink(os.path.join(self.project, "aidlc"), os.path.join(wt, "aidlc"))
+        event = {"hook_event_name": "UserPromptSubmit", "prompt": "go", "cwd": wt}
+        self.assertIn("AskUserQuestion", self.context_of(self.run_hook(event)))
+
+    def test_build_and_test_and_ci_never_ask(self):
+        self.git("checkout", "-q", "-b", "feat/x")
+        for stage, title in (("build-and-test", "Construction — Build and Test"), ("ci-pipeline", "Construction — CI Pipeline")):
+            self.set_state(stage)
+            out = self.prompt()
+            self.assertEqual(self.title_of(out), title)
+            self.assertNotIn("AskUserQuestion", self.context_of(out))
+
+    def test_inception_never_asks(self):
+        self.git("checkout", "-q", "-b", "feat/x")
+        self.set_state("requirements-analysis")
+        out = self.prompt()
+        self.assertEqual(self.title_of(out), "Inception — Requirements Analysis")
+        self.assertNotIn("AskUserQuestion", self.context_of(out))
+
+    def test_claimed_checkout_is_not_asked(self):
+        self.git("checkout", "-q", "-b", "claim/u4")
+        self.claim("u4-day-navigation")
+        out = self.prompt()
+        self.assertEqual(self.title_of(out), "u4-day-navigation — Functional Design")
+        self.assertNotIn("AskUserQuestion", self.context_of(out))
+
+    def test_unit_checkout_answer_names_the_unit(self):
+        self.git("checkout", "-q", "-b", "feat/x")
+        self.set_directive("functional-design", unit="u3-notes")
+        self.prompt()
+        self.answer("Unit checkout")
+        self.assertEqual(self.title_of(self.prompt("next")), "u3-notes — Functional Design")
+
+    def test_unit_checkout_answer_without_a_unit_names_the_stage(self):
+        self.git("checkout", "-q", "-b", "feat/x")
+        self.prompt()
+        self.answer("Unit checkout")
+        self.assertEqual(self.title_of(self.prompt("next")), "Construction — Functional Design")
+
+    def test_something_else_keeps_the_title(self):
+        self.git("checkout", "-q", "-b", "feat/x")
+        self.prompt()
+        self.answer("Something else")
+        out = self.prompt("next")
+        self.assertIsNone(out)
+        self.assertIsNone(self.bash())
+
+    def test_answer_to_another_question_is_ignored(self):
+        self.git("checkout", "-q", "-b", "feat/x")
+        self.prompt()
+        self.answer("Unit checkout", source="something-else")
+        self.assertIsNone(self.prompt("next"))
+
+    def test_tool_call_also_asks(self):
+        self.git("checkout", "-q", "-b", "feat/x")
+        self.assertIn("AskUserQuestion", self.context_of(self.bash()))
+
+
 class SessionTests(Base):
     """When the hook acts, and how often."""
 
