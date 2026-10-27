@@ -113,6 +113,79 @@ class TestPlanPage(UnitCase):
         self.assertIn("message of its own", err)
 
 
+class TestPlanAskOfTheEngine(UnitCase):
+    """The engine asks for the plan approval itself (`orchestrate next` returns an `ask` with `ask_type:
+    "plan-approval"`), and the agent may give the question any header: the u5-commenting session asked under "Plan" and
+    never sent the plan page's link."""
+
+    def ask_plan(self):
+        with open(os.path.join(self.record, ".aidlc-engine", "active-directive.json"), "w", encoding="utf-8") as f:
+            json.dump({"kind": "ask", "ask_type": "plan-approval", "stage": "code-generation", "unit": UNIT,
+                       "question": f"Approve the code plan for {UNIT}?"}, f)
+
+    def plan_question(self, header="Plan"):
+        return self.pre("AskUserQuestion", gate_question(f"Approve the code plan for {UNIT}?", header=header,
+                                                         labels=("Approve Plan", "Request Changes", "I'll edit the files")))
+
+    def test_the_engines_ask_opens_the_plan_gate_under_any_header(self):
+        self.ask_plan()
+        code, _out, err = self.plan_question()
+        self.assertEqual(code, 2)
+        self.assertIn("plan page", err)
+        self.write_bundle(self.plan_id)
+        code, _out, err = self.plan_question()
+        self.assertEqual(code, 2)
+        self.assertIn(f"{URL}#{self.plan_id}", err)
+        self.said(f"**Read:** {URL}#{self.plan_id}")
+        code, _out, err = self.plan_question()
+        self.assertEqual(code, 0, err)
+
+    def test_the_next_call_that_returns_the_ask_says_to_publish_the_plan_page(self):
+        self.ask_plan()
+        code, out, err = self.post("Bash", {"command": "aidlc engine orchestrate next"}, {"stdout": '{"kind":"ask"}'})
+        self.assertEqual(code, 0, err)
+        said = self.context(out)
+        self.assertIn("draft --page plan --unit u2-pickup-slots", said)
+        self.assertEqual(self.state_of()["pending"]["kind"], "plan")
+
+    def test_the_bundle_write_is_answered_once_with_the_link_to_send(self):
+        self.ask_plan()
+        _code, out = self.write_bundle(self.plan_id)
+        said = self.context(out)
+        self.assertIn(f"{URL}#{self.plan_id}", said)
+
+    def test_request_changes_reopens_the_plan_for_its_revision(self):
+        self.ask_plan()
+        self.write_bundle(self.plan_id)
+        self.said(f"**Read:** {URL}#{self.plan_id}")
+        self.assertEqual(self.plan_question()[0], 0)
+        self.post("Bash", {"command": 'aidlc engine log answer --stage code-generation --checkpoint plan-approval --details "Request Changes"'},
+                  {"stdout": "{}"})
+        self.assertIsNone(self.state_of()["pending"])
+        os.utime(os.path.join(self.record, ".aidlc-engine", "active-directive.json"))  # the revised plan's ask
+        later = time_after(self.state_of()["published"])
+        os.utime(os.path.join(self.record, ".aidlc-engine", "active-directive.json"), (later, later))
+        code, _out, err = self.plan_question()
+        self.assertEqual(code, 2)
+        self.assertIn("plan page", err)
+
+    def test_an_approve_plan_question_with_no_gate_open_is_left_alone(self):
+        self.assertEqual(self.plan_question()[0], 0)
+
+
+class TestRefusedReport(UnitCase):
+    def test_a_report_the_engine_refused_opens_nothing(self):
+        refused = '{"message":"Unit-end gate for \\"u2\\" must be reported against \\"code-generation\\".","kind":"error"}'
+        code, _out, err = self.post("Bash", {"command": f"aidlc engine orchestrate report --stage functional-design --unit {UNIT} --result awaiting-approval"},
+                                    {"stdout": refused})
+        self.assertEqual(code, 0, err)
+        self.assertIsNone((self.state_of() or {}).get("pending"))
+
+
+def time_after(published):
+    return max([p.get("at", 0) for p in published.values()] + [0]) + 5
+
+
 class TestUnitEndPage(UnitCase):
     def test_the_unit_end_gate_asks_for_the_unit_end_bundle(self):
         said = self.context(self.open_end())
