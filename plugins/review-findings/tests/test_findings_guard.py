@@ -1,6 +1,7 @@
 """Tests for hooks/findings_guard.py, run as the harness runs it: a subprocess fed one event on stdin.
 Run: python3 -m unittest discover -s plugins/review-findings/tests"""
 
+import datetime
 import json
 import os
 import shutil
@@ -64,12 +65,25 @@ class Harness:
             shutil.copytree(os.path.join(FIXTURES, "project"), self.project)
         else:
             os.makedirs(self.project)
+        self.transcript = None  # set to a path to hand the hook a session transcript
+
+    def say(self, text, block="text", sidechain=False):
+        """Append one assistant line to the session transcript, shaped as Claude Code writes it."""
+        if self.transcript is None:
+            self.transcript = os.path.join(self.tmp.name, "transcript.jsonl")
+        content = [{"type": "text", "text": text}] if block == "text" else [{"type": block, "thinking": text}]
+        stamp = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        with open(self.transcript, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"type": "assistant", "isSidechain": sidechain, "timestamp": stamp,
+                                "message": {"role": "assistant", "content": content}}) + "\n")
 
     def close(self):
         self.tmp.cleanup()
 
     def run(self, event_name, tool=None, tool_input=None, response=None, session="s1", raw=None):
         event = {"hook_event_name": event_name, "session_id": session, "cwd": self.project}
+        if self.transcript:
+            event["transcript_path"] = self.transcript
         if tool:
             event.update(tool_name=tool, tool_input=tool_input or {})
         if response is not None:
@@ -287,6 +301,41 @@ class Triage(GuardCase):
     def test_a_pull_request_gate_is_not_this_gate(self):
         self.h.triage("Fix")
         self.assertAllowed(self.h.pre("AskUserQuestion", gate_input("Merge #12 now?")))
+
+
+class SummaryFirst(GuardCase):
+    """The u31 NFR Design session (2026-10-27) asked the triage question with no summary before it; the developer
+    saw only the question. The question now waits for a message that shows the summary."""
+
+    def setUp(self):
+        super().setUp()
+        self.h.say("Recording the review verdict.")
+        self.h.brief()
+
+    def summary_text(self):
+        file = os.path.join(self.h.state, "s1.findings")
+        done = subprocess.run([sys.executable, FINDINGS, "summary", "--findings", file], capture_output=True, text=True,
+                              env=dict(os.environ, REVIEW_FINDINGS_DIR=self.h.state), check=True)
+        return done.stdout
+
+    def test_the_question_waits_for_the_summary(self):
+        self.assertRefused(self.h.pre("AskUserQuestion", triage_input()), "summary --findings", "**Suggested:**")
+
+    def test_thinking_and_a_sidechain_do_not_count(self):
+        text = self.summary_text()
+        self.h.say(text, block="thinking")
+        self.h.say(text, sidechain=True)
+        self.assertRefused(self.h.pre("AskUserQuestion", triage_input()))
+
+    def test_a_summary_without_every_suggestion_does_not_count(self):
+        self.h.say("**Review findings — Domain Design:** 2 open, 1 blocking")
+        self.assertRefused(self.h.pre("AskUserQuestion", triage_input()))
+
+    def test_the_summary_in_a_message_lets_the_question_through(self):
+        text = self.summary_text()
+        self.assertIn("**Suggested:**", text)
+        self.h.say(text)
+        self.assertAllowed(self.h.pre("AskUserQuestion", triage_input()))
 
 
 class Reports(GuardCase):

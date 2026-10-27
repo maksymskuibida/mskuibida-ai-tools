@@ -67,6 +67,8 @@ with a line becomes the file's name.
 
 While findings are waiting for the first answer:
 
+- the triage question itself, until a message of the agent shows the summary (the review named and a
+  **Suggested:** action for every open finding), so you read the findings before you are asked;
 - any other question, the Approval gate included;
 - `aidlc engine orchestrate report --result approved|rejected`;
 - code review only: edits (a file outside the project is fine) and `git commit|push`.
