@@ -161,3 +161,13 @@ is always given in chat.
 - A field that renderers may ignore is a minor change: add it to the schema, the validator and this file.
 - Anything that changes what an existing field means, or that makes an old bundle invalid, is a new `schema` value
   (`aidlc-gate-bundle/2`). Renderers refuse a value they don't know.
+
+## The Build and Test field of a per-stage gate row
+
+Not part of the bundle above: the per-stage `gates/<id>` row for the Build and Test stage may carry `buildTest`, the
+stage's tables read into data (commands and their results, line coverage against its floor, the Target Verification
+Matrix, the evidence-code legend). `gate_bundle.py` writes it; `approval-gate.html` shows a results strip, a
+filterable target matrix and a decision card per Not Met or Unverified target when it is there, and the stage as any
+other when it is not. Its shape is [`build-test.schema.json`](build-test.schema.json); check a row with
+`python3 validate_bundle.py --build-test <gate.json>`. The developer's picks come back in the row's `targetPicks`
+(`{<target id>: {pick: "accept"|"followup"|"fix", note?}}`), written by the page, never by the agent.

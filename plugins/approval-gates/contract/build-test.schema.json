@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/maksymskuibida/mskuibida-ai-tools/plugins/approval-gates/contract/build-test.schema.json",
+  "title": "Build and Test results of a gate row",
+  "description": "The `buildTest` field of a per-stage `gates/<id>` row for the Build and Test stage, written by gate_bundle.py from the stage's tables. The page (approval-gate.html) shows a results strip, a filterable target matrix and a decision card per Not Met or Unverified target when it is present, and the stage as any other when it is not. Every part is optional; parts the stage's files do not hold are left out.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "commands": { "type": "array", "items": { "$ref": "#/$defs/command" }, "description": "Every `Check | Command | Result` row of the test results." },
+    "coverage": { "type": "array", "items": { "$ref": "#/$defs/coverage" }, "description": "Line coverage a result names, with the floor when it names one." },
+    "counts": { "$ref": "#/$defs/counts" },
+    "targets": { "type": "array", "items": { "$ref": "#/$defs/target" }, "description": "The Target Verification Matrix, one entry per row, in file order." },
+    "evidence": { "type": "object", "propertyNames": { "pattern": "^[A-Z]{1,4}$" }, "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 300 }, "description": "The legend of evidence codes: code to what it stands for." }
+  },
+  "$defs": {
+    "command": {
+      "type": "object", "additionalProperties": false, "required": ["ok"],
+      "properties": {
+        "check": { "type": "string", "minLength": 1 },
+        "command": { "type": "string", "minLength": 1 },
+        "result": { "type": "string", "maxLength": 300 },
+        "ok": { "type": "boolean", "description": "False when the result reports a failure, an error or a timeout." }
+      }
+    },
+    "coverage": {
+      "type": "object", "additionalProperties": false, "required": ["pct"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "pct": { "type": "number", "minimum": 0, "maximum": 100 },
+        "floor": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "counts": {
+      "type": "object", "additionalProperties": false, "required": ["total"],
+      "properties": {
+        "met": { "type": "integer", "minimum": 0 },
+        "notMet": { "type": "integer", "minimum": 0 },
+        "unverified": { "type": "integer", "minimum": 0 },
+        "na": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "target": {
+      "type": "object", "additionalProperties": false, "required": ["id", "verdict"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "unit": { "type": "string", "minLength": 1, "description": "The Unit of the `###` heading the table sits under (U1), else the heading." },
+        "source": { "type": "string", "maxLength": 600 },
+        "expected": { "type": "string", "maxLength": 600 },
+        "actual": { "type": "string", "maxLength": 600 },
+        "evidence": { "type": "string", "maxLength": 600, "description": "Evidence codes from the legend, then the test names." },
+        "owner": { "type": "string", "maxLength": 600, "description": "The owning stage." },
+        "verdict": { "type": "string", "minLength": 1, "description": "Met, Not Met, Unverified or N/A; anything else is shown as written." }
+      }
+    }
+  }
+}

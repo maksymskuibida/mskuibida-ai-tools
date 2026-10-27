@@ -49,6 +49,13 @@
       a block's read dot. Block keys: "summary", "review", or a document key. A mark holds the hash of the
       text read, so on a new round only the blocks whose text changed turn unread.
 
+    gates/<id>.targetPicks[<target id>] = {pick: "accept"|"followup"|"fix", note?}   Build and Test only: the developer's
+      decision on a Not Met or Unverified target, saved with the same debounce as the notes.
+  Build and Test: when gates/<id> carries `buildTest` (gate_bundle.py writes it for the build-and-test stage; shape in
+  contract/build-test.schema.json: commands, coverage, counts, targets, evidence), the page adds a results strip, a
+  filterable target matrix, a decision card per Not Met or Unverified target, and folds the build / integration /
+  performance / security instruction files into a closed Reference group. Without it every stage looks as before.
+
   What the page reads besides the gate: the newest earlier gates/<id> row of the same intent, stage and
   Unit, and its documents, to mark the documents and sections that changed since (never written).
 
@@ -613,6 +620,86 @@ figure.screen > details.sub { margin: 0; padding: 4px 12px 6px; border-top: 1px 
   .gwt { grid-template-columns: minmax(0, 1fr); }
   .fact { min-width: 0; flex: 1 1 40%; }
 }
+/* Build and Test (only when the gate row carries buildTest): the results strip, the target matrix, the decision cards,
+   and the Reference group for the instruction files. Same tokens as everything above. */
+.bt-strip { display: grid; grid-template-columns: minmax(120px, auto) minmax(0, 1.1fr) minmax(0, 1.5fr); overflow: hidden; }
+.bts { padding: 14px 18px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.bts + .bts { border-left: 1px solid var(--line); }
+.bts .lbl { font-size: 12px; font-weight: 500; color: var(--muted); }
+.bts .sub { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.big { font-size: 30px; line-height: 1.1; font-weight: 600; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.big small { font-size: 16px; font-weight: 500; color: var(--muted); }
+.big.ok { color: var(--ok-fg); } .big.bad { color: var(--crit-fg); }
+.cov { display: grid; gap: 4px; }
+.covh { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.covh b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.covbar { position: relative; height: 8px; border-radius: 4px; background: var(--line-soft); }
+.covbar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; background: var(--ok-fg); }
+.covbar.low i { background: var(--crit-fg); }
+.covbar u { position: absolute; top: -3px; bottom: -3px; width: 2px; border-radius: 1px; background: var(--fg); text-decoration: none; }
+.vcounts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.vc { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-height: 56px; padding: 8px 10px; border-radius: 8px; border: 1px solid transparent; text-align: left; }
+.vc b { font-size: 20px; line-height: 1.2; font-weight: 600; font-variant-numeric: tabular-nums; }
+.vc span { font-size: 12px; font-weight: 500; }
+.vc:hover { border-color: currentColor; }
+.vc.notmet, .vtag.notmet { background: var(--crit-bg); color: var(--crit-fg); }
+.vc.unverified, .vtag.unverified { background: var(--warn-bg); color: var(--warn-fg); }
+.vc.met, .vtag.met { background: var(--ok-bg); color: var(--ok-fg); }
+.vc.na, .vtag.na, .vtag.other { background: var(--low-bg); color: var(--low-fg); }
+.stack { display: flex; height: 8px; border-radius: 4px; overflow: hidden; gap: 2px; }
+.stack i { display: block; min-width: 3px; }
+.stack i.notmet { background: var(--crit-fg); } .stack i.unverified { background: var(--warn-dot); } .stack i.met { background: var(--ok-fg); } .stack i.na { background: var(--control); }
+.vtag { display: inline-flex; align-items: center; font: 600 11px/1.3 var(--body); padding: 2px 8px; border-radius: 4px; white-space: nowrap; }
+.btool { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 12px 0; }
+.btool input[type="search"] { flex: 1 1 220px; min-width: 0; height: 32px; }
+.bchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.bchip { min-height: 28px; padding: 0 10px; border-radius: 14px; font-size: 12.5px; }
+.bchip[aria-pressed="true"] { background: var(--fg); color: var(--surface); border-color: var(--fg); }
+.bchip .n { font: 12px var(--mono); opacity: .7; margin-left: 5px; }
+.tm { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.tm-head, .tm-line { display: grid; grid-template-columns: minmax(150px, 1.1fr) 96px minmax(0, 2fr) minmax(0, 1.3fr) minmax(0, 1.3fr); gap: 4px 14px; padding: 8px 12px; align-items: start; }
+.tm-head { background: var(--raised); font-size: 12px; font-weight: 500; color: var(--muted); border-bottom: 1px solid var(--line); }
+.tm-row { border-top: 1px solid var(--line-soft); border-left: 3px solid transparent; font-size: 13px; min-width: 0; }
+.tm-head + .tm-row { border-top: 0; }
+.tm-row.notmet { border-left-color: var(--crit-fg); } .tm-row.unverified { border-left-color: var(--warn-dot); }
+.tm-row:hover > .tm-line { background: var(--hover); }
+.tm-line > div { min-width: 0; overflow-wrap: anywhere; color: var(--fg-2); }
+.tm-id { display: flex; align-items: flex-start; gap: 4px; color: var(--fg) !important; }
+.tm-id .mono { padding-top: 5px; }
+.tm-x { flex: none; width: 26px; min-height: 26px; height: 26px; padding: 0; border: 0; background: transparent; color: var(--muted); display: inline-flex; align-items: center; justify-content: center; transition: transform .12s; }
+.tm-x[aria-expanded="true"] { transform: rotate(90deg); }
+.tm-det { padding: 10px 14px 12px 42px; background: var(--raised); border-top: 1px solid var(--line-soft); }
+.tm-det dl { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; font-size: 13px; }
+.tm-det dt { color: var(--muted); } .tm-det dd { margin: 0; overflow-wrap: anywhere; }
+.ecode { font: 600 11.5px var(--mono); padding: 0 4px; border-radius: 3px; background: var(--accent-soft); color: var(--accent); border-bottom: 1px dotted var(--accent); }
+.tm-none { padding: 18px; color: var(--muted); }
+.dsum { margin: 12px 0 0; color: var(--fg-2); }
+.dcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr)); gap: 10px; margin-top: 12px; }
+.dcard { display: grid; gap: 8px; align-content: start; min-width: 0; padding: 12px; border: 1px solid var(--line); border-left-width: 3px; border-radius: 8px; background: var(--surface); }
+.dcard.notmet { border-left-color: var(--crit-fg); } .dcard.unverified { border-left-color: var(--warn-dot); }
+.dcard.chosen { background: var(--accent-tint); }
+.dtop { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.dtop .hint { margin-left: auto; font-size: 12px; }
+.dwhy { margin: 0; font-size: 13px; color: var(--fg-2); display: grid; gap: 3px; overflow-wrap: anywhere; }
+.dwhy b { font-weight: 500; color: var(--muted); margin-right: 6px; }
+.dpick { display: flex; flex-wrap: wrap; gap: 6px; }
+.dpick button { min-height: 32px; border-radius: 16px; }
+.dpick button[aria-checked="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.dfoot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.dfoot .stat { margin-left: auto; font-size: 12px; color: var(--muted); }
+.dfoot .stat.ok { color: var(--ok-fg); } .dfoot .stat.warn { color: var(--crit-fg); }
+.refgrp > .body { display: grid; gap: 12px; padding-left: 12px; }
+@media (max-width: 767px) {
+  .bt-strip { grid-template-columns: minmax(0, 1fr); }
+  .bts + .bts { border-left: 0; border-top: 1px solid var(--line); }
+  .tm-head { display: none; }
+  .tm-line { grid-template-columns: minmax(0, 1fr) auto; }
+  .tm-line > .c-exp, .tm-line > .c-act, .tm-line > .c-ev { grid-column: 1 / -1; }
+  .tm-line > [data-l]::before { content: attr(data-l); display: block; font-size: 11.5px; font-weight: 500; color: var(--muted); }
+  .tm-det { padding-left: 14px; }
+  .refgrp > .body { padding-left: 4px; }
+}
+@media (max-width: 480px) { .vcounts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
 /* aidlc-ids.css:begin */
 /* Shared: the canonical copy is shared/aidlc-ids/aidlc-ids.css; scripts/sync-shared.py copies it into every page.
@@ -674,7 +761,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
 
   let db = null, uid = null, tipOn = null;
   const fresh = () => ({ unsub: [], gate: null, docs: new Map(), docsLoaded: false, notes: {}, dirty: new Set(), noteStat: {}, unsaved: false, saving: false, failed: false,
-    noteTimer: null, painted: "", openNotes: new Set(), railSig: "", mode: {}, refs: new Map(), ids: {}, railOpen: {},
+    noteTimer: null, painted: "", openNotes: new Set(), railSig: "", mode: {}, picks: {}, bt: { v: new Set(), u: new Set(), q: "", rows: new Set() }, refs: new Map(), ids: {}, railOpen: {},
     reads: {}, readKey: "", hashes: {}, filter: "all", prev: null, prevDocs: null, changed: {}, changedSecs: {} });
   const view = Object.assign({ id: "", diagrams: 0 }, fresh());
   const hasMd = () => typeof marked !== "undefined" && typeof DOMPurify !== "undefined";
@@ -861,7 +948,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     el.crumbs.innerHTML = `<a href="#">All gates</a><span aria-hidden="true">/</span><span>${esc(g.intent || "")}</span>${g.phase ? `<span aria-hidden="true">/</span><span>${esc(upper(g.phase))}</span>` : ""}` +
       `<span class="status" tabindex="0" data-tip="The page holds no decision: Claude asks the gate question in chat, and a note you leave here goes with your answer"><i aria-hidden="true"></i>Answer in chat</span>`;
     setStatus(g.project || "");
-    if (!view.unsaved && !view.saving) view.notes = Object.assign({}, g.notes || {});
+    if (!view.unsaved && !view.saving) { view.notes = Object.assign({}, g.notes || {}); view.picks = JSON.parse(JSON.stringify(g.targetPicks || {})); }
     paintAll();
   }
 
@@ -891,20 +978,27 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
   function paintAll() {
     if (!view.gate) return;
     const g = view.gate; const docs = docList();
-    const sig = JSON.stringify([view.id, g.summary, g.brief, g.review, docs.map((d) => [d.key, d.title, d.kind, d.text, !!d.pending, !!d.partial]), isDark(), view.mode, view.changed]);
+    const sig = JSON.stringify([view.id, g.summary, g.brief, g.review, docs.map((d) => [d.key, d.title, d.kind, d.text, !!d.pending, !!d.partial]), g.buildTest || null, isDark(), view.mode, view.changed]);
     if (sig === view.painted) { paintChrome(docs); return; }
     view.painted = sig; view.refs = new Map();
     view.hashes = {}; if (g.summary) view.hashes.summary = hash(g.summary); if (g.brief) view.hashes.review = hash(g.brief);
     docs.forEach((d) => { if (!d.pending) view.hashes[d.key] = hash(d.text); });
+    const B = bt(); if (B && B.targets) { view.hashes["bt-matrix"] = hash(JSON.stringify(B.targets)); if (openTargets(B).length) view.hashes["bt-decide"] = hash(JSON.stringify(openTargets(B))); }
     const frag = [];
+    if (B) frag.push(btStrip(B));
     if (g.summary) frag.push(`<details class="block sum" open id="b-summary" data-block="summary"><summary>${CARET}<h2>Summary</h2><span class="hint wide">what Claude did in this stage</span><span class="end">${rdot("summary")}</span></summary><div class="body md" id="summarymd"></div></details>`);
     if (g.brief) frag.push(briefBlock(g));
+    if (B && B.targets && B.targets.length) { frag.push(btMatrixBlock(B)); frag.push(btDecideBlock(B)); }
     if (!docs.length) frag.push(view.docsLoaded ? '<div class="card0 msg"><b>No documents yet.</b><p>Claude writes them with the gate; they appear here as soon as they land.</p></div>' : '<p class="hint">Loading documents…</p>');
-    docs.forEach((d, i) => frag.push(docBlock(d, i)));
+    const refs = refDocs(docs);
+    docs.forEach((d, i) => { if (!refs.includes(d)) frag.push(docBlock(d, i)); });
+    if (refs.length) frag.push(refGroup(refs));
     el.col.innerHTML = frag.join("") + '<div class="card0 nomatch" id="nomatch" hidden></div>';
     if (g.summary) renderMarkdown($("summarymd"), g.summary);
     if (g.brief) fillBrief(g);
     docs.forEach((d, i) => fillDoc(d, i));
+    btRender(); btDecideCount(); { const q = $("bt-q"); if (q) q.value = view.bt.q; }
+    Object.keys(view.picks).forEach((id) => { const st = view.noteStat["pick:" + id]; if (st) setNoteStat("pick:" + id, st[0], st[1]); });
     openAll();
     docs.forEach((d) => { const b = $("d-" + d.key); if (b && d.path) regRef("file:" + d.path.split("/").pop().toLowerCase(), b, d.title || d.key, d.path.split("/").pop()); });
     view.ids = idMap(docs);
@@ -937,6 +1031,12 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
       out.push({ key: "review", go: "b-brief", short: "Review", count: b ? (open.length ? open.length + " open" : "settled") : "", extra: hi ? `<span class="tag" style="background:var(--crit-bg);color:var(--crit-fg)">${hi} blocking</span>` : "",
         tip: b ? (open.length ? `${plural(open.length, "finding")} the reviewer still wants fixed${hi ? `, ${hi} of them blocking` : ""}` : "The reviewer left no open finding") : "The review brief" });
     }
+    const B = bt();
+    if (B && B.targets && B.targets.length) {
+      out.push({ key: "bt-matrix", go: "b-bt-matrix", short: "Matrix", count: String(B.targets.length), tip: "The target matrix: every quality target and how it ended" });
+      const open = openTargets(B);
+      if (open.length) out.push({ key: "bt-decide", go: "b-bt-decide", short: "Decisions", count: pickedCount(B) + "/" + open.length, tip: "A decision card for each target that is not met or unverified" });
+    }
     docs.forEach((d) => {
       const shown = $("d-" + d.key); const title = ((shown && shown.querySelector("summary h2")) || {}).textContent || d.title || d.key;
       const secs = shown ? shown.querySelectorAll("details.sec").length : 0;
@@ -962,6 +1062,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     /* header facts */
     const b = g.brief ? parseBrief(g.brief) : null; const open = b ? b.rows.filter((x) => isOpenStatus(x.status)).length : null;
     el.hfacts.innerHTML = `<div class="fact"><span>Round</span><b class="num">${esc(g.round || 1)}</b>${g.why ? `<span>${esc(WHY[g.why] || g.why)}</span>` : ""}</div><div class="fact"><span>Documents</span><b class="num">${docs.length}</b></div>` +
+      (bt() && openTargets(bt()).length ? `<div class="fact"><span>Decisions</span><b class="num">${pickedCount(bt())}/${openTargets(bt()).length}</b></div>` : "") +
       (open !== null ? `<div class="fact"><span>Open findings</span><b class="num${open ? " warn" : ""}">${open}</b></div>` : "") +
       `<div class="fact"><span>Your notes</span><b class="num">${nNotes}</b></div>`;
     el.hfacts.hidden = false;
@@ -988,6 +1089,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
       const dot = node.querySelector(":scope > summary .rdot"); if (dot) { const lab = r ? "Mark as unread" : "Mark as read"; dot.setAttribute("aria-label", lab); dot.dataset.tip = lab; }
       const ok = passes(x.key); node.hidden = !ok; if (ok) shown++;
     });
+    const rgp = $("b-reference"); if (rgp) rgp.hidden = [...rgp.querySelectorAll("details.doc")].every((n) => n.hidden);
     const nm = $("nomatch"); if (nm) { nm.hidden = !!shown || !blocks.length; nm.textContent = view.filter === "unread" ? "You marked everything read. Choose All to see it again." : "Nothing here for this filter. Choose All to see every block."; }
     /* the band */
     const opts = (g.options || []).map((o) => o.t).filter(Boolean);
@@ -2483,6 +2585,10 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     const top = (go, key, title) => `<div class="rgroup"><button type="button" class="rdoc${isRead(key) ? " read" : ""}" data-go="${go}"><span class="rcaret none" aria-hidden="true"></span><span class="rtitle">${title}</span></button></div>`;
     if (view.gate && view.gate.summary && passes("summary")) html += top("b-summary", "summary", "Summary");
     if (view.gate && view.gate.brief && passes("review")) html += top("b-brief", "review", "Review");
+    if (view.gate && view.gate.buildTest && view.gate.buildTest.targets && view.gate.buildTest.targets.length) {
+      if (passes("bt-matrix")) html += top("b-bt-matrix", "bt-matrix", "Target matrix");
+      if (view.hashes["bt-decide"] && passes("bt-decide")) html += top("b-bt-decide", "bt-decide", "Decisions");
+    }
     docs.filter((d) => passes(d.key)).forEach((d) => {
       const shown = el.col.querySelector(`#d-${CSS.escape(d.key)} summary h2`); const title = (shown && shown.textContent.trim()) || d.title || d.key;
       const secs = [...el.col.querySelectorAll(`#d-${CSS.escape(d.key)} details.sec`)].filter((x) => !x.hidden);
@@ -2508,6 +2614,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
   function openAll() {
     el.col.querySelectorAll("details").forEach((d) => { d.open = true; });
     el.col.querySelectorAll("details.block[data-block]").forEach((b) => { if (isRead(b.dataset.block)) b.open = false; });
+    const rg = $("b-reference"); if (rg) rg.open = false;  /* the instruction files stay folded until asked for */
     drawDiagrams(el.col);
   }
   /* Marking a block read folds it; marking it unread opens it again. */
@@ -2546,6 +2653,129 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
   });
   el.col.addEventListener("toggle", (e) => { const d = e.target; if (d.open) drawDiagrams(d); }, true);
 
+  /* ---------- Build and Test: only when the gate row carries buildTest ---------- */
+  const bt = () => (view.gate && view.gate.buildTest) || null;
+  const REF_DOC = /^(build|integration-test|performance-test|security-test)-instructions?$/;
+  const refDocs = (docs) => bt() ? docs.filter((d) => REF_DOC.test(d.key)) : [];
+  const VCLS = (v) => ({ "Not Met": "notmet", "Unverified": "unverified", "Met": "met", "N/A": "na" }[v] || "other");
+  const VTIP = { "Not Met": "The target was checked and the result misses it", "Unverified": "No check could confirm or refute this target", "Met": "The target was checked and holds", "N/A": "Not decided in this stage: another stage owns it" };
+  const VRANK = { "Not Met": 0, "Unverified": 1, "Met": 2, "N/A": 3 };
+  const PICKS = [["accept", "Accept as known"], ["followup", "Follow-up"], ["fix", "Fix now"]];
+  const openTargets = (B) => (B.targets || []).filter((t) => t.verdict === "Not Met" || t.verdict === "Unverified").sort((a, b) => VRANK[a.verdict] - VRANK[b.verdict]);
+  const vtag = (v) => `<span class="vtag ${VCLS(v)}" data-tip="${esc(VTIP[v] || v)}">${esc(v)}</span>`;
+  const pickedCount = (B) => openTargets(B).filter((t) => (view.picks[t.id] || {}).pick).length;
+  function evidenceHtml(text, legend) {
+    let out = "", last = 0; const re = /\b[A-Z]{1,4}\b/g; let m;
+    while ((m = re.exec(text))) {
+      if (!legend || !legend[m[0]] || /[\w.]/.test(text[m.index - 1] || "") || /[\w]/.test(text[m.index + m[0].length] || "")) continue;
+      out += esc(text.slice(last, m.index)) + `<abbr class="ecode" tabindex="0" data-tip="${esc(m[0] + ": " + legend[m[0]])}">${esc(m[0])}</abbr>`; last = m.index + m[0].length;
+    }
+    return out + esc(text.slice(last));
+  }
+  function btStrip(B) {
+    const parts = [];
+    if (B.commands && B.commands.length) {
+      const bad = B.commands.filter((c) => !c.ok), ok = B.commands.length - bad.length;
+      parts.push(`<div class="bts"><span class="lbl">Commands</span><b class="big num ${bad.length ? "bad" : "ok"}" data-tip="${esc(bad.length ? "Commands whose result reports a failure" : "Every command of the test results passed")}">${ok}<small>/${B.commands.length}</small></b><span class="sub">${bad.length ? "Failed: " + esc(bad.map((c) => c.check || c.command).join(", ")) : "all passed"}</span></div>`);
+    }
+    if (B.coverage && B.coverage.length) {
+      parts.push(`<div class="bts"><span class="lbl">Line coverage</span>${B.coverage.map((c) => {
+        const low = c.floor != null && c.pct < c.floor;
+        return `<div class="cov"><div class="covh"><span>${esc(c.repo || "Coverage")}</span><b>${esc(c.pct)}%</b></div><div class="covbar${low ? " low" : ""}" role="img" aria-label="${esc((c.repo || "Coverage") + " " + c.pct + " percent" + (c.floor != null ? ", floor " + c.floor + " percent" : ""))}"><i style="width:${Math.max(0, Math.min(100, c.pct))}%"></i>${c.floor != null ? `<u style="left:${Math.max(0, Math.min(100, c.floor))}%" data-tip="${esc("Floor: " + c.floor + "%")}"></u>` : ""}</div></div>`;
+      }).join("")}<span class="sub">The bar is the coverage; the mark is the floor.</span></div>`);
+    }
+    const n = B.counts;
+    if (n) {
+      const tiles = [["Not Met", n.notMet], ["Unverified", n.unverified], ["Met", n.met], ["N/A", n.na]].filter((x) => x[1] !== undefined);
+      parts.push(`<div class="bts"><span class="lbl">Targets · ${plural(n.total, "target")}</span><div class="vcounts">${tiles.map(([v, k]) => `<button type="button" class="vc ${VCLS(v)}" data-btv="${esc(v)}" data-btonly="1" data-tip="${esc(VTIP[v] + ". Show only these in the matrix.")}"><b>${k}</b><span>${esc(v)}</span></button>`).join("")}</div>` +
+        (n.total ? `<div class="stack" aria-hidden="true">${tiles.filter((x) => x[1]).map(([v, k]) => `<i class="${VCLS(v)}" style="flex:${k} 1 0"></i>`).join("")}</div>` : "") + `</div>`);
+    }
+    return parts.length ? `<section class="card0 bt-strip" id="b-bt-strip" aria-label="Results">${parts.join("")}</section>` : "";
+  }
+  function btMatrixBlock(B) {
+    return `<details class="block bt" open id="b-bt-matrix" data-block="bt-matrix"><summary>${CARET}<h2>Target matrix</h2><span class="hint wide">every quality target and how it ended</span><span class="end"><span class="pill quiet num">${plural(B.targets.length, "target")}</span>${rdot("bt-matrix")}</span></summary>` +
+      `<div class="body"><div class="btool"><input type="search" id="bt-q" placeholder="Search by ID or text" aria-label="Search the targets" autocomplete="off"><div class="bchips" id="bt-vchips" role="group" aria-label="Filter by verdict"></div><div class="bchips" id="bt-uchips" role="group" aria-label="Filter by Unit"></div></div>` +
+      `<div class="tm" id="bt-tm" role="table" aria-label="Targets"></div></div></details>`;
+  }
+  function btRender() {
+    const B = bt(); const tm = $("bt-tm"); if (!B || !tm) return;
+    const f = view.bt, all = B.targets;
+    const q = f.q.trim().toLowerCase();
+    const pass = (t) => (!f.v.size || f.v.has(t.verdict)) && (!f.u.size || f.u.has(t.unit || "")) && (!q || [t.id, t.expected, t.actual, t.evidence, t.source].some((x) => String(x || "").toLowerCase().includes(q)));
+    const rows = all.map((t, i) => [t, i]).sort((a, b) => ((VRANK[a[0].verdict] ?? 4) - (VRANK[b[0].verdict] ?? 4)) || a[1] - b[1]).map((x) => x[0]).filter(pass);
+    const verdicts = ["Not Met", "Unverified", "Met", "N/A"].filter((v) => all.some((t) => t.verdict === v));
+    $("bt-vchips").innerHTML = verdicts.map((v) => `<button type="button" class="bchip" data-btv="${esc(v)}" aria-pressed="${f.v.has(v)}">${esc(v)}<span class="n">${all.filter((t) => t.verdict === v).length}</span></button>`).join("");
+    const units = [...new Set(all.map((t) => t.unit || ""))].filter(Boolean);
+    $("bt-uchips").innerHTML = units.length > 1 ? units.map((u) => `<button type="button" class="bchip" data-btu="${esc(u)}" aria-pressed="${f.u.has(u)}">${esc(u)}<span class="n">${all.filter((t) => t.unit === u).length}</span></button>`).join("") : "";
+    tm.innerHTML = `<div class="tm-head" role="row"><div role="columnheader">Target</div><div role="columnheader">Verdict</div><div role="columnheader">Expected</div><div role="columnheader">Actual</div><div role="columnheader">Evidence</div></div>` +
+      (rows.length ? rows.map((t) => {
+        const open = f.rows.has(t.id);
+        const det = [["Unit", t.unit], ["Source", t.source], ["Owning stage", t.owner], ["Evidence", t.evidence]].filter((x) => x[1]);
+        return `<div class="tm-row ${VCLS(t.verdict)}" role="row" data-tid="${esc(t.id)}"><div class="tm-line">` +
+          `<div class="tm-id" role="cell"><button type="button" class="tm-x" data-btx="${esc(t.id)}" aria-expanded="${open}" aria-label="Details of ${esc(t.id)}">${CHEV}</button><span class="mono">${esc(t.id)}</span></div>` +
+          `<div role="cell">${vtag(t.verdict)}</div><div class="c-exp" role="cell" data-l="Expected">${esc(t.expected || "")}</div><div class="c-act" role="cell" data-l="Actual">${esc(t.actual || "")}</div><div class="c-ev" role="cell" data-l="Evidence">${evidenceHtml(t.evidence || "", B.evidence)}</div></div>` +
+          `<div class="tm-det"${open ? "" : " hidden"}><dl>${det.map((x) => `<dt>${esc(x[0])}</dt><dd>${esc(x[1])}</dd>`).join("")}</dl></div></div>`;
+      }).join("") : '<div class="tm-none">No target matches. Clear a filter or the search.</div>');
+  }
+  function btDecideBlock(B) {
+    const open = openTargets(B); if (!open.length) return "";
+    return `<details class="block bt" open id="b-bt-decide" data-block="bt-decide"><summary>${CARET}<h2>Decisions</h2><span class="hint wide">what to do with each target that is not met or unverified</span><span class="end"><span class="pill quiet num" id="bt-dcount"></span>${rdot("bt-decide")}</span></summary>` +
+      `<div class="body"><p class="dsum">Choose for each: <b>Accept as known</b> keeps it as a known limit, <b>Follow-up</b> records it as work for later, <b>Fix now</b> sends it back as a Request Changes naming the targets. Your choices go to Claude with your answer in chat.</p>` +
+      `<div class="dcards">${open.map((t) => {
+        const p = view.picks[t.id] || {}; const note = (p.note || "").trim(); const id = esc(t.id);
+        return `<div class="dcard ${VCLS(t.verdict)}${p.pick ? " chosen" : ""}" data-did="${id}"><div class="dtop">${vtag(t.verdict)}<span class="mono">${id}</span><span class="hint">${esc(t.unit || "")}</span></div>` +
+          `<p class="dwhy">${t.expected ? `<span><b>Expected</b> ${esc(t.expected)}</span>` : ""}${t.actual ? `<span><b>Actual</b> ${esc(t.actual)}</span>` : ""}</p>` +
+          `<div class="dpick" role="radiogroup" aria-label="Decision for ${id}">${PICKS.map(([k, l]) => `<button type="button" role="radio" aria-checked="${p.pick === k}" data-pick="${k}" data-tid="${id}">${l}</button>`).join("")}</div>` +
+          `<div class="dfoot"><button type="button" class="notebtn" data-pnote="${id}" aria-pressed="${!!note}">${note ? "Your note" : "Add a note"}</button><span class="stat" id="ns-pick:${id}" aria-live="polite"></span></div>` +
+          `<textarea rows="2" class="dnote" data-tid="${id}" aria-label="Note on ${id}" placeholder="Optional: why, or what to do"${note || view.openNotes.has("pick:" + t.id) ? "" : " hidden"}>${esc(p.note || "")}</textarea></div>`;
+      }).join("")}</div></div></details>`;
+  }
+  function btDecideCount() {
+    const B = bt(); const c = $("bt-dcount"); if (!B || !c) return;
+    const open = openTargets(B), n = pickedCount(B); c.textContent = n + " of " + open.length + " chosen";
+  }
+  function refGroup(docs) {
+    return `<details class="block refgrp" id="b-reference" data-block="reference"><summary>${CARET}<h2>Reference</h2><span class="hint wide">build, integration, performance and security instructions: how to run things, not what happened</span><span class="end"><span class="pill quiet num">${plural(docs.length, "file")}</span></span></summary><div class="body">${docs.map((d, i) => docBlock(d, i)).join("")}</div></details>`;
+  }
+  function pickEdited(id, change) {
+    const cur = Object.assign({}, view.picks[id] || {}, change);
+    if (cur.pick === undefined) delete cur.pick;
+    if (!cur.pick && !(cur.note || "").trim()) delete view.picks[id]; else view.picks[id] = cur;
+    view.dirty.add("pick:" + id); view.unsaved = true; setNoteStat("pick:" + id, "Not saved yet");
+    paintSave(); clearTimeout(view.noteTimer); view.noteTimer = setTimeout(flushNotes, 700);
+  }
+  function onBtClick(e) {
+    const B = bt(); if (!B) return;
+    const v = e.target.closest("[data-btv]");
+    if (v) {
+      e.preventDefault(); const f = view.bt, val = v.dataset.btv;
+      if (v.dataset.btonly) { f.v = new Set([val]); f.u = new Set(); f.q = ""; const q = $("bt-q"); if (q) q.value = ""; } else if (f.v.has(val)) f.v.delete(val); else f.v.add(val);
+      btRender(); if (v.dataset.btonly) { const m = $("b-bt-matrix"); if (m) jumpTo(m); } return;
+    }
+    const u = e.target.closest("[data-btu]"); if (u) { e.preventDefault(); const f = view.bt; if (f.u.has(u.dataset.btu)) f.u.delete(u.dataset.btu); else f.u.add(u.dataset.btu); btRender(); return; }
+    const x = e.target.closest("[data-btx]");
+    if (x) { e.preventDefault(); const id = x.dataset.btx; if (view.bt.rows.has(id)) view.bt.rows.delete(id); else view.bt.rows.add(id); const row = x.closest(".tm-row"), det = row.querySelector(".tm-det"); det.hidden = !view.bt.rows.has(id); x.setAttribute("aria-expanded", String(!det.hidden)); return; }
+    const pk = e.target.closest("[data-pick]");
+    if (pk) {
+      e.preventDefault(); const id = pk.dataset.tid; const same = (view.picks[id] || {}).pick === pk.dataset.pick;
+      pickEdited(id, { pick: same ? undefined : pk.dataset.pick });
+      const card = pk.closest(".dcard"); card.classList.toggle("chosen", !!(view.picks[id] || {}).pick);
+      card.querySelectorAll("[data-pick]").forEach((b) => b.setAttribute("aria-checked", String((view.picks[id] || {}).pick === b.dataset.pick)));
+      btDecideCount(); paintChrome(docList()); return;
+    }
+    const pn = e.target.closest("[data-pnote]");
+    if (pn) { e.preventDefault(); const card = pn.closest(".dcard"), ta = card.querySelector(".dnote"), id = pn.dataset.pnote; ta.hidden = !ta.hidden; if (ta.hidden) view.openNotes.delete("pick:" + id); else { view.openNotes.add("pick:" + id); ta.focus(); } pn.setAttribute("aria-pressed", String(!ta.hidden || !!(ta.value || "").trim())); }
+  }
+  el.col.addEventListener("click", onBtClick);
+  el.col.addEventListener("input", (e) => {
+    if (e.target.id === "bt-q") { view.bt.q = e.target.value; btRender(); return; }
+    if (e.target.classList && e.target.classList.contains("dnote")) {
+      const id = e.target.dataset.tid; pickEdited(id, { note: e.target.value });
+      const nb = e.target.closest(".dcard").querySelector("[data-pnote]"); if (nb) nb.textContent = e.target.value.trim() ? "Your note" : "Add a note";
+      btDecideCount();
+    }
+  });
+
   /* ---------- notes: saved as you type; a failed save says so and is sent again ---------- */
   function noteEdited(key, text) {
     view.notes[key] = text; view.dirty.add(key); view.unsaved = true; setNoteStat(key, "Not saved yet");
@@ -2560,7 +2790,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     view.saving = true; view.unsaved = false; view.dirty = new Set();
     keys.forEach((k) => setNoteStat(k, "Saving…")); paintSave();
     let err = null;
-    try { await db.doc("gates/" + id).update({ notes: Object.assign({}, view.notes) }); } catch (e) { err = e || {}; }
+    try { await db.doc("gates/" + id).update(Object.assign({ notes: Object.assign({}, view.notes) }, bt() ? { targetPicks: JSON.parse(JSON.stringify(view.picks)) } : {})); } catch (e) { err = e || {}; }
     if (view.id !== id) return;
     view.saving = false;
     if (!err) {

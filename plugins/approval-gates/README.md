@@ -58,7 +58,23 @@ capabilities):
 - Notes on rows, and Do it / Leave it on suggestion rows, reach the agent with your chat answer. The decision itself
   is given in chat.
 
-Per-stage gates are unchanged.
+Per-stage gates are unchanged, except the Build and Test stage (below).
+
+### Build and Test
+
+At the `build-and-test` gate `gate_bundle.py` also reads the stage's tables into `buildTest` on the gate row
+(`contract/build-test.schema.json`), and the page shows, above the usual documents:
+
+- a **results strip**: commands passed out of run, line coverage per repository as a bar against its floor, and the
+  Met / Not Met / Unverified / N/A counts (press a count to filter the matrix);
+- a **target matrix**: Not Met and Unverified first, filter chips by verdict and by Unit, a search by ID or text, and
+  evidence codes whose legend shows on hover;
+- a **decision card** per Not Met or Unverified target: Accept as known, Follow-up or Fix now, with an optional note.
+  The picks are saved in the row (`targetPicks`) and the agent reads them with your chat answer: Fix now becomes a
+  Request Changes naming those targets, Follow-up is recorded as follow-up work, Accept as a known limit;
+- the build, integration, performance and security instruction files folded in a closed **Reference** section.
+
+If the tables are not found, the stage looks like any other.
 
 ## What you see
 
@@ -166,6 +182,7 @@ gates/<id>                  {title, stage, stageName, phase?, intent, project?, 
                              createdAt, summary?, brief?, review?, nextStage?, options, ids?, documents: [index]}
 gates/<id>/documents/<key>  {n, key, title, path, kind, text}
 page writes                 gates/<id>.notes[<key>]
+                            gates/<id>.targetPicks[<target id>]   (Build and Test: {pick, note?})
                             data/users/<viewer>/reads-<intent>--<stage>--<unit>   (the viewer's read marks)
 ```
 
