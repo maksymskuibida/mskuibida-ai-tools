@@ -125,11 +125,14 @@ that skill's § 1 to publish it first.
 
 1. Build the rows: `FINDINGS board --findings <file> --out <scratch dir>`. It prints the form id
    (`<intent>-<stage>[-<unit>]-findings-<YYYYMMDDTHHMM>`, or `code-review-<YYYYMMDDTHHMM>`) and
-   the path of `writes.json`. The board is titled "Review findings · <stage name>" and has three
-   boxes: **Fix** ("Fixed before approval"), **Accept** ("Carried as a known risk") and **Reject
-   (reason required)** ("Not applicable; write why in the note"). Each finding is one card: the
-   title is its first sentence, the details hold Where, Finding and Required action, and it starts
-   in Fix when it blocks and in Accept when it does not. Its details say, in plain words, what is
+   the path of `writes.json`. The board is titled "Review findings · <stage name>" and is a
+   list of cards in two sections (Blocking, then Can be carried; for a code review Confirmed, then Possible)
+   with three decision buttons on each card: **Fix** ("Fixed before approval"), **Accept** ("Carried as a known
+   risk") and **Reject** ("Not applicable"; its note field opens and a reason is required). Each finding is one
+   card: the title is its first sentence, the details hold Where, Finding and Required action, and the card shows
+   its severity and whether it blocks. The review suggests Fix for a blocking finding and Accept for the rest; the
+   suggestion is marked on the card, but nothing is picked for the developer: every card has to be decided
+   (Done stays off until it is), or the developer takes the suggestion with the bulk buttons. Its details say, in plain words, what is
    wrong, the suggested action and where; the card also carries them apart (`plain`, `action`,
    `detail`), with `refs` (what the finding points at, `{label, tip, target}`, a live link when the
    target is `#<qid>` of another card) for the page (question-forms § 5). In an AI-DLC project,

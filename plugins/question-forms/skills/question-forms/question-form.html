@@ -58,33 +58,41 @@
     forms/<id>/questions/<qid>       {n, text, ctx?, kind: "text", hint?, proposed?: {t: "…"}, refs?}
       proposed.t is a suggested answer the developer can take with one press.
 
-    Board form — cards sorted into boxes instead of questions answered one by one:
+    Board form — a list of cards, each decided by pressing one of its boxes' buttons:
     forms/<id>                       {…, view: "board",
-                                      boxes: [{k: "fix", t: "…", hint?, tone?: "ink"|"accent"|"warn"|"muted"}]}
-      2–4 boxes, side by side when the page is wide enough, stacked when it is not.
-      groups?: [{k, t, hint?}] with boxes[].group, and boxes[].sink: true — a grouped board: the
-      groups side by side, each group's boxes stacked, sink boxes in a full row below. A card can
-      move only within its group or to a sink box; a card proposed into a sink box names its group
-      in `group` (card field), else it may go to any box.
-    forms/<id>/questions/<qid>       {n, text, ctx?, kind: "card", from?, group?, proposed: {k: "<box k>", why?},
+                                      boxes: [{k: "fix", t: "…", hint?, tone?: "ink"|"accent"|"warn"|"muted",
+                                               note?: {required?: true, label?: "Why does this not apply?"}}],
+                                      groups?: [{k, t, hint?}]}
+      2–4 boxes. Each is a decision button on every card that may use it; `tone` colours it once chosen. Nothing is
+      chosen for the developer: a card has no answer until a button is pressed, and Done stays off until every card has
+      one. note.required: choosing this box needs a written reason (the note field opens, the card stays open until it
+      is written); label is the field's heading. groups: the sections of the list, in this order, each holding the cards
+      whose `group` is its k (a card with no group goes in an unlabelled section). With boxes[].group (and sink: true) a
+      card can only choose the boxes of its group, plus sink boxes and boxes with no group.
+    forms/<id>/questions/<qid>       {n, text, ctx?, kind: "card", from?, group?, proposed?: {k: "<box k>", why?},
                                       outcomes?: {"<box k>": "what happens when the card sits here"},
-                                      plain?, action?, detail?, refs?}
-      text is the card's short title; from is one line on who asked for what. A card starts
-      in its proposed box. On a grouped board the group alone decides where it can go, and
-      outcomes only describes; on a board without groups, outcomes (when present) limits the
-      boxes offered to its keys and the proposed box.
-      plain?: what the card means in plain words, shown on the card under its title.
-      action?: the suggested action, shown in the card's details. refs?: as for questions.
-      detail?: ctx without what plain and action say; shown in place of ctx when the card has plain
-        or action, so the plain words are not said twice. ctx stays complete for older pages.
+                                      severity?, blocking?, plain?, action?, detail?, refs?}
+      text is the card's short title; from is one line on who asked for what. proposed is the suggestion: it is marked
+      on the card and shown in its details, never selected. outcomes is shown inside each box's button (what happens, and
+      what it costs); on a board without grouped boxes it also limits the boxes offered to its keys and the proposed box.
+      severity?: a short word ("Critical", "Major", "Minor", "Nit", "Confirmed", "Possible", …), drawn as a coloured tag.
+      blocking?: a short text ("Blocks approval"), set when the card holds something up. It marks the card and enables the
+      bar's "<box> all blocking" button, which takes the suggestion on every undecided blocking card.
+      plain?: what the card means in plain words, shown in its details under its title.
+      action?: the suggested action, shown in bold in the suggestion box. refs?: as for questions.
+      detail?: ctx without what plain and action say; shown in place of ctx when the card has plain or action, so the
+        plain words are not said twice. ctx stays complete for older pages.
       refs targets on a findings board: "#<qid>" another card (live); "doc:<where>", "path:<file>",
         "finding:<closed id>" are not in the form (a link that says so).
+      The bulk buttons ("take the suggestion on the rest", "<box> all blocking") press the proposed box for undecided
+      cards; they never take a box that needs a reason or has tone "warn".
 
   What the page writes (the only thing an agent reads back, one `get` of forms/<id>):
 
     forms/<id>.answers[qid] = {k: ["A"] | ["A","C"] | ["X"], note: "…", at: ISO}
       text question: {k: [], note: "<the answer>"} · card: {k: ["<box k>"], note}
-      On Done every card is written, moved or not.
+      A card is written when the developer presses a decision (or takes the suggestion): there is no answer for a card
+      still undecided, and Done is off until every card has one (and every box with note.required its note).
     forms/<id>.status       = "done" when the developer presses Done; "open" again
                               after a later edit.   forms/<id>.savedAt = ISO of Done.
     data/users/<viewer>/seen-<id>  {marks: {<qid>: <signature>}} — the viewer's own "seen" marks
@@ -149,7 +157,6 @@ button:focus-visible, a:focus-visible, textarea:focus-visible, input:focus-visib
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .num { font-variant-numeric: tabular-nums; }
 .wrap { width: 100%; max-width: 920px; margin: 0 auto; padding-block: 24px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 16px; }
-body.wide .wrap { max-width: 1320px; }
 #app { display: flex; flex-direction: column; gap: 16px; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
@@ -291,122 +298,77 @@ section.q.needs-note .note label { color: var(--crit-fg); }
 .band span { color: var(--band-muted); flex: 1 1 260px; } .band b { font-weight: 500; }
 .band .primary.is-done { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-bg); }
 
-/* Board: boxes side by side when the column is wide enough, stacked otherwise. */
-.wrap { container-type: inline-size; }
-.board { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
-@container (min-width: 980px) { .board { grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); align-items: stretch; } }
-.box { --tone: var(--accent); --box-bg: var(--surface); background: var(--surface); border: 1px solid var(--line); border-top: 3px solid var(--tone); border-radius: 12px; display: grid; grid-template-rows: auto 1fr; min-width: 0; scroll-margin-top: calc(var(--bar-h) + 16px); }
-.box.tone-accent { --tone: var(--high-fg); }
-.box.tone-warn { --tone: var(--crit-fg); }
-.box.tone-muted { --tone: var(--muted); }
-.box.over { box-shadow: 0 0 0 2px var(--tone); }
-.boxhead { padding: 12px 16px 10px; border-bottom: 1px solid var(--line-soft); display: grid; gap: 2px; }
-.boxhead h3 { font-size: 15px; font-weight: 600; margin: 0; display: flex; justify-content: flex-start; gap: 10px; align-items: baseline; }
-.boxhead .count { font: 500 12px var(--mono); color: var(--tone); }
-.boxhead p { margin: 0; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cards { display: grid; gap: 10px; padding: 12px; align-content: start; min-height: 72px; }
-.cards:empty { border: 1px dashed var(--control); border-radius: 8px; margin: 12px; padding: 0; }
-.fcard { container-type: inline-size; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 8px; min-width: 0; scroll-margin-top: calc(var(--bar-h) + 16px); }
-/* Only the handle drags, so the card's text can be selected and copied. */
-.cgrip { flex: none; align-self: center; display: grid; place-items: center; width: 18px; height: 28px; margin-left: -6px; border-radius: 4px; color: var(--muted); cursor: grab; }
-.cgrip:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 6%, transparent); }
-.cgrip:active { cursor: grabbing; }
-.fcard.dragging { opacity: .45; }
-.fcard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Board: one list of cards. A card is open until it has its decision, then folds to one line. */
+.blist { display: flex; flex-direction: column; gap: 14px; }
+.bgroup { display: flex; flex-direction: column; gap: 10px; }
+.bghead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 6px 2px 0; }
+.bghead.plain-head { padding: 0; }
+.bghead h3 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.bghead span { font-size: 13px; color: var(--muted); }
+.bghead .grow-sp { flex: 1; }
+.blink { border: 0; background: none; padding: 4px 0; font-size: 13px; font-weight: 500; color: var(--accent); }
+.blink:hover { color: var(--accent-strong); text-decoration: underline; }
+.bcards { display: flex; flex-direction: column; gap: 10px; }
+.fcard { container-type: inline-size; background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--rail, var(--control)); border-radius: 10px; display: flex; flex-direction: column; min-width: 0; scroll-margin-top: calc(var(--bar-h) + 16px); }
+.fcard.blocking { --rail: var(--crit-fg); }
+.fcard.ans { --rail: var(--ok-fg); }
+.fcard.needs-note { --rail: var(--crit-fg); }
 .fcard.filtered { display: none; }
-.chead { display: flex; gap: 10px; align-items: center; }
-.chead .qid { font-size: 11.5px; padding: 4px 6px; margin: 0; }
-.ctitle { flex: 1 1 auto; font-size: 14px; font-weight: 600; line-height: 1.35; margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.cflags { flex: none; display: flex; gap: 4px; }
-.cflags .tag { height: 20px; font-size: 10.5px; padding: 0 6px; }
+.fcard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 8px 12px 8px 4px; cursor: pointer; }
 .cexp { flex: none; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--muted); }
 .cexp:hover { color: var(--fg); border-color: var(--control); }
 .cexp svg { transition: transform .15s; }
-.fcard.open .cexp svg { transform: rotate(180deg); }
-.plain { margin: 0; font-size: 13px; color: var(--fg-2); line-height: 1.5; }
-.cdetail { display: none; }
-.fcard.open .cdetail { display: block; border-top: 1px solid var(--line); padding-top: 10px; }
-.cin { display: grid; gap: 10px; }
-.cmain, .cside { display: grid; gap: 8px; align-content: start; min-width: 0; }
-.cmain .ctx { font-size: 13.5px; }
-.fcard p { margin: 0; font-size: 13px; }
-.fcard .from { color: var(--muted); font-size: 12.5px; }
-.fcard .outcome { border-left: 3px solid var(--tone, var(--accent)); padding-left: 8px; color: var(--fg-2); }
-.fcard .outcome:empty, .fcard .sugg:empty { display: none; }
-.fcard .sugg { color: var(--muted); }
-.fcard .sugg .tag { margin-right: 6px; background: var(--accent-soft); color: var(--accent); height: 20px; }
-.fcard.moved .sugg .tag { background: var(--low-bg); color: var(--low-fg); }
-.action { padding: 8px 10px; border-radius: 6px; background: var(--accent-tint); font-size: 13px; }
-.action b { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); margin-bottom: 2px; }
-.addnote { justify-self: start; background: none; border: 0; padding: 0; font-size: 13px; font-weight: 500; color: var(--accent); }
+.fcard.ans:not(.open) .cexp svg { transform: rotate(-90deg); }
+.chead .qid { margin: 0; font-size: 11.5px; padding: 4px 6px; }
+.sev { flex: none; display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 4px; font-size: 11px; font-weight: 600; letter-spacing: .02em; background: var(--low-bg); color: var(--low-fg); }
+.sev.crit { background: var(--crit-bg); color: var(--crit-fg); } .sev.high { background: var(--high-bg); color: var(--high-fg); } .sev.med { background: var(--med-bg); color: var(--med-fg); }
+.ctitle { flex: 1 1 240px; min-width: 0; margin: 0; font-size: 15px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.fcard.ans:not(.open) .chead { flex-wrap: nowrap; }
+.fcard.ans:not(.open) .ctitle { flex-basis: 0; font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fcard.ans:not(.open) .blk { display: none; }
+.blk { flex: none; font-size: 12px; font-weight: 600; color: var(--crit-fg); }
+.rowstate { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+.dpill { flex: none; font-size: 11.5px; font-weight: 600; height: 24px; padding: 0 9px; border-radius: 5px; display: inline-flex; align-items: center; background: var(--accent-soft); color: var(--accent); }
+.dpill.tone-muted { background: var(--low-bg); color: var(--fg-2); } .dpill.tone-warn { background: var(--crit-bg); color: var(--crit-fg); } .dpill.tone-accent { background: var(--r2-bg); color: var(--r2-fg); }
+.diff { font-size: 11.5px; color: var(--warn-fg); background: var(--warn-bg); border-radius: 4px; padding: 2px 7px; white-space: nowrap; }
+.notetag { font-size: 11px; font-weight: 600; height: 22px; padding: 0 7px; border-radius: 4px; background: var(--low-bg); color: var(--fg-2); display: inline-flex; align-items: center; }
+.cbody { display: none; flex-direction: column; gap: 10px; padding: 0 16px 14px 42px; min-width: 0; }
+.fcard.open .cbody { display: flex; }
+.fcard .plain { margin: 0; font-size: 14px; color: var(--fg-2); }
+.fcard .from { margin: 0; color: var(--muted); font-size: 12.5px; }
+.cbody .ctx { font-size: 13.5px; }
+.sugg { background: var(--accent-tint); border-radius: 8px; padding: 9px 12px; display: flex; flex-direction: column; gap: 2px; }
+.sugg small { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); }
+.sugg strong { font-weight: 600; }
+.sugg em { font-style: normal; font-size: 12.5px; color: var(--muted); }
+.decide { display: grid; grid-template-columns: repeat(var(--n, 3), minmax(0, 1fr)); gap: 1px; border: 1px solid var(--control); border-radius: 10px; overflow: hidden; background: var(--control); }
+.dopt { min-height: 44px; border: 0; background: var(--raised); color: var(--fg-2); padding: 8px 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; text-align: center; font-size: 14px; }
+.dopt:hover { background: var(--hover); color: var(--fg); }
+.dopt b { font-weight: 500; }
+.dopt i { font-style: normal; font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); }
+.dopt span { font-size: 12px; color: var(--muted); line-height: 1.35; }
+.dopt.sg:not(.on) { outline: 2px dashed var(--accent); outline-offset: -4px; }
+.dopt.on { font-weight: 600; }
+.dopt.on b { font-weight: 600; }
+.dopt.on i, .dopt.on span { color: inherit; opacity: .85; }
+.dopt.on.tone-ink { background: var(--accent); color: var(--on-accent); }
+.dopt.on.tone-muted { background: var(--fg-2); color: var(--surface); }
+.dopt.on.tone-warn { background: var(--crit-fg); color: var(--surface); }
+.dopt.on.tone-accent { background: var(--r2-fg); color: var(--surface); }
+@container (max-width: 560px) { .decide.has-oc { grid-template-columns: minmax(0, 1fr); } .dopt { align-items: flex-start; text-align: left; } }
+.addnote { justify-self: start; align-self: flex-start; background: none; border: 0; padding: 6px 0; min-height: 32px; font-size: 13px; font-weight: 500; color: var(--accent); }
 .fcard.noting .addnote { display: none; }
 .cnote { display: none; }
 .fcard.noting .cnote { display: flex; }
-@container (min-width: 560px) { .cin { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 8px 20px; } }
-.box.tone-ink .fcard { --tone: var(--accent); } .box.tone-accent .fcard { --tone: var(--high-fg); }
-.box.tone-warn .fcard { --tone: var(--crit-fg); } .box.tone-muted .fcard { --tone: var(--muted); }
-.moves { display: flex; flex-wrap: wrap; gap: 6px; }
-.move { height: 28px; background: var(--surface); color: var(--fg-2); border: 1px solid var(--control); border-radius: 6px; padding: 0 9px; font-size: 12.5px; font-weight: 500; }
-.move:hover { border-color: var(--accent); color: var(--fg); }
-
-/* Grouped board: the groups side by side, each group's boxes stacked; sink boxes get a row below. */
-.gboard { display: grid; gap: 14px; }
-.grow { display: grid; gap: 0; grid-template-columns: minmax(0, 1fr); align-items: stretch; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface); }
-@container (min-width: 720px) { .grow { grid-template-columns: repeat(var(--g, 2), minmax(0, 1fr)); } .group + .group { border-top: 0; border-left: 1px solid var(--line); } }
-.group { background: var(--surface); display: grid; gap: 0; align-content: start; min-width: 0; grid-template-rows: auto; }
-@container (max-width: 719.98px) { .group + .group { border-top: 1px solid var(--line); } }
-.ghead { display: grid; gap: 2px; padding: 12px 18px 10px; border-bottom: 1px solid var(--line); min-width: 0; }
-.ghead h3 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin: 0; color: var(--muted); }
-.ghead h3, .ghead p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ghead p { margin: 0; font-size: 12px; color: var(--muted); }
-.gboxes { display: grid; gap: 0; }
-.group .box { --box-bg: color-mix(in srgb, var(--tone) 5%, var(--surface)); background: var(--box-bg); border: 0; border-radius: 0; }
-.group .box + .box { border-top: 1px solid var(--line); }
-.group .boxhead { border-bottom: 0; padding: 14px 18px 4px; }
-.group .boxhead p { padding-left: 16px; }
-.group .boxhead h3 > span:first-child::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--tone); margin-right: 8px; vertical-align: 1px; }
-.group .cards { padding: 8px 18px 18px; }
-.group .fcard { background: var(--surface); }
-.box.sink { border-top-style: dashed; position: relative; --box-bg: var(--surface); }
-.sinkgrip { display: none; }
-body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none; }
-.box.sink .cards { padding: 10px 16px 16px; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
-  max-height: var(--sink-max, 130px); overflow-y: auto; scrollbar-gutter: stable; }
-.box.sink .cards, body.wide .box .cards {
-  /* scroll shadows: a soft edge appears only where there is more to scroll */
-  background:
-    linear-gradient(var(--box-bg, var(--surface)) 30%, transparent) center top,
-    linear-gradient(transparent, var(--box-bg, var(--surface)) 70%) center bottom,
-    radial-gradient(farthest-side at 50% 0, color-mix(in srgb, var(--fg) 16%, transparent), transparent) center top,
-    radial-gradient(farthest-side at 50% 100%, color-mix(in srgb, var(--fg) 16%, transparent), transparent) center bottom;
-  background-repeat: no-repeat; background-size: 100% 28px, 100% 28px, 100% 10px, 100% 10px;
-  background-attachment: local, local, scroll, scroll; }
-.box.no-drop { opacity: .4; }
-
-/* On a window wide and tall enough, the board is exactly as tall as the screen below the bar, and each box
-   scrolls on its own. The sink row is one row of cards and a quarter; the groups take the rest. Phones
-   scroll the page as usual. */
-@media (min-width: 760px) and (min-height: 560px) {
-  body.wide #questions { height: calc(100dvh - var(--bar-h) - 40px); min-height: 360px; }
-  body.wide .board { height: 100%; min-height: 0; align-items: stretch; }
-  body.wide .gboard { height: 100%; min-height: 0; grid-template-rows: minmax(0, 1fr) auto; gap: 12px; }
-  body.wide .grow { min-height: 0; height: 100%; align-items: stretch; }
-  body.wide .group { min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
-  body.wide .gboxes { min-height: 0; grid-auto-rows: minmax(0, 1fr); }
-  body.wide .box { min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
-  body.wide .box.sink .boxhead { padding: 12px 16px 8px; }
-  body.wide .sinkgrip { display: block; position: absolute; left: 0; right: 0; top: -9px; height: 16px; cursor: ns-resize; z-index: 1; touch-action: none; }
-  body.wide .sinkgrip::after { content: ""; position: absolute; left: 50%; top: 6px; width: 48px; height: 4px; margin-left: -24px; border-radius: 2px; background: var(--control); transition: background .15s; }
-  body.wide .sinkgrip:hover::after, body.wide .sinkgrip:focus-visible::after, body.resizing .sinkgrip::after { background: var(--muted); }
-  body.wide .sinkgrip:focus-visible { outline: none; }
-  body.wide .box .cards { min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
-  body.wide .box .cards:empty { min-height: 48px; }
-}
+.fcard.needs-note textarea { border-color: var(--crit-fg); }
+.fcard.needs-note .nlabel, .fcard.needs-note .nhint { color: var(--crit-fg); }
 
 /* touch: every control at least 44px tall */
 @media (pointer: coarse) {
-  .pill, .btn, .chip, .primary, .use, .move, .search { min-height: 44px; }
+  .pill, .btn, .chip, .primary, .use, .search, .blink { min-height: 44px; }
   .cexp { width: 44px; height: 44px; }
+  .dopt { min-height: 48px; }
   button.tag, .save button { min-height: 32px; padding-inline: 10px; }
   .opt { padding-block: 12px; }
 }
@@ -638,7 +600,7 @@ var AidlcIds = (function () {
   const view = {
     id: "", unsub: [], form: null, mode: "", boxesKey: "", loaded: false, rendered: new Map(), drag: null,
     questions: new Map(), answers: {}, touched: {}, pending: {}, qstat: {}, inflight: false, timer: null, retry: 0, retryTimer: null,
-    save: { state: "idle", at: "", msg: "" }, closing: false, confirmDone: false, expanded: new Set(), filter: "all",
+    save: { state: "idle", at: "", msg: "" }, closing: false, confirmDone: false, open: new Set(), shut: new Set(), noting: new Set(), filter: "all",
     marks: {}, marksReady: false, baselined: false, notice: null, tokens: null,
   };
 
@@ -745,8 +707,8 @@ var AidlcIds = (function () {
     if (Object.keys(view.pending).length) flush();
     view.unsub.forEach((u) => { try { u(); } catch {} }); view.unsub = [];
     clearTimeout(view.timer); clearTimeout(view.retryTimer);
-    Object.assign(view, { questions: new Map(), rendered: new Map(), expanded: new Set(), mode: "", boxesKey: "", loaded: false, drag: null, answers: {}, touched: {}, pending: {}, qstat: {}, confirmDone: false, filter: "all", marks: {}, marksReady: false, baselined: false, notice: null, tokens: null, retry: 0, save: { state: "idle", at: "", msg: "" } });
-    document.body.classList.remove("wide"); hideTip();
+    Object.assign(view, { questions: new Map(), rendered: new Map(), open: new Set(), shut: new Set(), noting: new Set(), mode: "", boxesKey: "", loaded: false, drag: null, answers: {}, touched: {}, pending: {}, qstat: {}, confirmDone: false, filter: "all", marks: {}, marksReady: false, baselined: false, notice: null, tokens: null, retry: 0, save: { state: "idle", at: "", msg: "" } });
+    hideTip();
   }
 
   /* ---------- the list of forms ---------- */
@@ -821,10 +783,10 @@ var AidlcIds = (function () {
     const f = view.form, head = $("head"); if (!f || !head) return;
     const done = f.status === "done", n = view.questions.size, a = [...view.questions.keys()].filter(answered).length;
     const lede = f.intro || (f.view === "board"
-      ? "Each card starts in the box Claude suggests. Move it with its buttons or by dragging its handle (⠿); Done saves where every card sits."
+      ? "Claude’s suggestion is marked on each card, but nothing is chosen for you. Press a decision on every card; it folds away once you do. Done saves your decisions."
       : "Nothing is pre-selected. Pick an option or write your own; a note is optional unless you choose Other. Answers save as you go.");
     const facts = isBoard()
-      ? `<div class="fact"><span>Cards</span><b>${n}</b></div><div class="fact"><span>Moved</span><b>${movedCount()}</b></div><div class="fact"><span>With a note</span><b>${notedCount()}</b></div>`
+      ? `<div class="fact"><span>Cards</span><b>${n}</b></div><div class="fact"><span>Answered</span><b>${a}</b></div><div class="fact"><span>With a note</span><b>${notedCount()}</b></div>`
       : `<div class="fact"><span>Questions</span><b>${n}</b></div><div class="fact"><span>Answered</span><b>${a}</b></div><div class="fact"><span>Open</span><b>${n - a}</b></div>`;
     const file = f.file ? `<div class="source"><span>Questions file</span>${refHtml({ label: f.file, target: "path:" + f.file, tip: `The file Claude copies your answers into: ${f.file}.` })}</div>` : "";
     head.innerHTML = `<div class="crumbs"><a href="#" data-home="1">All forms</a>${f.stage ? `<span aria-hidden="true">/</span><span>${esc(f.stage)}</span>` : ""}
@@ -838,9 +800,8 @@ var AidlcIds = (function () {
     const key = mode === "board" ? JSON.stringify([view.form.boxes || [], view.form.groups || []]) : "";
     if (mode === view.mode && key === view.boxesKey) return;
     view.mode = mode; view.boxesKey = key; view.rendered = new Map(); view.tokens = null;
-    document.body.classList.toggle("wide", mode === "board");
     const qs = $("questions"); qs.innerHTML = "";
-    if (mode === "board") qs.appendChild(renderBoard(view.form.boxes || []));
+    if (mode === "board") qs.appendChild(renderBoard());
     sync();
   }
   function sync() {
@@ -858,7 +819,7 @@ var AidlcIds = (function () {
       if (!node || view.rendered.get(q.id) !== sig) {
         const focusId = document.activeElement && node && node.contains(document.activeElement) ? document.activeElement.id : "";
         const fresh = isBoard() ? renderCard(q) : renderQuestion(q);
-        if (node) node.replaceWith(fresh); else (isBoard() ? qsEl.querySelector("[data-cards]") || qsEl : qsEl).appendChild(fresh);
+        if (node) node.replaceWith(fresh); else if (isBoard()) placeCard(fresh, q); else qsEl.appendChild(fresh);
         node = fresh; view.rendered.set(q.id, sig); paintAnswer(q.id);
         if (focusId) document.getElementById(focusId)?.focus();
       }
@@ -867,7 +828,7 @@ var AidlcIds = (function () {
     qsEl.querySelectorAll("[data-qid]").forEach((n) => { if (!seen.has(n.dataset.qid)) { view.rendered.delete(n.dataset.qid); n.remove(); } });
     paintAll();
   }
-  function paintAll() { paintCounts(); qsAll().forEach((q) => paintFresh(q.id)); applyFilter(); paintHead(); paintBar(); }
+  function paintAll() { qsAll().forEach((q) => paintFresh(q.id)); applyFilter(); paintHead(); paintBar(); }
   const qsAll = () => [...view.questions.values()];
 
   /* ---------- "new since you looked": the viewer's own marks ---------- */
@@ -906,7 +867,7 @@ var AidlcIds = (function () {
   /* ---------- the sticky bar: filters, progress, save state, Done, and a chip per question or box ---------- */
   function counts() {
     const qs = qsAll();
-    return { total: qs.length, ans: qs.filter((q) => answered(q.id)).length, need: missingNotes().length, fresh: qs.filter((q) => freshness(q.id)).length, moved: movedCount(), noted: notedCount() };
+    return { total: qs.length, ans: qs.filter((q) => answered(q.id)).length, need: missingNotes().length, fresh: qs.filter((q) => freshness(q.id)).length };
   }
   function saveHtml() {
     const s = view.save, f = view.form || {};
@@ -924,14 +885,13 @@ var AidlcIds = (function () {
   }
   function paintBarInner(bar) {
     const c = counts(), multi = c.total > 1;
-    const pct = c.total ? Math.round((isBoard() ? c.total : c.ans) / c.total * 100) : 0;
+    const pct = c.total ? Math.round(c.ans / c.total * 100) : 0;
     const f = view.filter;
     let filters, progress, chips;
     if (isBoard()) {
-      filters = [["all", "All", c.total], ["moved", "Moved", c.moved], ["noted", "With a note", c.noted]].concat(c.fresh ? [["fresh", "New or changed", c.fresh]] : []);
-      progress = "";
-      chips = boxes().filter((b) => !document.getElementById("box-" + b.k)?.hidden).map((b) => { const n = [...document.querySelectorAll(`[data-cards="${CSS.escape(b.k)}"] .fcard:not(.filtered)`)].length;
-        return `<a class="chip" href="#" data-jump="box-${esc(b.k)}" style="--tone:var(--${toneVar(b.tone)})" data-tip="${esc(stripMd(b.t) + (b.hint ? " — " + stripMd(b.hint) : "") + `. ${plural(n, "card")} here.`)}"><span class="sw" aria-hidden="true"></span>${esc(stripMd(b.t))}<span class="count">${n}</span></a>`; }).join("");
+      filters = [["all", "All", c.total], ["open", "Unanswered", c.total - c.ans]].concat(boxes().map((b) => ["box:" + b.k, stripMd(b.t), qsAll().filter((q) => boxOf(q.id) === b.k).length])).concat(c.fresh ? [["fresh", "New or changed", c.fresh]] : []);
+      progress = `<span class="progress"><span class="num">Answered ${c.ans}/${c.total}</span><span class="meter" aria-hidden="true"><i style="width:${pct}%"></i></span></span>`;
+      chips = "";
     } else {
       filters = [["all", "All", c.total], ["open", "Unanswered", c.total - c.ans]].concat(c.fresh ? [["fresh", "New or changed", c.fresh]] : []);
       progress = `<span class="progress"><span class="num">Answered ${c.ans}/${c.total}</span><span class="meter" aria-hidden="true"><i style="width:${pct}%"></i></span></span>`;
@@ -943,21 +903,27 @@ var AidlcIds = (function () {
     }
     const notice = view.notice ? `<div class="barmsg${view.notice.crit ? " crit" : ""}"><span>${view.notice.html}</span>${view.notice.jump ? `<button type="button" data-jump="q-${esc(view.notice.jump)}">Go to the first one</button>` : ""}</div>` : "";
     const showNext = !isBoard() && c.ans < c.total;
+    const blocking = isBoard() ? blockingLeft() : [];
+    const left = isBoard() ? ordered().map((q) => q.id).filter((id) => !complete(id)) : [];
+    const lack = left.filter((id) => !boxOf(id)), why = left.filter(reasonMissing);
+    const standing = isBoard() && left.length && !view.notice
+      ? `<div class="barmsg"><span>${[lack.length ? `${plural(lack.length, "card")} still need a decision (${idList(lack)}).` : "", why.length ? `${idList(why)}: write the reason.` : ""].filter(Boolean).join(" ")}</span><button type="button" data-jump="q-${esc(left[0])}">Go to the first one</button></div>` : "";
     bar.innerHTML = `<div class="barrow">
         ${multi ? `<div class="filters" role="group" aria-label="Show">${filters.map(([k, t, n]) => `<button type="button" class="pill" data-filter="${k}" aria-pressed="${f === k}">${t}<b>${n}</b></button>`).join("")}</div>` : ""}
         <div class="tools">${progress}
           ${showNext ? `<button type="button" class="btn" data-act="next" data-tip="Go to the next question you have not answered.">Next unanswered</button>` : ""}
+          ${isBoard() && blocking.length ? `<button type="button" class="btn" data-act="blocking">${esc(blockingLabel(blocking))} · ${blocking.length}</button>` : ""}
           ${isBoard() ? `<button type="button" class="btn wide-only" data-act="expand">Expand all</button><button type="button" class="btn wide-only" data-act="collapse">Collapse all</button>` : ""}
           ${c.fresh ? `<button type="button" class="btn wide-only" data-act="allseen">Mark all seen</button>` : ""}
           <span class="grow-sp"></span>${saveHtml()}
-          <button type="button" class="primary${view.form.status === "done" ? " is-done" : ""}" data-act="done" ${view.closing ? "disabled" : ""} data-tip="${esc(doneTip(c))}">${doneLabel()}</button></div></div>
-      ${notice}${multi || isBoard() ? `<nav class="chips" aria-label="${isBoard() ? "Boxes" : "Questions"}">${chips}</nav>` : ""}`;
-    barHeight(); paintBand(c);
+          <button type="button" class="primary${view.form.status === "done" ? " is-done" : ""}" data-act="done" ${view.closing || left.length ? "disabled" : ""} data-tip="${esc(doneTip(c))}">${doneLabel()}</button></div></div>
+      ${notice || standing}${multi && !isBoard() ? `<nav class="chips" aria-label="Questions">${chips}</nav>` : ""}`;
+    paintSections(); barHeight(); paintBand(c);
   }
   function notify(n) { view.notice = n; if (n) $("live").textContent = n.html.replace(/<[^>]+>/g, ""); paintBar(); }
   function doneTip(c) {
     if (view.form && view.form.status === "done") return "Already done. Press again after a change to mark it done again.";
-    if (isBoard()) return "Saves where every card sits and marks the form done. Then tell Claude in chat.";
+    if (isBoard()) return c.ans < c.total ? `${c.total - c.ans} cards still need a decision.` : "Saves your decisions and marks the form done. Then tell Claude in chat.";
     return c.ans < c.total ? `${c.total - c.ans} still unanswered; Done asks you to confirm. Then tell Claude in chat.` : "Every question is answered. Mark the form done, then tell Claude in chat.";
   }
   function paintBand(c) {
@@ -966,20 +932,19 @@ var AidlcIds = (function () {
     band.hidden = false;
     band.innerHTML = done
       ? `<b>Done ${esc(fmt(view.form.savedAt))}.</b><span>Tell Claude in chat that the form is done. A later change reopens the form, and you press Done again.</span><button type="button" class="primary is-done" data-act="done">Done ✓</button>`
-      : `<b>${isBoard() ? `${plural(c.total, "card")} sorted.` : `${c.ans} of ${c.total} answered.`}</b><span>${isBoard() ? "Done saves where every card sits." : "Unanswered questions stay open questions for Claude."} Press Done, then tell Claude in chat that the form is done.</span><button type="button" class="primary" data-act="done" ${view.closing ? "disabled" : ""}>Done</button>`;
+      : `<b>${`${c.ans} of ${c.total} answered.`}</b><span>${isBoard() ? "Done saves your decisions." : "Unanswered questions stay open questions for Claude."} Press Done, then tell Claude in chat that the form is done.</span><button type="button" class="primary" data-act="done" ${view.closing || (isBoard() && c.ans < c.total) ? "disabled" : ""}>Done</button>`;
   }
   const stripMd = (s) => String(s ?? "").replace(/[`*]/g, "");
-  const toneVar = (t) => ({ ink: "accent", accent: "high-fg", warn: "crit-fg", muted: "muted" }[t] || "accent");
+  const blockingLabel = (list) => { const ks = [...new Set(list.map((q) => q.proposed.k))]; return ks.length === 1 ? `${stripMd(boxLabel(ks[0]))} all blocking` : "Take the suggestion on blocking"; };
   function answerText(qid) { const a = view.answers[qid]; if (!a) return ""; const q = view.questions.get(qid); return q?.kind === "text" ? "in your words" : (a.k || []).join(", "); }
 
   /* ---------- filters ---------- */
   function passes(q) {
     const f = view.filter, a = view.answers[q.id];
     if (f === "all") return true;
-    if (f === "open") return !answered(q.id) || ((a?.k || []).includes("X") && !(a?.note || "").trim());
+    if (f === "open") return isBoard() ? !complete(q.id) : !answered(q.id) || ((a?.k || []).includes("X") && !(a?.note || "").trim());
     if (f === "fresh") return !!freshness(q.id);
-    if (f === "moved") return !!q.proposed?.k && boxOf(q.id) !== q.proposed.k;
-    if (f === "noted") return !!(a?.note || "").trim();
+    if (f.startsWith("box:")) return boxOf(q.id) === f.slice(4);
     return true;
   }
   function applyFilter() {
@@ -987,179 +952,163 @@ var AidlcIds = (function () {
     const qsEl = $("questions"); if (!qsEl) return;
     let empty = qsEl.querySelector(":scope > .filter-empty");
     const none = view.filter !== "all" && view.questions.size && !qsAll().some(passes);
-    if (none) { if (!empty) { empty = document.createElement("div"); empty.className = "card msg filter-empty"; qsEl.appendChild(empty); } empty.innerHTML = `<b>${view.filter === "open" ? "Every question is answered." : "Nothing here for this filter."}</b><p><button type="button" class="btn" data-filter="all">Show all questions</button></p>`; }
+    if (none) { if (!empty) { empty = document.createElement("div"); empty.className = "card msg filter-empty"; qsEl.appendChild(empty); } empty.innerHTML = `<b>${view.filter === "open" ? (isBoard() ? "Nothing left to answer." : "Every question is answered.") : "Nothing here for this filter."}</b><p>${view.filter === "open" && isBoard() ? "Every card has a decision, and every reason is written. Press Done, or look at them again. " : ""}<button type="button" class="btn" data-filter="all">${isBoard() ? "Show all cards" : "Show all questions"}</button></p>`; }
     else if (empty) empty.remove();
-    if (isBoard()) paintCounts();
+    paintSections();
   }
 
-  /* ---------- board ---------- */
+  /* ---------- board: one list of cards, each decided with one press ----------
+     Nothing is picked for the developer: a card is undecided until a decision button is pressed. The suggestion
+     (proposed) is marked on the card and in its details, never selected. A card with a decision folds to one line. */
   const boxes = () => (view.form && view.form.boxes) || [];
-  const boxLabel = (k) => boxes().find((b) => b.k === k)?.t || k;
   const boxDef = (k) => boxes().find((b) => b.k === k);
+  const boxLabel = (k) => boxDef(k)?.t || k;
   const grouped = () => boxes().some((b) => b.group || b.sink);
-  /* With groups, a card stays in its group (its own `group`, else its proposed box's) or goes to a
-     sink box. A card with no group at all may go anywhere. */
+  /* With grouped boxes, a card goes to the boxes of its group (its own `group`, else its proposed box's), to a sink box,
+     or to a box that has no group. A card with no group at all may go anywhere. Without them, `outcomes` limits the
+     boxes to its keys (plus the proposed box). */
   const cardGroup = (q) => q.group || boxDef(q.proposed?.k)?.group || "";
   const allowed = (q, k) => {
     const box = boxDef(k); if (!q || !box) return false;
-    if (grouped() && !box.sink && cardGroup(q) && box.group !== cardGroup(q)) return false;
-    if (grouped()) return true;
+    if (grouped()) return !!box.sink || !box.group || !cardGroup(q) || box.group === cardGroup(q);
     return !q.outcomes || Object.prototype.hasOwnProperty.call(q.outcomes, k) || q.proposed?.k === k;
   };
-  function boxOf(qid) {
-    const q = view.questions.get(qid); const a = view.answers[qid]?.k?.[0];
-    if (a && boxes().some((b) => b.k === a)) return a;
-    if (q?.proposed?.k && boxes().some((b) => b.k === q.proposed.k)) return q.proposed.k;
-    return boxes()[0]?.k || "";
-  }
-  const movedCount = () => isBoard() ? qsAll().filter((q) => q.proposed?.k && boxOf(q.id) !== q.proposed.k).length : 0;
-  const notedCount = () => qsAll().filter((q) => (view.answers[q.id]?.note || "").trim()).length;
-  const boxHtml = (x) => `<section class="box tone-${esc(x.tone || "ink")}${x.sink ? " sink" : ""}" id="box-${esc(x.k)}" data-box="${esc(x.k)}" aria-labelledby="boxh-${esc(x.k)}">
-      ${x.sink ? `<div class="sinkgrip" role="separator" aria-orientation="horizontal" tabindex="0" aria-label="Resize ${esc(stripMd(x.t))}: arrow keys; double-click resets"></div>` : ""}
-      <div class="boxhead"><h3 id="boxh-${esc(x.k)}"><span>${inline(x.t)}</span><span class="count" data-count="${esc(x.k)}">0</span></h3>${x.hint ? `<p data-tip="${esc(stripMd(x.hint))}">${inline(x.hint)}</p>` : ""}</div>
-      <div class="cards" data-cards="${esc(x.k)}"></div></section>`;
-  function renderBoard(list) {
-    const b = document.createElement("div");
-    if (grouped()) {
-      const defs = (view.form && view.form.groups) || [];
-      const keys = [...new Set(list.filter((x) => !x.sink).map((x) => x.group || ""))];
-      const groups = keys.map((k) => ({ k, t: "", hint: "", ...(defs.find((g) => g.k === k) || {}) }));
-      b.className = "gboard";
-      b.innerHTML = `<div class="grow" style="--g:${Math.max(1, groups.length)}">${groups.map((g) => `<section class="group" data-group="${esc(g.k)}">
-          ${g.t || g.hint ? `<div class="ghead">${g.t ? `<h3>${inline(g.t)}</h3>` : ""}${g.hint ? `<p>${inline(g.hint)}</p>` : ""}</div>` : ""}
-          <div class="gboxes">${list.filter((x) => !x.sink && (x.group || "") === g.k).map(boxHtml).join("")}</div></section>`).join("")}</div>
-        ${list.filter((x) => x.sink).map(boxHtml).join("")}`;
-    } else {
-      b.className = "board"; b.style.setProperty("--n", String(Math.max(1, list.length)));
-      b.innerHTML = list.map(boxHtml).join("");
-    }
-    bindSinkGrips(b);
-    b.querySelectorAll(".box").forEach((box) => {
-      box.addEventListener("dragover", (e) => { if (!view.drag || !allowed(view.questions.get(view.drag), box.dataset.box)) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; box.classList.add("over"); });
-      box.addEventListener("dragleave", (e) => { if (!box.contains(e.relatedTarget)) box.classList.remove("over"); });
-      box.addEventListener("drop", (e) => { e.preventDefault(); box.classList.remove("over"); if (view.drag) place(view.drag, box.dataset.box, false); });
-    });
-    return b;
-  }
+  const boxOf = (qid) => { const a = view.answers[qid]?.k?.[0]; return a && boxDef(a) ? a : ""; };
+  const noteOf = (qid) => view.answers[qid]?.note || "";
+  /* boxes[].note = {required?: true, label?: "Why does this not apply?"} */
+  const noteRule = (k) => { const n = boxDef(k)?.note; return n && typeof n === "object" ? n : {}; };
+  const reasonMissing = (qid) => { const k = boxOf(qid); return !!k && !!noteRule(k).required && !noteOf(qid).trim(); };
+  const complete = (qid) => !!boxOf(qid) && !reasonMissing(qid);
+  const notedCount = () => qsAll().filter((q) => noteOf(q.id).trim()).length;
+  /* A card is open until it has its decision; the developer can open or fold any card by hand. */
+  const isOpen = (qid) => view.open.has(qid) || (!view.shut.has(qid) && !complete(qid));
+  const SEV = (s) => { const w = String(s || "").toLowerCase(); return /critical|confirmed|must/.test(w) ? "crit" : /major|high/.test(w) ? "high" : /minor|medium|suggest/.test(w) ? "med" : "low"; };
   const CHEV = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  function renderBoard() {
+    const b = document.createElement("div"); b.className = "blist"; b.id = "blist"; return b;
+  }
+  /* Sections are the form's `groups`, made when the first card of a group arrives. */
+  function listFor(q) {
+    const g = cardGroup(q) || "";
+    const have = [...document.querySelectorAll("[data-cards]")].find((n) => n.dataset.cards === g);
+    if (have) return have;
+    const defs = (view.form && view.form.groups) || [];
+    const def = defs.find((x) => x.k === g) || {}, order = defs.findIndex((x) => x.k === g);
+    const sec = document.createElement("section"); sec.className = "bgroup"; sec.dataset.group = g; sec.dataset.order = String(order < 0 ? 999 : order);
+    sec.innerHTML = `${def.t ? `<div class="bghead"><h3>${inline(def.t)}</h3><span class="bgcount" data-bgcount="${esc(g)}"></span>${def.hint ? `<span class="bghint">${inline(def.hint)}</span>` : ""}<span class="grow-sp"></span><button type="button" class="blink" data-act="take" data-group="${esc(g)}" hidden></button></div>` : `<div class="bghead plain-head"><button type="button" class="blink" data-act="take" data-group="${esc(g)}" hidden></button></div>`}<div class="bcards" data-cards="${esc(g)}"></div>`;
+    const root = $("blist") || $("questions");
+    const after = [...root.querySelectorAll(":scope > .bgroup")].find((s) => +s.dataset.order > +sec.dataset.order);
+    root.insertBefore(sec, after || null);
+    return sec.querySelector("[data-cards]");
+  }
+  function placeCard(node, q) {
+    const list = listFor(q);
+    const after = [...list.children].find((n) => (view.questions.get(n.dataset.qid)?.n ?? 0) > (q.n ?? 0));
+    list.insertBefore(node, after || null);
+  }
+
   function renderCard(q) {
     const c = document.createElement("article"); c.className = "fcard"; c.id = "q-" + q.id; c.dataset.qid = q.id; c.dataset.aidlcId = q.id; c.tabIndex = -1;
     c.setAttribute("aria-labelledby", "ct-" + q.id);
-    c.innerHTML = `<div class="chead"><span class="cgrip" draggable="true" data-tip="Drag to another box; the move buttons do the same." aria-hidden="true"><svg viewBox="0 0 10 16" width="10" height="16"><g fill="currentColor"><circle cx="2.5" cy="3" r="1.4"/><circle cx="7.5" cy="3" r="1.4"/><circle cx="2.5" cy="8" r="1.4"/><circle cx="7.5" cy="8" r="1.4"/><circle cx="2.5" cy="13" r="1.4"/><circle cx="7.5" cy="13" r="1.4"/></g></svg></span><span class="qid" tabindex="0" data-tip="${esc(`Card ${q.id}. Use it when you mention this card in chat.`)}">${esc(q.id)}</span><h4 class="ctitle" id="ct-${esc(q.id)}">${inline(q.text, q.id)}</h4>
-        <span class="cflags"><span class="qfresh"></span><span class="qstate"></span></span>
-        <button type="button" class="cexp" aria-expanded="false" aria-controls="cd-${esc(q.id)}" aria-label="Details of ${esc(qLabel(q))}">${CHEV}</button></div>
-      ${q.plain ? `<p class="plain">${inline(q.plain, q.id)}</p>` : ""}
-      <div class="moves" role="group" aria-label="Move this card"></div>
-      <div class="cdetail" id="cd-${esc(q.id)}"><div class="cin"><div class="cmain">
+    const body = q.detail && (q.plain || q.action) ? q.detail : q.ctx;
+    c.innerHTML = `<div class="chead"><button type="button" class="cexp" aria-expanded="false" aria-controls="cd-${esc(q.id)}" aria-label="Details of ${esc(qLabel(q))}">${CHEV}</button>
+        ${q.severity ? `<span class="sev ${SEV(q.severity)}">${inline(q.severity)}</span>` : ""}<span class="qid" tabindex="0" data-tip="${esc(`Card ${q.id}. Use it when you mention this card in chat.`)}">${esc(q.id)}</span>
+        <h4 class="ctitle" id="ct-${esc(q.id)}">${inline(q.text, q.id)}</h4>
+        ${q.blocking ? `<span class="blk">${inline(String(q.blocking))}</span>` : ""}<span class="qfresh"></span><span class="rowstate"></span></div>
+      <div class="cbody" id="cd-${esc(q.id)}">
+        ${q.plain ? `<p class="plain">${inline(q.plain, q.id)}</p>` : ""}
         ${q.from ? `<p class="from">${inline(q.from, q.id)}</p>` : ""}
-        ${(q.detail && (q.plain || q.action) ? q.detail : q.ctx) ? `<div class="ctx">${md(q.detail && (q.plain || q.action) ? q.detail : q.ctx, q.id)}</div>` : ""}
-        ${q.action ? `<p class="action"><b>Suggested action</b>${inline(q.action, q.id)}</p>` : ""}
+        ${body ? `<div class="ctx">${md(body, q.id)}</div>` : ""}
         ${refsHtml(q, "Refers to")}
-        <button type="button" class="addnote">Add a note</button>
-        <div class="note cnote"><label for="${esc(q.id)}-note"><b>Note</b><span>Optional — a condition, a reason, what to change.</span><span class="qsave" id="${esc(q.id)}-save" aria-live="polite"></span></label>
+        <div class="sugg" hidden></div>
+        <div class="decide" role="group" aria-label="Decision for ${esc(qLabel(q))}"></div>
+        <button type="button" class="addnote">+ Add a note</button>
+        <div class="note cnote"><label for="${esc(q.id)}-note"><b class="nlabel">Note</b><span class="nhint"></span><span class="qsave" id="${esc(q.id)}-save" aria-live="polite"></span></label>
           <textarea id="${esc(q.id)}-note" rows="2"></textarea></div>
-      </div><div class="cside">
-        <p class="outcome"></p>
-        <p class="sugg"></p>
-      </div></div></div>`;
-    if (view.expanded.has(q.id)) setOpen(c, true);
-    c.querySelector(".cexp").addEventListener("click", () => setOpen(c, !c.classList.contains("open")));
-    c.querySelector(".addnote").addEventListener("click", () => { c.classList.add("noting"); c.querySelector("textarea").focus(); });
-    /* The drag starts on the handle but carries the whole card's image. */
-    const grip = c.querySelector(".cgrip");
-    grip.addEventListener("dragstart", (e) => { view.drag = q.id; c.classList.add("dragging"); hideTip(); e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", q.id); } catch {}
-      try { const r = c.getBoundingClientRect(); e.dataTransfer.setDragImage(c, e.clientX - r.left, e.clientY - r.top); } catch {}
-      document.querySelectorAll(".box").forEach((b) => b.classList.toggle("no-drop", b.dataset.box !== boxOf(q.id) && !allowed(q, b.dataset.box))); });
-    grip.addEventListener("dragend", () => { view.drag = null; c.classList.remove("dragging"); document.querySelectorAll(".box.over, .box.no-drop").forEach((b) => b.classList.remove("over", "no-drop")); });
+      </div>`;
+    const head = c.querySelector(".chead");
+    head.addEventListener("click", (e) => { if (e.target.closest("a, .qid, [data-tip]:not(.cexp)")) return; setOpen(q.id, !isOpen(q.id)); });
+    c.querySelector(".decide").addEventListener("click", (e) => { const to = e.target.closest(".dopt")?.dataset.to; if (to) choose(q.id, to); });
+    c.querySelector(".addnote").addEventListener("click", () => { view.noting.add(q.id); paintCard(q.id); document.getElementById(q.id + "-note")?.focus(); });
     const ta = c.querySelector("textarea");
-    ta.addEventListener("input", () => collect(q.id));
-    c.querySelector(".moves").addEventListener("click", (e) => { const to = e.target.closest(".move")?.dataset.to; if (to) place(q.id, to, true); });
+    /* Writing a note keeps the card open; it folds when the developer leaves the field with the card complete. */
+    ta.addEventListener("input", () => { if (!view.shut.has(q.id)) view.open.add(q.id); collect(q.id); });
+    ta.addEventListener("blur", (e) => { if (complete(q.id) && !c.contains(e.relatedTarget)) { view.open.delete(q.id); view.shut.delete(q.id); paintCard(q.id); applyFilter(); paintBar(); } });
     return c;
   }
-  function setOpen(card, open) {
-    card.classList.toggle("open", open);
-    card.querySelector(".cexp")?.setAttribute("aria-expanded", String(open));
-    if (open) view.expanded.add(card.dataset.qid); else view.expanded.delete(card.dataset.qid);
+  function setOpen(qid, open) {
+    view.open.delete(qid); view.shut.delete(qid); (open ? view.open : view.shut).add(qid);
+    paintCard(qid);
   }
-  function setAllOpen(open) { document.querySelectorAll(".fcard").forEach((c) => setOpen(c, open)); requestAnimationFrame(sizeSinks); }
+  function setAllOpen(open) {
+    const ids = qsAll().map((q) => q.id);
+    view.open = new Set(open ? ids : []); view.shut = new Set(open ? [] : ids);
+    ids.forEach(paintCard);
+  }
   function paintCard(qid) {
-    const node = document.getElementById("q-" + qid); const q = view.questions.get(qid); if (!node || !q) return;
-    const k = boxOf(qid);
-    const list = [...document.querySelectorAll("[data-cards]")].find((n) => n.dataset.cards === k);
-    if (list && node.parentElement !== list) {
-      const after = [...list.children].find((n) => (view.questions.get(n.dataset.qid)?.n ?? 0) > (q.n ?? 0));
-      list.insertBefore(node, after || null);
-    }
-    node.querySelector(".outcome").innerHTML = q.outcomes && q.outcomes[k] ? inline(q.outcomes[k], qid) : "";
-    const pk = q.proposed?.k; const why = q.proposed?.why ? " — " + inline(q.proposed.why, qid) : "";
-    node.querySelector(".sugg").innerHTML = pk ? (pk === k
-      ? `<span class="tag" tabindex="0" data-tip="Claude put the card in this box first. Leave it, or move it.">Suggested here</span>${why}`
-      : `<span class="tag" tabindex="0" data-tip="${esc(`You moved this card. Claude suggested ${stripMd(boxLabel(pk))}.`)}">Suggested: ${esc(stripMd(boxLabel(pk)))}</span>${why}`) : "";
-    node.classList.toggle("moved", !!pk && pk !== k);
-    node.querySelector(".moves").innerHTML = boxes().filter((b) => b.k !== k && allowed(q, b.k)).map((b) => `<button type="button" class="move" data-to="${esc(b.k)}" aria-label="${esc(`Move ${qLabel(q)} to ${stripMd(b.t)}`)}">→ ${inline(b.t)}</button>`).join("");
-    const ta = node.querySelector("textarea"); const note = view.answers[qid]?.note || "";
+    const node = document.getElementById("q-" + qid), q = view.questions.get(qid); if (!node || !q) return;
+    const k = boxOf(qid), pk = q.proposed?.k, open = isOpen(qid), note = noteOf(qid), rule = k ? noteRule(k) : {};
+    node.classList.toggle("open", open); node.classList.toggle("ans", complete(qid)); node.classList.toggle("blocking", !!q.blocking);
+    node.classList.toggle("needs-note", reasonMissing(qid));
+    node.querySelector(".cexp").setAttribute("aria-expanded", String(open));
+    const sg = node.querySelector(".sugg");
+    if (pk && boxDef(pk)) {
+      sg.hidden = false;
+      sg.innerHTML = `<small>Suggested · ${inline(boxLabel(pk))}</small>${q.action ? `<strong>${inline(q.action, qid)}</strong>` : ""}${q.proposed.why ? `<em>${inline(q.proposed.why, qid)}</em>` : ""}`;
+    } else sg.hidden = true;
+    const opts = boxes().filter((b) => allowed(q, b.k));
+    const dec = node.querySelector(".decide");
+    dec.classList.toggle("has-oc", opts.some((b) => q.outcomes && q.outcomes[b.k]));
+    dec.style.setProperty("--n", String(Math.max(1, opts.length)));
+    dec.innerHTML = opts.map((b) => { const oc = q.outcomes && q.outcomes[b.k];
+      return `<button type="button" class="dopt tone-${esc(b.tone || "ink")}${b.k === k ? " on" : ""}${b.k === pk ? " sg" : ""}" data-to="${esc(b.k)}" aria-pressed="${b.k === k}"><b>${inline(b.t)}</b>${b.k === pk ? `<i>suggested</i>` : ""}${oc ? `<span>${inline(oc, qid)}</span>` : ""}</button>`; }).join("");
+    const showNote = view.noting.has(qid) || !!note.trim() || !!rule.required;
+    node.classList.toggle("noting", showNote);
+    node.querySelector(".nlabel").textContent = rule.label || "Note";
+    node.querySelector(".nhint").textContent = rule.required ? "Required." : "Optional — a condition, a reason, what to change.";
+    const ta = node.querySelector("textarea");
+    ta.placeholder = rule.required ? "One or two sentences. Claude reads this back as written." : "";
     if (document.activeElement !== ta) ta.value = note;
-    node.classList.toggle("noting", !!note.trim() || node.classList.contains("noting"));
-    node.querySelector(".qstate").innerHTML = [pk && pk !== k ? `<span class="tag differs" tabindex="0" data-tip="${esc(`Moved from ${stripMd(boxLabel(pk))}, where Claude suggested it.`)}">moved</span>` : "", note.trim() ? `<span class="tag open" tabindex="0" data-tip="${esc("Your note: " + note.trim())}">note</span>` : ""].join("");
+    node.querySelector(".rowstate").innerHTML = !k ? "" :
+      (reasonMissing(qid) ? `<span class="tag need" tabindex="0" data-tip="${esc(`${stripMd(boxLabel(k))} needs a reason in the note.`)}">needs a reason</span>` : "") +
+      (note.trim() ? `<span class="notetag" tabindex="0" data-tip="${esc("Your note: " + note.trim())}">note</span>` : "") +
+      (pk && pk !== k && boxDef(pk) ? `<span class="diff" tabindex="0" data-tip="${esc(`Claude suggested ${stripMd(boxLabel(pk))}; you chose ${stripMd(boxLabel(k))}.`)}">not the suggestion</span>` : "") +
+      `<span class="dpill tone-${esc(boxDef(k)?.tone || "ink")}">${inline(boxLabel(k))}</span>`;
     paintQsave(qid);
   }
-  function place(qid, k, keepFocus) {
+  function choose(qid, k) {
     const q = view.questions.get(qid); if (!allowed(q, k)) return;
-    record(qid, [k], document.getElementById(qid + "-note")?.value ?? (view.answers[qid]?.note || ""));
-    paintCard(qid); paintCounts(); applyFilter(); paintHead(); paintBar();
-    if (keepFocus) { const n = document.getElementById("q-" + qid); n?.focus({ preventScroll: true }); n?.scrollIntoView({ block: "nearest", behavior: reduced() ? "auto" : "smooth" }); }
+    record(qid, [k], document.getElementById(qid + "-note")?.value ?? noteOf(qid));
+    view.open.delete(qid); view.shut.delete(qid);
+    paintCard(qid); applyFilter(); paintHead(); paintBar();
+    $("live").textContent = `${q.id}: ${stripMd(boxLabel(k))}`;
+    const n = document.getElementById("q-" + qid);
+    if (reasonMissing(qid)) document.getElementById(qid + "-note")?.focus();
+    else n?.focus({ preventScroll: true });
   }
-  /* The sink row shows one row of cards and a quarter by default. On a wide window its top edge
-     can be dragged; the chosen height is kept in this browser only. */
-  const WIDE = window.matchMedia("(min-width: 760px) and (min-height: 560px)");
-  const SINK_KEY = "qf-sink-height";
-  const readSinkHeight = () => { try { return parseInt(localStorage.getItem(SINK_KEY) || "", 10) || 0; } catch { return 0; } };
-  const saveSinkHeight = (px) => { try { localStorage.setItem(SINK_KEY, String(px)); } catch {} };
-  function sizeSinks() {
-    document.querySelectorAll(".box.sink .cards").forEach((list) => {
-      const chosen = WIDE.matches ? readSinkHeight() : 0;
-      if (chosen) { list.style.setProperty("--sink-max", `${chosen}px`); return; }
-      const card = [...list.children].find((c) => !c.classList.contains("open") && !c.classList.contains("filtered")) || list.firstElementChild;
-      const h = card ? card.offsetHeight : 76;
-      const gap = parseFloat(getComputedStyle(list).rowGap) || 10;
-      list.style.setProperty("--sink-max", `${Math.round(h + gap + h / 4)}px`);
-    });
+  /* Taking the suggestion is a press too: it records the card's proposed box. A box that needs a reason, or that
+     costs something (tone warn), is never taken in bulk. */
+  const bulkOk = (q) => { const pk = q.proposed?.k; return !boxOf(q.id) && !!pk && allowed(q, pk) && !noteRule(pk).required && boxDef(pk)?.tone !== "warn"; };
+  function take(list) {
+    let n = 0;
+    list.filter(bulkOk).forEach((q) => { record(q.id, [q.proposed.k], noteOf(q.id)); view.open.delete(q.id); view.shut.delete(q.id); n++; });
+    qsAll().forEach((q) => paintCard(q.id)); applyFilter(); paintHead(); paintBar();
+    toast(n ? `Took the suggestion on ${plural(n, "card")}.` : "No card had a suggestion to take.");
   }
-  function bindSinkGrips(root) {
-    root.querySelectorAll(".sinkgrip").forEach((grip) => {
-      const list = grip.parentElement.querySelector(".cards");
-      const board = () => ($("questions")?.getBoundingClientRect().height || 600);
-      const clamp = (px) => Math.max(60, Math.min(Math.round(px), Math.round(board() - 220)));
-      const set = (px) => { const v = clamp(px); list.style.setProperty("--sink-max", `${v}px`); saveSinkHeight(v); };
-      let startY = 0, startH = 0;
-      grip.addEventListener("pointerdown", (e) => {
-        if (!WIDE.matches) return;
-        startY = e.clientY; startH = list.clientHeight - (parseFloat(getComputedStyle(list).paddingTop) || 0) - (parseFloat(getComputedStyle(list).paddingBottom) || 0);
-        grip.setPointerCapture(e.pointerId); document.body.classList.add("resizing"); e.preventDefault();
-      });
-      grip.addEventListener("pointermove", (e) => { if (grip.hasPointerCapture(e.pointerId)) set(startH + (startY - e.clientY)); });
-      const stop = (e) => { if (grip.hasPointerCapture(e.pointerId)) grip.releasePointerCapture(e.pointerId); document.body.classList.remove("resizing"); };
-      grip.addEventListener("pointerup", stop); grip.addEventListener("pointercancel", stop);
-      grip.addEventListener("keydown", (e) => {
-        if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
-        e.preventDefault();
-        const cur = parseFloat(getComputedStyle(list).maxHeight) || 120;
-        set(cur + (e.key === "ArrowUp" ? 24 : -24));
-      });
-      grip.addEventListener("dblclick", () => { try { localStorage.removeItem(SINK_KEY); } catch {} sizeSinks(); });
-    });
-  }
-  WIDE.addEventListener?.("change", () => sizeSinks());
-  function paintCounts() {
+  const blockingLeft = () => qsAll().filter((q) => q.blocking && bulkOk(q));
+  /* Counts, the bulk button and visibility of each section, after the filter ran. */
+  function paintSections() {
     if (!isBoard()) return;
-    requestAnimationFrame(sizeSinks);
-    document.querySelectorAll("[data-count]").forEach((c) => { const list = [...document.querySelectorAll("[data-cards]")].find((n) => n.dataset.cards === c.dataset.count); c.textContent = String(list ? list.querySelectorAll(".fcard:not(.filtered)").length : 0); });
-    /* A box the filter leaves with no card leaves the board with its heading, count and chip, and so does a group whose
-       boxes all left. With every card showing, an empty box stays: it is where a card can be dropped. */
-    document.querySelectorAll(".box").forEach((b) => { b.hidden = view.filter !== "all" && !b.querySelector(".fcard:not(.filtered)"); });
-    document.querySelectorAll(".group").forEach((g) => { g.hidden = !g.querySelector(".box:not([hidden])"); });
-    document.querySelectorAll(".board").forEach((r) => r.style.setProperty("--n", String(Math.max(1, r.querySelectorAll(".box:not([hidden])").length))));
-    document.querySelectorAll(".grow").forEach((r) => r.style.setProperty("--g", String(Math.max(1, r.querySelectorAll(".group:not([hidden])").length))));
+    document.querySelectorAll(".bgroup").forEach((sec) => {
+      const g = sec.dataset.group, cards = qsAll().filter((q) => (cardGroup(q) || "") === g);
+      const shown = [...sec.querySelectorAll(".fcard:not(.filtered)")].length;
+      sec.hidden = !shown;
+      const cnt = sec.querySelector("[data-bgcount]"); if (cnt) cnt.textContent = String(cards.length);
+      const btn = sec.querySelector('[data-act="take"]'), n = cards.filter(bulkOk).length;
+      const show = !!btn && n > 0 && !cards.some((q) => q.blocking);
+      if (btn) { btn.hidden = !show; btn.textContent = show ? `Take the suggestion on ${n === cards.length ? "all" : "the rest"} · ${n}` : ""; }
+    });
   }
 
   /* ---------- question list ---------- */
@@ -1236,7 +1185,7 @@ var AidlcIds = (function () {
   function collect(qid) {
     const node = document.getElementById("q-" + qid); if (!node) return;
     const note = node.querySelector("textarea").value;
-    const k = isBoard() ? [boxOf(qid)] : [...node.querySelectorAll("input:checked")].map((i) => i.value);
+    const k = isBoard() ? (boxOf(qid) ? [boxOf(qid)] : []) : [...node.querySelectorAll("input:checked")].map((i) => i.value);
     record(qid, k, note);
   }
 
@@ -1286,7 +1235,7 @@ var AidlcIds = (function () {
   }
   function answered(qid) {
     const q = view.questions.get(qid); const a = view.answers[qid];
-    if (q?.kind === "card") return true;
+    if (q?.kind === "card") return complete(qid);
     if (q?.kind === "text") return !!(a?.note || "").trim();
     return !!(a?.k || []).length;
   }
@@ -1296,18 +1245,14 @@ var AidlcIds = (function () {
 
   async function done() {
     if (!db || !view.id || view.closing) return;
+    if (isBoard()) {
+      const left = ordered().map((q) => q.id).filter((id) => !complete(id));
+      if (left.length) { notify({ crit: true, html: `${plural(left.length, "card")} need an answer (${idList(left)}): press a decision, and write the reason where one is asked for.`, jump: left[0] }); reveal("q-" + left[0]); return; }
+    }
     const miss = missingNotes();
     if (miss.length) { notify({ crit: true, html: `${idList(miss)}: you chose Other — write your own words in the note, or pick an option.`, jump: miss[0] }); reveal("q-" + miss[0]); return; }
     const open = unanswered();
     if (open.length && !view.confirmDone) { view.confirmDone = true; notify({ html: `${plural(open.length, "question")} unanswered (${idList(open)}). They stay open questions for Claude. Press Done again to confirm.`, jump: open[0] }); return; }
-    if (isBoard()) {
-      /* A card left where it started is an answer too: write every card's box. */
-      const now = new Date().toISOString();
-      for (const qid of view.questions.keys()) {
-        const k = boxOf(qid);
-        if (view.answers[qid]?.k?.[0] !== k) { view.answers[qid] = { k: [k], note: view.answers[qid]?.note || "", at: now }; view.pending[qid] = view.answers[qid]; }
-      }
-    }
     clearTimeout(view.timer); clearTimeout(view.retryTimer); view.closing = true; view.notice = null; paintBar();
     try {
       /* Wait until every answer is saved: an autosave may be in flight, and more may be pending. */
@@ -1327,7 +1272,7 @@ var AidlcIds = (function () {
   function reveal(targetId) {
     const node = document.getElementById(targetId); if (!node) return;
     if (node.classList.contains("filtered")) { view.filter = "all"; applyFilter(); paintBar(); }
-    if (node.classList.contains("fcard") && !node.classList.contains("open")) setOpen(node, true);
+    if (node.classList.contains("fcard") && !node.classList.contains("open")) setOpen(node.dataset.qid, true);
     node.scrollIntoView({ block: node.classList.contains("fcard") ? "center" : "start", behavior: reduced() ? "auto" : "smooth" });
     node.classList.remove("flash"); void node.offsetWidth; node.classList.add("flash");
     if (!node.hasAttribute("tabindex")) node.setAttribute("tabindex", "-1");
@@ -1362,6 +1307,8 @@ var AidlcIds = (function () {
     if (act === "done") done();
     else if (act === "retry") { view.retry = 0; flush(); }
     else if (act === "next") { const open = unanswered(); const cur = ordered().findIndex((q) => { const n = document.getElementById("q-" + q.id); return n && n.getBoundingClientRect().top > (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--bar-h")) || 120) + 24; }); const after = ordered().slice(Math.max(0, cur)).map((q) => q.id).find((q) => open.includes(q)) || open[0]; if (after) reveal("q-" + after); }
+    else if (act === "blocking") take(blockingLeft());
+    else if (act === "take") { const g = e.target.closest("[data-group]").dataset.group; take(qsAll().filter((q) => (cardGroup(q) || "") === g)); }
     else if (act === "expand") setAllOpen(true);
     else if (act === "collapse") setAllOpen(false);
     else if (act === "allseen") markSeen(qsAll().map((q) => q.id));
@@ -1371,7 +1318,7 @@ var AidlcIds = (function () {
     const id = a.getAttribute("data-aidlc-ref"), node = id && document.getElementById("q-" + id);
     if (!node) return;
     if (node.classList.contains("filtered")) { view.filter = "all"; applyFilter(); paintBar(); }
-    if (node.classList.contains("fcard") && !node.classList.contains("open")) setOpen(node, true);
+    if (node.classList.contains("fcard") && !node.classList.contains("open")) setOpen(node.dataset.qid, true);
   }, true);
   window.addEventListener("beforeunload", (e) => { if (Object.keys(view.pending).length || view.inflight) { flush(); e.preventDefault(); e.returnValue = ""; } });
 

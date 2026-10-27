@@ -272,6 +272,11 @@ class Answers(unittest.TestCase):
         picks = findings.picks_of(self.brief, answers={"R-02": {"k": ["accept"]}, "R-03": {"k": ["accept"], "note": ""}})
         self.assertEqual(findings.answer_summary(self.brief, picks) + "\n", fixture("answers-accept.md"))
 
+    def test_reject_without_a_reason_is_refused(self):
+        for note in ("", "   ", None):
+            with self.assertRaisesRegex(ValueError, "rejects R-02 without a reason"):
+                findings.picks_of(self.brief, answers={"R-02": {"k": ["reject"], "note": note}, "R-03": {"k": ["accept"]}})
+
     def test_reject_with_a_note_quotes_it_as_written(self):
         note = "Checkout and expiry never run on the same cart:\nthe cart is locked while it checks out."
         picks = findings.picks_of(self.brief, answers={"R-02": {"k": ["reject"], "note": note}, "R-03": {"k": ["accept"]}})
@@ -337,17 +342,22 @@ class Board(unittest.TestCase):
         self.assertEqual([b["k"] for b in form["boxes"]], ["fix", "accept", "reject"])
         self.assertEqual([b.get("tone") for b in form["boxes"]], ["ink", "muted", "warn"])
         self.assertEqual(form["boxes"][0]["hint"], "Fixed before approval")
-        self.assertEqual(form["boxes"][2]["t"], "Reject (reason required)")
-        self.assertTrue(form["boxes"][2]["sink"])
-        self.assertNotIn("sink", form["boxes"][0])
+        self.assertEqual(form["boxes"][2]["t"], "Reject")
+        self.assertEqual(form["boxes"][2]["note"], {"required": True, "label": "Why does this not apply?"})
+        self.assertNotIn("note", form["boxes"][0])
+        self.assertFalse(any("sink" in b or "group" in b for b in form["boxes"]))  # the page lists cards, no columns
+        self.assertEqual([(g["k"], g["t"]) for g in form["groups"]], [("blocking", "Blocking"), ("carried", "Can be carried")])
         self.assertTrue(form["file"].endswith("domain-model.md"))
 
     def test_cards(self):
         _, blocking, minor, _ = self.made()
         self.assertEqual((blocking["kind"], blocking["n"], minor["n"]), ("card", 1, 2))
         self.assertEqual(blocking["proposed"],
-                         {"k": "fix", "why": "Major: it blocks approval until it is fixed or rejected, so it starts in Fix"})
-        self.assertEqual(minor["proposed"], {"k": "accept", "why": "Minor: it can be carried as a known risk, so it starts in Accept"})
+                         {"k": "fix", "why": "Major: it blocks approval until it is fixed or rejected"})
+        self.assertEqual(minor["proposed"], {"k": "accept", "why": "Minor: it can be carried as a known risk"})
+        self.assertEqual((blocking["group"], blocking["severity"], blocking["blocking"]), ("blocking", "Major", "Blocks approval"))
+        self.assertEqual((minor["group"], minor["severity"]), ("carried", "Minor"))
+        self.assertNotIn("blocking", minor)
         self.assertEqual(set(blocking["outcomes"]), {"fix", "accept", "reject"})
         self.assertEqual(blocking["from"], "AI review, Major")
         self.assertLessEqual(len(blocking["text"]), 90)
@@ -400,6 +410,8 @@ class Board(unittest.TestCase):
         self.assertEqual(card["detail"].split("\n\n")[0], "**Where:** in cart.py")
         self.assertEqual(card["refs"][0]["tip"], "src/cart.py, line 42")
         self.assertEqual(card["proposed"]["k"], "fix")
+        self.assertEqual((card["group"], card["severity"], card["blocking"]), ("blocking", "Confirmed", "Blocking"))
+        self.assertEqual([g["t"] for g in form["groups"]], ["Confirmed", "Possible"])
         self.assertNotIn("stage", form)
 
     def test_ids_the_cards_mention_get_the_forms_ids_map(self):

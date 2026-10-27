@@ -58,8 +58,9 @@ with a line becomes the file's name.
 - **Accept.** Offered only when no finding blocks. At a gate, Approve records the findings as
   accepted risks (the engine does that). In a code review they are listed as accepted.
 - **Open in form.** The agent opens a board in your **AI-DLC question forms** artifact (the
-  `question-forms` plugin): one card per finding, in the boxes Fix, Accept and Reject (reason
-  required), each card starting where its severity says. You sort them and press Done; the agent
+  `question-forms` plugin): one card per finding with three buttons, Fix, Accept and Reject (a
+  reason is required). The suggestion for each card is marked, but nothing is picked for you: you press a
+  decision on every card (or take the suggestions in bulk), and press Done; the agent
   shows one line per card and acts on it. Rejected cards go on the rejected report as
   `--reject-finding`.
 
@@ -113,10 +114,10 @@ findings.py board    --findings FILE [--id ID] [--title T] [--project-dir D] --o
 ```
 
 `board` writes `forms.json`, `cards/<id>.json` and `writes.json` for one `ArtifactData` batch: the
-form `forms/<id>` (`view: "board"`, three boxes) and a `forms/<id>/questions/<finding id>` card per
+form `forms/<id>` (`view: "board"`, three boxes, two `groups` as sections; Reject carries `note: {required: true}`) and a `forms/<id>/questions/<finding id>` card per
 finding, in the contract of the `question-forms` template. Each card's `ctx` is the plain words
 (What's wrong, Suggested, Where); the card also carries the optional fields `plain` (what the
-finding means, after its title), `action` (the suggested action), `detail` (`ctx` without those
+finding means, after its title), `severity`, `blocking` and `group` (the section), `action` (the suggested action), `detail` (`ctx` without those
 two) and `refs` for a page that draws them apart:
 
 ```json
