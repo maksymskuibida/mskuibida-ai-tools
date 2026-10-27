@@ -8,6 +8,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -21,6 +23,7 @@ STAGE = "domain-design"
 BRIEF_COMMAND = f"aidlc engine review-brief review --stage {STAGE} --why first"
 FORM_ID = "260101-demo-shop-domain-design-findings-20261019t1000"
 CODE_FORM_ID = "code-review-20261019t1000"
+os.environ["REVIEW_FINDINGS_SUMMARY_WAIT"] = "0"  # no waiting for a transcript flush, except in the tests of it
 URL = "https://claude.ai/artifact/abc"
 TRIAGE_TEXT = "2 review findings are open (1 blocking). What should I do with them?"
 
@@ -336,6 +339,32 @@ class SummaryFirst(GuardCase):
         self.assertIn("**Suggested:**", text)
         self.h.say(text)
         self.assertAllowed(self.h.pre("AskUserQuestion", triage_input()))
+
+    def test_a_summary_flushed_late_counts(self):
+        text = self.summary_text()
+        timer = threading.Timer(0.8, self.h.say, [text])
+        timer.start()
+        self.addCleanup(timer.join)
+        os.environ["REVIEW_FINDINGS_SUMMARY_WAIT"] = "10"
+        self.addCleanup(os.environ.__setitem__, "REVIEW_FINDINGS_SUMMARY_WAIT", "0")
+        started = time.time()
+        self.assertAllowed(self.h.pre("AskUserQuestion", triage_input()))
+        self.assertLess(time.time() - started, 8)
+
+    def test_no_waiting_once_the_question_itself_is_on_disk(self):
+        with open(self.h.transcript, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"type": "assistant", "isSidechain": False, "timestamp": "2099-01-01T00:00:00.000Z",
+                                "message": {"id": "m1", "role": "assistant", "content": [
+                                    {"type": "tool_use", "id": "toolu_q", "name": "AskUserQuestion", "input": {}}]}}) + "\n")
+        os.environ["REVIEW_FINDINGS_SUMMARY_WAIT"] = "30"
+        self.addCleanup(os.environ.__setitem__, "REVIEW_FINDINGS_SUMMARY_WAIT", "0")
+        event = {"hook_event_name": "PreToolUse", "session_id": "s1", "cwd": self.h.project, "tool_use_id": "toolu_q",
+                 "transcript_path": self.h.transcript, "tool_name": "AskUserQuestion", "tool_input": triage_input()}
+        env = dict(os.environ, REVIEW_FINDINGS_DIR=self.h.state, CLAUDE_PROJECT_DIR=self.h.project)
+        started = time.time()
+        done = subprocess.run([sys.executable, HOOK], input=json.dumps(event), capture_output=True, text=True, env=env)
+        self.assertEqual(done.returncode, 2, done.stderr)
+        self.assertLess(time.time() - started, 10)
 
 
 class Reports(GuardCase):

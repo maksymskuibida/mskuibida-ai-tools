@@ -420,6 +420,39 @@ def summary_sent(event, pend):
     return False
 
 
+def summary_flush_wait():
+    try:
+        return max(0.0, float(os.environ.get("REVIEW_FINDINGS_SUMMARY_WAIT", "3")))
+    except ValueError:
+        return 3.0
+
+
+def call_written(event):
+    """True when the transcript already holds this very tool call: the response that makes it is then on disk whole."""
+    call_id, path = event.get("tool_use_id"), event.get("transcript_path")
+    if not call_id or not path:
+        return False
+    try:
+        with open(path, encoding="utf-8") as f:
+            return any(call_id in line for line in f if '"tool_use"' in line)
+    except OSError:
+        return False
+
+
+def wait_for_summary(event, pend):
+    """summary_sent, tried again for a moment when the summary is missing. Claude Code writes the blocks of a response
+    to the transcript as they stream, and the hook of a tool call can run before the text block of the same response
+    (one entry per block, one message id) has reached the file; a summary sent in the response that asks the question
+    would be refused for good. It waits for the text to land, and stops waiting once the question's own tool call is
+    on disk."""
+    deadline = time.time() + summary_flush_wait()
+    while True:
+        sent = summary_sent(event, pend)
+        if sent or time.time() >= deadline or call_written(event):
+            return sent
+        time.sleep(0.2)
+
+
 def is_gate(question):
     return (norm(question.get("header", "")) == "approval" and bool(labels(question) & GATE_LABELS)
             and not PULL_REQUEST.search(str(question.get("question", ""))))
@@ -579,7 +612,7 @@ def guard(event, tool, ti, command, pend):
                     raise Refusal("No finding is blocking, so the triage question offers Accept too: "
                                   "Fix, Accept, Open in form (in that order).")
         if not pend.get("asked"):
-            if any(is_triage(q) for q in qs) and not summary_sent(event, pend):
+            if any(is_triage(q) for q in qs) and not wait_for_summary(event, pend):
                 raise Refusal(
                     "Show the developer the summary of the findings in a message of its own before the question: run "
                     f"`python3 {os.path.join(SCRIPTS, 'findings.py')} summary --findings {pend.get('file') or '<the saved findings file>'}` "
