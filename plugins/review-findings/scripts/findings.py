@@ -432,7 +432,7 @@ def summary(doc):
     for it in readable(doc):
         meta = status_word(it) + (f", {it['where']}" if it["where"] else "")
         lines.append(f"{it['n']}. **{it['title']}** ({meta})" + (f" {clip(it['rest'], SUMMARY_LIMIT)}" if it["rest"] else ""))
-        lines.append(f"   Suggested: {it['suggested']}")
+        lines.append(f"   **Suggested:** {it['suggested']}")
     return head + "\n\n" + "\n".join(lines)
 
 

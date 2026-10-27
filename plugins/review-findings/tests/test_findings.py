@@ -119,9 +119,9 @@ class Summary(unittest.TestCase):
         self.assertEqual(lines[1], "")
         self.assertTrue(lines[2].startswith("1. **The `Cart` rule `checkout | expire` is ambiguous.** (Blocking, domain "
                                             "model › Cart aggregate, invariants list) Two events can fire"))
-        self.assertEqual(lines[3], "   Suggested: State the winning event. Add one line on what happens to reserved stock.")
+        self.assertEqual(lines[3], "   **Suggested:** State the winning event. Add one line on what happens to reserved stock.")
         self.assertTrue(lines[4].startswith("2. **The Events table lists"))
-        self.assertTrue(lines[5].startswith("   Suggested: No change was named by the reviewer"))
+        self.assertTrue(lines[5].startswith("   **Suggested:** No change was named by the reviewer"))
         self.assertEqual(len(lines), 6)
 
     def test_no_ids_or_paths_in_the_sentences(self):

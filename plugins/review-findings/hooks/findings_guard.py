@@ -35,6 +35,7 @@ PostToolUse/UserPromptSubmit. Standard library only.
 """
 
 import contextlib
+import datetime
 import importlib.util
 import json
 import os
@@ -374,6 +375,48 @@ def is_triage(question):
     return norm(question.get("header", "")) == "findings" and {"fix", "open in form"} <= labels(question)
 
 
+def epoch_of(stamp):
+    try:
+        return datetime.datetime.fromisoformat(str(stamp).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def summary_sent(event, pend):
+    """True when a message of the assistant, written since these findings were saved, shows their summary: it names
+    the review ("Review findings", the stage) and carries a suggested action per open finding. Tool results, the
+    developer's prompts, thinking and subagent transcripts do not count. An unreadable transcript counts as sent: the
+    question is not held on what cannot be checked."""
+    path = event.get("transcript_path")
+    if not path:
+        return True
+    label = (pend.get("stage_name") or pend.get("stage") or "").lower() if pend.get("source") != "code-review" else ""
+    since, total = pend.get("at"), len(pend.get("findings") or [])
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                if '"assistant"' not in line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(entry, dict) or entry.get("type") != "assistant" or entry.get("isSidechain"):
+                    continue
+                stamp = epoch_of(entry.get("timestamp"))
+                if isinstance(since, (int, float)) and stamp is not None and stamp < since - 1:
+                    continue
+                content = (entry.get("message") or {}).get("content") if isinstance(entry.get("message"), dict) else None
+                for block in content if isinstance(content, list) else [{"type": "text", "text": content}]:
+                    text = str(block.get("text", "")) if isinstance(block, dict) and block.get("type") == "text" else ""
+                    low = text.lower()
+                    if "review findings" in low and (not label or label in low) and low.count("suggested") >= total:
+                        return True
+    except OSError:
+        return True
+    return False
+
+
 def is_gate(question):
     return (norm(question.get("header", "")) == "approval" and bool(labels(question) & GATE_LABELS)
             and not PULL_REQUEST.search(str(question.get("question", ""))))
@@ -512,6 +555,12 @@ def guard(event, tool, ti, command, pend):
                     raise Refusal("No finding is blocking, so the triage question offers Accept too: "
                                   "Fix, Accept, Open in form (in that order).")
         if not pend.get("asked"):
+            if any(is_triage(q) for q in qs) and not summary_sent(event, pend):
+                raise Refusal(
+                    "Show the developer the summary of the findings in a message of its own before the question: run "
+                    f"`python3 {os.path.join(SCRIPTS, 'findings.py')} summary --findings {pend.get('file') or '<the saved findings file>'}` "
+                    "and send its output as the text of your message (every finding with its **Suggested:** action), "
+                    "then ask. Thinking is not output and a tool result is not a message.")
             if not all(is_triage(q) for q in qs):
                 raise Refusal(
                     f"{total} review finding(s) are open and the developer has not been asked what to do with them. "

@@ -39,14 +39,16 @@ brief or the report. It holds the summary block and the path of a saved findings
 ## 2. The summary and the question
 
 Print the summary block from the hook message in chat (or render it again with `FINDINGS summary
---findings <file>`). It shows each open finding in plain words, with its suggested action and no
-ids, rule codes or paths in the sentences:
+--findings <file>`), as the text of a message of its own, before the question. The hook refuses the
+triage question until a message of yours since the findings were saved shows it: the review named
+and a **Suggested:** action for every open finding. It shows each open finding in plain words, with
+its suggested action in bold and no ids, rule codes or paths in the sentences:
 
 ```
 **Review findings — Domain Design:** 2 open, 1 blocking
 
 1. **The `Cart` rule `checkout | expire` is ambiguous.** (Blocking, domain model › Cart aggregate, invariants list) Two events can fire on the same cart, …
-   Suggested: State the winning event. Add one line on what happens to reserved stock.
+   **Suggested:** State the winning event. Add one line on what happens to reserved stock.
 ```
 
 When you talk about a finding in chat, do the same: its number in this list and its words, never
