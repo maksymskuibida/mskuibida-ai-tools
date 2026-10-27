@@ -79,9 +79,11 @@ And always:
 - a triage question that offers Accept while a finding blocks, or leaves it out when none does;
 - after Fix, a rejected report whose `--reason` misses an open finding id;
 - after Open in form, the gate and the report until the form reads `status: "done"`;
-- once the answer is known (Fix or Accept, or the form done), the gate, the reports and, in a code
-  review, edits and commits until the summary of the answers has been printed with `findings.py
-  answers` ("## Review Findings: User Answer", one `### <id>: Fix|Accept|Reject` per finding, with
+- after a done form, the gate and the reports until its answers have been read; a stage review
+  with any card in Fix is Request Changes, so the Approval question and an approved report are
+  refused and the rejected report names every Fix card (answers from the form need no summary);
+- once Fix or Accept is answered in chat, the gate, the reports and, in a code review, edits and
+  commits until the summary of the answers has been printed with `findings.py answers` ("## Review Findings: User Answer", one `### <id>: Fix|Accept|Reject` per finding, with
   `#### Action items:` and `#### User Note:` where they apply) and matches the recorded answers;
 - an agent writing `status: "done"` on a findings form (only your press on Done does that).
 

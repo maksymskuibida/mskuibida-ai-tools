@@ -19,8 +19,11 @@ What it enforces (PreToolUse, exit code 2 and the reason on stderr)
   * Answer Open in form: the gate (and the report) waits until the form reads status done.
   * Answer Fix: a rejected report must name every open finding id in `--reason`.
   * An agent never writes status done on a findings form.
-  * Once the answer is known (Fix or Accept, or the form done), the gate, the reports and (code review) edits and
-    commits wait until `findings.py answers` printed the summary of the answers and it matches what was recorded.
+  * Once Fix or Accept is answered in chat, the gate, the reports and (code review) edits and commits wait until
+    `findings.py answers` printed the summary of the answers and it matches what was recorded. Answers from a done
+    form need no summary.
+  * A done form with cards in Fix (a stage review) is Request Changes: the Approval question and an approved report
+    are refused, and the rejected report's --reason names every Fix card.
   * The review brief is printed unpiped and in full: a Bash call that pipes `aidlc engine review-brief`
     (`| head`, `| tail`, `| grep`, …) or redirects its output is refused, and a brief whose table lists
     open findings without their `> R-NN Finding:` lines (a cut-off output) is not recorded as findings:
@@ -445,18 +448,39 @@ def form_wait(pend):
         return ("The developer chose Open in form, so the findings are sorted in a form before the gate. Write the "
                 "board with `findings.py board` and ask the form check (\"Look at the form and pick one from above: "
                 "<artifact url>#<form id>\", header Form).")
-    return None if form.get("done") else "Answer the form to continue: " + form_link(pend)
+    if not form.get("done"):
+        return "Answer the form to continue: " + form_link(pend)
+    if form.get("answers") is None:
+        return (f"The form is done, but its answers have not been read. Read them with ArtifactData get of "
+                f"forms/{form.get('id', '<id>')}.")
+    return None
 
 
 def summary_wait(pend):
-    """Why the next step waits for the summary of the developer's answers, or None: once the answer is known (Fix or
-    Accept in chat, or a done form) the agent prints it with `findings.py answers` and sends it as written."""
-    if not pend.get("asked") or pend.get("summarized") or form_wait(pend) is not None:
+    """Why the next step waits for the summary of the developer's answers, or None: once Fix or Accept is answered in
+    chat the agent prints it with `findings.py answers` and sends it as written. Answers from a done form need no
+    summary: the developer wrote them in the form themselves."""
+    if not pend.get("asked") or pend.get("summarized") or pend.get("answer") == "form":
         return None
     return ("Send the summary of the developer's answers first: run `python3 "
             f"{os.path.join(SCRIPTS, 'findings.py')} answers --findings {pend.get('file') or '<the saved findings file>'}` "
             "and send its output in chat exactly as printed (it starts \"" + F.ANSWERS_HEADING + "\"). Nothing is fixed, "
             "and the gate is not asked, before that.")
+
+
+def form_fix_ids(pend):
+    """The findings the developer put in the Fix box of a done form (a stage review), in order; [] otherwise."""
+    form = pend.get("form") or {}
+    if pend.get("answer") != "form" or not form.get("done") or pend.get("source") == "code-review":
+        return []
+    answers = form.get("answers") or {}
+    return [f["id"] for f in pend.get("findings") or []
+            if "fix" in ((answers.get(f["id"]) or {}).get("k") or [])]
+
+
+REQUEST_CHANGES_NOW = ("Do not ask the Approval question: report rejected now, with --reason naming every Fix card by id "
+                       "with its action items and the developer's note, and --reject-finding \"<review artifact "
+                       "path>#R-NN=<note>\" for each Reject card. Then say in chat which findings go back for fixing.")
 
 
 def blocked(pend):
@@ -571,6 +595,10 @@ def guard(event, tool, ti, command, pend):
         why = form_wait(pend) or summary_wait(pend)
         if why and any(is_gate(q) for q in qs):
             raise Refusal(why)
+        fixes = form_fix_ids(pend)
+        if fixes and any(is_gate(q) for q in qs):
+            raise Refusal(f"The developer marked {', '.join(fixes)} for Fix in the form, which already is Request Changes. "
+                          + REQUEST_CHANGES_NOW)
         return
     if tool in EDIT_TOOLS:
         if pend.get("source") == "code-review" and blocked(pend) and inside_project(event, ti):
@@ -613,9 +641,18 @@ def report_guard(pend, rep):
     why = form_wait(pend) or summary_wait(pend)
     if why:
         raise Refusal(why)
+    fixes = form_fix_ids(pend)
     if rep["result"] != "rejected":
+        if fixes:
+            raise Refusal(f"The developer marked {', '.join(fixes)} for Fix in the form, so the stage is not approved. "
+                          + REQUEST_CHANGES_NOW)
         return
-    if pend.get("answer") == "fix":
+    if fixes:
+        missing = [i for i in fixes if not names_id(rep["reason"], i)]
+        if missing:
+            raise Refusal("The rejected report's --reason names every finding the developer marked for Fix in the form, "
+                          "with its action items. Missing: " + ", ".join(missing) + ".")
+    elif pend.get("answer") == "fix":
         missing = [i for i in ids if not names_id(rep["reason"], i)]
         if missing:
             raise Refusal("The developer chose Fix, so the rejected report's --reason names every open finding with "
@@ -875,8 +912,7 @@ def on_triage(state, pend, answer):
             "Something is wrong in the form). The gate"
             + ("" if not code else " and every edit or commit")
             + " waits until forms/<id> reads status done (read it with ArtifactData get or query; you never write "
-            "done). Then print the summary of the answers with `findings.py answers --findings <the saved findings file>` "
-            "and send it as printed" + ("." if code else ", before the gate."))
+            "done). The answers come from the form, so no summary of them is sent in chat.")
 
 
 def on_gate_answer(pend, answer):
@@ -933,13 +969,18 @@ def on_data(state, ti, resp):
                            if isinstance(v, dict)}
     else:
         return (f"the form {form['id']} is done, but its answers were not in this result. Read it with ArtifactData get "
-                f"of forms/{form['id']}, then print the summary of the answers.")
+                f"of forms/{form['id']}: the next steps use them.")
     if pend.get("source") == "code-review":
-        return (f"the form {form['id']} is done. {summary_wait(pend)} Then Fix cards are fixed now; Accept cards are "
+        state["pending"] = None  # the developer's answers are in the form: nothing more to wait for
+        return (f"the form {form['id']} is done. Fix cards are fixed now; Accept cards are "
                 "carried; Reject cards are listed with the note.")
-    return (f"the form {form['id']} is done. {summary_wait(pend)} Then present the gate. Request Changes carries the Fix "
-            "cards (by id, with the action items) in --reason, and each Reject card as --reject-finding \"<review artifact "
-            "path>#R-NN=<note>\"; Accept cards stay open and are recorded as accepted risks on Approve.")
+    fixes = form_fix_ids(pend)
+    if fixes:
+        return (f"the form {form['id']} is done and the developer marked {', '.join(fixes)} for Fix: that is Request "
+                f"Changes. {REQUEST_CHANGES_NOW}")
+    return (f"the form {form['id']} is done with nothing marked for Fix. Present the gate; Accept cards are recorded as "
+            "accepted risks on Approve. A Request Changes there carries each Reject card as --reject-finding "
+            "\"<review artifact path>#R-NN=<note>\".")
 
 
 # ---------------------------------------------------------------- UserPromptSubmit

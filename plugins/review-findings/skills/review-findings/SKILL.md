@@ -73,8 +73,7 @@ approved and rejected reports and, for a code review, edits and `git commit|push
 
 ## 3. What each answer means
 
-**First, the summary of the answers.** As soon as the answer is known (Fix or Accept here, or the
-form read as done in § 4), run `FINDINGS answers --findings <file>` with no other arguments. It
+**First, the summary of the answers.** As soon as Fix or Accept is answered here, run `FINDINGS answers --findings <file>` with no other arguments. It
 prints the developer's answers, finding by finding, from what the hook recorded:
 
 ```
@@ -152,7 +151,11 @@ that skill's § 1 to publish it first.
    refuses it.
 4. Read the answers back with `ArtifactData` `get` of `forms/<form id>` (the hook records the
    answers from that result; `answers[qid].k[0]` is the card's box, `note` the developer's words).
-   Print and send the summary of the answers as in § 3, then:
+   No summary of the answers is sent: the developer wrote them in the form. Then:
+   - **Any card in Fix** (a stage review): that is Request Changes. Do not ask the Approval
+     question; report rejected at once, with the Fix cards and the Reject cards as below, and say in
+     chat which findings go back for fixing. The hook refuses the Approval question and an approved
+     report here.
    - **Fix** cards: as Fix above. The rejected report's `--reason` names these cards by id with
      their required action.
    - **Accept** cards: carried; on Approve the engine records them as accepted risks.
