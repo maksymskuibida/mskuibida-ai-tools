@@ -372,6 +372,46 @@ export function unitStageStatuses(progress: UnitProgress): Map<string, UnitStage
   )
 }
 
+/** The engine's claim registry in `aidlc/`: every Unit claimed by anyone on the team, shared through git refs. */
+export const CLAIM_REGISTRY_FILE = '.aidlc-claim-registry.json'
+
+/**
+ * The Units the claim registry holds as claimed (`claims.<unit>.status == "claimed"`), by name. When the registry names
+ * an intent UUID and the caller knows the intent's, they must agree: another intent's claims are not these Units'.
+ * Empty when the text is no registry.
+ */
+export function parseClaimRegistry(text: string | null, intentUuid: string): Set<string> {
+  const out = new Set<string>()
+  if (text === null) return out
+  try {
+    const raw: unknown = JSON.parse(text)
+    if (raw === null || typeof raw !== 'object') return out
+    const registry = raw as Record<string, unknown>
+    if (intentUuid !== '' && typeof registry.intent_uuid === 'string' && registry.intent_uuid !== intentUuid) return out
+    const claims = registry.claims
+    if (claims === null || typeof claims !== 'object') return out
+    for (const [unit, claim] of Object.entries(claims)) {
+      if (claim !== null && typeof claim === 'object' && (claim as Record<string, unknown>).status === 'claimed') out.add(unit)
+    }
+  } catch {
+    // Not JSON: no claims known.
+  }
+  return out
+}
+
+/**
+ * Where a Unit stands before any stage has run, for the Units list: `claimed` (someone holds it), `ready` (not claimed,
+ * every Unit it depends on done), `blocked` (a Unit it depends on is not done). Undefined once it has started or is
+ * done (its progress says so; a claim never undoes a finished Unit), and when a dependency has no progress to go on.
+ * A dependency that names no Unit of the list is ignored, as in `buildOrder`.
+ */
+export function startOf(unit: UnitEdge, progress: ReadonlyMap<string, UnitProgress>, claimed: ReadonlySet<string>): 'claimed' | 'ready' | 'blocked' | undefined {
+  if (progress.get(unit.name)?.phase !== 'planned') return undefined
+  if (claimed.has(unit.name)) return 'claimed'
+  const known = unit.dependsOn.filter(dep => progress.has(dep))
+  return known.every(dep => progress.get(dep)?.phase === 'done') ? 'ready' : 'blocked'
+}
+
 /** The file the engine writes in a checkout's `aidlc/` when it claims a Unit for it (`aidlc --claim`), and `unit finish` deletes. */
 export const UNIT_SCOPE_FILE = '.aidlc-unit-scope.json'
 

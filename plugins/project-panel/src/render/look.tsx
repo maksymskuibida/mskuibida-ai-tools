@@ -19,7 +19,7 @@ export function pill(ctx: Ctx, word: string, color: string | undefined, isDim = 
   )
 }
 
-type Kind = 'done' | 'stale' | 'live' | 'local' | 'current' | 'planned' | 'skipped' | 'failed' | 'mark'
+type Kind = 'done' | 'stale' | 'live' | 'local' | 'current' | 'planned' | 'ready' | 'blocked' | 'skipped' | 'failed' | 'mark'
 
 /** What the item's glyph means, as an icon. */
 function kindOf(item: Item, glyph: string): Kind {
@@ -28,7 +28,8 @@ function kindOf(item: Item, glyph: string): Kind {
   if (glyph === '◌') return 'local'
   if (glyph === '✕') return 'failed'
   if (glyph === '–') return 'skipped'
-  if (glyph === '○') return item.isCurrent ? 'current' : 'planned'
+  if (glyph === '⊘') return 'blocked'
+  if (glyph === '○') return item.isCurrent ? 'current' : item.readiness === 'ready' ? 'ready' : 'planned'
   return 'mark'
 }
 
@@ -51,6 +52,13 @@ export function iconSource(kind: Kind, glyph = ''): string {
       return svg(ring(RING_ARC, '', 1.6) + `<circle cx="7" cy="7" r="2.2" fill="${RING_ARC}"/>`)
     case 'planned':
       return svg(ring(RING_TRACK, ' stroke-opacity="0.7"'))
+    case 'ready':
+      return svg(ring(RING_ARC, '', 1.6))
+    case 'blocked':
+      return svg(
+        ring(RING_TRACK, ' stroke-opacity="0.6"') +
+          `<rect x="4.9" y="6.6" width="4.2" height="3.3" rx="0.7" fill="${RING_TEXT}"/><path d="M5.8 6.6V5.6a1.2 1.2 0 0 1 2.4 0v1" fill="none" stroke="${RING_TEXT}" stroke-width="1.1" stroke-linecap="round"/>`,
+      )
     case 'skipped':
       return svg(ring(RING_TRACK, ' stroke-opacity="0.5" stroke-dasharray="2 2"') + `<line x1="4.5" y1="7" x2="9.5" y2="7" stroke="${RING_TEXT}" stroke-width="1.5" stroke-linecap="round"/>`)
     case 'failed':
