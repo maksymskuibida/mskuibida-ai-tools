@@ -5,10 +5,35 @@ description: Use at every AI-DLC questions file, before the developer is asked t
 
 # Question forms
 
-Every questions file gets a form, always. The file stays the record and the engine keeps
-reading it; the form is how the developer fills it. The template, `question-form.html` next to
+The file stays the record and the engine keeps reading it; the form is how the developer fills it.
+Whether a questions file gets a form is the developer's **preference** for this project (§ 0); under
+`always`, or when the developer chose the form for that file, it does, every time. The template, `question-form.html` next to
 this file, is the one page; its header comment is the data contract. Never generate, restyle or
 edit a form page per stage.
+
+## 0. The preference, and what the hooks hold you to
+
+The developer's choice is per user and per project, kept by the plugin (`always`, `ask`, `never`). You
+never read or write it; the `question_guard.py` hook tells you the next step after each questions file you write
+(a `Write`/`Edit` of `…/aidlc/spaces/…/<stage>-questions.md` with `[Answer]:` tags):
+
+- **No preference yet** → open the preference dialog: one `AskUserQuestion` with `metadata: {"source":
+  "question-forms:preference"}` and a placeholder question ("Show question forms?", options "Always" and "Ask").
+  The plugin's mod replaces it with the real question (Always show question forms / Ask every time / Never show) and
+  explains above it what a question form is. Do not answer it, add text of your own or ask anything else; follow the
+  line the mod adds. `/question-forms:preference` opens the same dialog later.
+- **`ask`** → for each file, one `AskUserQuestion` with `metadata: {"source": "question-forms:ask:<repo path of the
+  file>"}` and a placeholder question; the answer (open the form, or the developer edits the file) counts for that file.
+- **`always`**, or the form chosen → § 2 to § 4. **`never`**, or the file chosen → the developer edits the file; the
+  plugin stays out of the way.
+
+What the hooks refuse, so you don't run into it: ending the turn until the dialog is answered, or until the file's
+`forms/<id>` row (whose `file` is the questions file) was written by `ArtifactData`, from `data` or a `file_path` and a message of yours carries
+`<artifact url>#<id>`; an `AskUserQuestion` with that link inside it (send the link in a message of its own, **before**
+the ask, and write nothing after an ask); `aidlc engine orchestrate next|continue|report` for a stage whose form was
+opened while its file still has empty `[Answer]:` tags; recording the preference from Bash or writing its files by
+hand. `/question-forms:release` clears the guard for the session. A turn the hook has held three times is let through
+with a note.
 
 ## 1. The artifact (once per developer)
 

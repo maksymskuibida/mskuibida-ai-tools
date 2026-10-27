@@ -4,7 +4,7 @@
     "name": "Maksym Skuibida"
   },
   "description": "Maksym Skuibida's personal Claude Code tooling — small, opinionated plugins.",
-  "version": "1.16.0",
+  "version": "1.18.0",
   "plugins": [
     {
       "name": "response-format",
@@ -40,7 +40,7 @@
       "name": "question-forms",
       "source": "./plugins/question-forms",
       "description": "Every AI-DLC questions file becomes a form in one private artifact: the agent writes the questions as rows, you answer in the page, and the agent copies your answers word for word into the file's [Answer]: tags. Also renders text-only questions and board forms that sort cards into boxes.",
-      "version": "1.5.0"
+      "version": "1.6.0"
     },
     {
       "name": "story-points",
@@ -52,7 +52,7 @@
       "name": "approval-gates",
       "source": "./plugins/approval-gates",
       "description": "For AI-DLC projects: at every approval gate the stage's documents, the review brief and the completion summary become one page in the developer's private artifact, linked from the gate question, with a purpose-built view per document kind (entities, rules, components, units, stories, requirements, decisions, contracts, bolts, traceability) and ids linked across documents; a hook refuses the Approval question and the approved or rejected report until the page exists. Notes left in the page come back to the agent. Under the unit-end rhythm a Unit gets two pages instead: the plan page (every design stage, read once) and the unit-end page (what was built), built from a gate bundle whose JSON contract and validator ship with the plugin. On both pages every id (US, AC, FR, NFR, BR, Q, U, C, E, ADR, R, ...) is a link with a tooltip saying what it is, found the one shared aidlc-ids way.",
-      "version": "1.12.0"
+      "version": "1.13.0"
     },
     {
       "name": "review-findings",

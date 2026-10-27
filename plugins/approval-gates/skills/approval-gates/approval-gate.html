@@ -905,6 +905,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     if (g.summary) renderMarkdown($("summarymd"), g.summary);
     if (g.brief) fillBrief(g);
     docs.forEach((d, i) => fillDoc(d, i));
+    openAll();
     docs.forEach((d) => { const b = $("d-" + d.key); if (b && d.path) regRef("file:" + d.path.split("/").pop().toLowerCase(), b, d.title || d.key, d.path.split("/").pop()); });
     view.ids = idMap(docs);
     linkRefs(el.col);
@@ -2503,6 +2504,17 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     const b = e.target.closest("[data-go]"); if (b) go(b.dataset.go, b);
   });
   el.rail.addEventListener("keydown", (e) => { if ((e.key === "Enter" || e.key === " ") && e.target.closest(".rdoc")) { e.preventDefault(); e.target.closest(".rdoc").click(); } });
+  /* Everything opens when the page is drawn; a block the viewer marked read stays folded. */
+  function openAll() {
+    el.col.querySelectorAll("details").forEach((d) => { d.open = true; });
+    el.col.querySelectorAll("details.block[data-block]").forEach((b) => { if (isRead(b.dataset.block)) b.open = false; });
+    drawDiagrams(el.col);
+  }
+  /* Marking a block read folds it; marking it unread opens it again. */
+  function readAndFold(keys, on) {
+    setRead(keys, on);
+    keys.forEach((k) => { const b = el.col.querySelector(`details.block[data-block="${CSS.escape(k)}"]`); if (b) { b.open = !on; if (!on) drawDiagrams(b); } });
+  }
   function expandAll(on) {
     el.col.querySelectorAll("details").forEach((d) => { d.open = on; }); if (on) drawDiagrams(el.col);
     el.rail.querySelectorAll("details.rgroup").forEach((g) => { g.open = on; view.railOpen[g.dataset.key] = on; });
@@ -2512,7 +2524,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     e.preventDefault();
     if (t.dataset.filter) { view.filter = t.dataset.filter; paintChrome(docList()); }
     else if (t.dataset.all) expandAll(t.dataset.all === "open");
-    else if (t.dataset.allread) setRead(blocksOf(docList()).map((b) => b.key), true);
+    else if (t.dataset.allread) readAndFold(blocksOf(docList()).map((b) => b.key), true);
     else if (t.dataset.outline) { el.rail.classList.toggle("show"); t.setAttribute("aria-expanded", String(el.rail.classList.contains("show"))); if (el.rail.classList.contains("show")) el.rail.scrollIntoView({ block: "nearest" }); }
     else if (t.dataset.retry) { view.unsaved = true; view.failed = false; flushNotes(); }
     else if (t.dataset.go) go(t.dataset.go, t);
@@ -2521,7 +2533,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
   el.revs.addEventListener("click", onChromeClick);
   el.col.addEventListener("click", (e) => {
     const rd = e.target.closest(".rdot");
-    if (rd) { e.preventDefault(); e.stopPropagation(); setRead([rd.dataset.read], !isRead(rd.dataset.read)); return; }
+    if (rd) { e.preventDefault(); e.stopPropagation(); readAndFold([rd.dataset.read], !isRead(rd.dataset.read)); return; }
     const sb = e.target.closest(".seg button");
     if (sb) { e.preventDefault(); e.stopPropagation(); view.mode[sb.dataset.key] = sb.dataset.mode; view.painted = ""; paintAll(); return; }
     const nb = e.target.closest(".notebtn");

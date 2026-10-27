@@ -475,7 +475,8 @@ var GateView = (function () {
   /* ---------- state helpers ---------- */
   function revOf(item) { return item.rev || 1; }
   function isRead(st, key, item) { return (st.read[key] || 0) >= revOf(item); }
-  function isOpen(st, key) { var o = st.open[key]; return o === undefined ? st.mode === "full" : o; }
+  /* Everything is open in the Full view; a row the viewer marked read stays folded until they open it. */
+  function isOpen(st, key, read) { var o = st.open[key]; return o === undefined ? st.mode === "full" && !read : o; }
   function secOpen(st, key, dflt) { var o = st.sec[key]; return o === undefined ? dflt : o; }
   function passes(st, item, key, isStep) {
     var f = st.filter;
@@ -562,7 +563,7 @@ var GateView = (function () {
   }
 
   function rowHtml(st, bundle, sec, r) {
-    var key = anchor(r.id), open = isOpen(st, key), read = isRead(st, key, r);
+    var key = anchor(r.id), read = isRead(st, key, r), open = isOpen(st, key, read);
     var t = r.rev ? revTone(r.rev) : null;
     var bg = t ? "background:var(--" + t + "-tint)" : (r.lookFirst ? "background:var(--accent-tint)" : "");
     var head = '<div class="rowhead">' +
@@ -644,7 +645,7 @@ var GateView = (function () {
   }
 
   function stepHtml(st, bundle, step) {
-    var key = "step-" + int(step.n), open = isOpen(st, key), read = isRead(st, stepKey(step), step), t = step.rev ? revTone(step.rev) : null;
+    var key = "step-" + int(step.n), read = isRead(st, stepKey(step), step), open = isOpen(st, key, read), t = step.rev ? revTone(step.rev) : null;
     var lt = LAYER_TONE[step.layer] || "low";
     var head = '<div class="rowhead"><button type="button" class="twist" data-act="row" data-key="' + key + '" aria-expanded="' + open + '" aria-label="' + (open ? "Collapse" : "Expand") + " step " + int(step.n) + '">' + CHEVRON + "</button>" +
       '<span class="rid">Step ' + int(step.n) + "</span>" +
@@ -691,7 +692,7 @@ var GateView = (function () {
     var body = "";
     if (open) {
       body = '<div class="secbody">' + groups.map(function (g) {
-        var gk = "ans-" + g.key, go = !!st.open[gk];
+        var gk = "ans-" + g.key, go = st.open[gk] !== false;
         var d = (g.questions || []).filter(function (q) { return q.proposed && q.answer.charAt(0) !== q.proposed.charAt(0); }).length;
         return '<div class="row qgroup" id="' + esc(g.key) + '"><div class="rowhead"><button type="button" class="twist" data-act="group" data-key="' + esc(gk) + '" aria-expanded="' + go + '" aria-label="' + (go ? "Collapse " : "Expand ") + esc(g.title) + ' answers">' + CHEVRON + "</button>" +
           '<button type="button" class="rtitle" data-act="group" data-key="' + esc(gk) + '" title="' + esc(g.file) + '">' + esc(g.title) + "</button>" +
@@ -707,7 +708,7 @@ var GateView = (function () {
   }
 
   function designHtml(st, bundle) {
-    var d = bundle.design, open = secOpen(st, "design", false), rows = d.rows || [];
+    var d = bundle.design, open = secOpen(st, "design", true), rows = d.rows || [];
     var link = d.bundle ? '<a href="#' + esc(d.bundle) + '" data-nav="' + esc(d.bundle) + '" style="margin-top:10px;font-size:13px">Open the full plan-approval page</a>' : (d.url ? '<a href="' + esc(safeHref(d.url)) + '" target="_blank" rel="noopener">Open the full plan-approval page</a>' : "");
     var body = open ? '<div class="drows">' + rows.map(function (r) {
       return '<div class="drow"><span class="rid">' + esc(r.id) + '</span><span class="dt" title="' + esc(r.title) + '">' + esc(r.title) + '</span><span class="lab" style="' + tone(LABEL_TONE[r.label] || "low") + '">' + esc(r.label) + "</span></div>";
@@ -788,7 +789,7 @@ var GateView = (function () {
 
   /* The whole page for one bundle. st: {mode, filter, open, sec, read, notes, picks, noteStat}. */
   function render(bundle, st) {
-    st = Object.assign({ mode: "summary", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {} }, st || {});
+    st = Object.assign({ mode: "full", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {} }, st || {});
     var keys = order(bundle).filter(function (k) { return hasContent(st, bundle, k); }), parts = {};
     (bundle.sections || []).forEach(function (s) { parts[s.key] = sectionHtml(st, bundle, s); });
     if (bundle.plan) parts.plan = planHtml(st, bundle);
@@ -823,7 +824,7 @@ if (typeof module !== "undefined") module.exports = GateView;
   var db = null, user = null, uid = null;
   var view = { id: "", row: null, bundle: null, ids: {}, unsub: [], st: null, readKey: "", saving: false, unsaved: false, timer: 0 };
 
-  function freshState() { return { mode: "summary", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {} }; }
+  function freshState() { return { mode: "full", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {} }; }
   function toast(text) { toastEl.textContent = text; toastEl.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(function () { toastEl.hidden = true; }, 2400); }
   function teardown() {
     if (view.unsaved) flush();  /* sends the pending note of the page being left; flush reads the id before it awaits */
@@ -942,16 +943,16 @@ if (typeof module !== "undefined") module.exports = GateView;
     if (!btn || !view.st) return;
     var st = view.st, act = btn.dataset.act, key = btn.dataset.key, val = btn.dataset.val, rev = view.bundle.header.revision || 1;
     if (act === "row") {
-      var now = !(st.open[key] === undefined ? st.mode === "full" : st.open[key]);
-      st.open[key] = now;
+      var twist = app.querySelector('.twist[data-act="row"][data-key="' + key + '"]');
+      st.open[key] = twist ? twist.getAttribute("aria-expanded") !== "true" : !st.open[key];
       /* opening a row only opens it: the read dot is the one thing that marks a row read */
     } else if (act === "sec") {
-      var dflt = key === "design" ? false : true;
-      st.sec[key] = !(st.sec[key] === undefined ? dflt : st.sec[key]);
-    } else if (act === "group") st.open[key] = !st.open[key];
+      st.sec[key] = st.sec[key] === false;
+    } else if (act === "group") st.open[key] = st.open[key] === false;
     else if (act === "read") {
       var it = GateView.itemsOf(view.bundle).filter(function (x) { return x.anchor === key; })[0];
-      if (it) { var r = it.item.rev || 1; if (GateView.isRead(st, it.key, it.item)) { st.read[it.key] = r - 1; saveReads(); } else markRead([it.key], r); }
+      /* marking a row read folds it; marking it unread opens it again */
+      if (it) { var r = it.item.rev || 1; if (GateView.isRead(st, it.key, it.item)) { st.read[it.key] = r - 1; saveReads(); st.open[key] = true; } else { markRead([it.key], r); st.open[key] = false; } }
     } else if (act === "mode") { st.mode = val; st.open = {}; st.sec = {}; }
     else if (act === "filter") { st.filter = val; st.sec = {}; }
     else if (act === "expand" || act === "collapse") {
@@ -959,7 +960,10 @@ if (typeof module !== "undefined") module.exports = GateView;
       GateView.order(view.bundle).forEach(function (k) { st.sec[k] = on; });
       GateView.itemsOf(view.bundle).forEach(function (x) { st.open[x.anchor] = on; });
       (view.bundle.answers || []).forEach(function (g) { st.open["ans-" + g.key] = on; });
-    } else if (act === "allread") markRead(GateView.itemsOf(view.bundle).map(function (x) { return x.key; }), rev);
+    } else if (act === "allread") {
+      markRead(GateView.itemsOf(view.bundle).map(function (x) { return x.key; }), rev);
+      GateView.itemsOf(view.bundle).forEach(function (x) { st.open[x.anchor] = false; });
+    }
     else if (act === "pick") { st.picks[key] = st.picks[key] === val ? "" : val; queueSave(); }
     paint();
   });

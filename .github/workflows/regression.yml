@@ -108,6 +108,12 @@ jobs:
           claude plugin validate plugins/review-findings
           claude plugin test plugins/review-findings
 
+      - name: Validate and test question-forms
+        # Not best effort, same as model-fit: the preference dialogs are the mod's.
+        run: |
+          claude plugin validate plugins/question-forms
+          claude plugin test plugins/question-forms
+
       - name: Validate and test aidlc-ids
         # Not best effort, same as model-fit.
         run: |
@@ -118,7 +124,6 @@ jobs:
         run: |
           claude plugin validate .
           claude plugin validate plugins/worktree-cleanup
-          claude plugin validate plugins/question-forms
           claude plugin validate plugins/story-points
           claude plugin validate plugins/approval-gates
           claude plugin validate plugins/aidlc-session-titles
@@ -140,6 +145,10 @@ jobs:
       - name: Test unit-claim
         # Python hook and choice script with a unittest suite.
         run: python3 -m unittest discover -s plugins/unit-claim/tests
+
+      - name: Test question-forms
+        # Python hook and preference script with a unittest suite.
+        run: python3 -m unittest discover -s plugins/question-forms/tests
 
       - name: Test aidlc-session-titles
         # Python hook with a unittest suite.
