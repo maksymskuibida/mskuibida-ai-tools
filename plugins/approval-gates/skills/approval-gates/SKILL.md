@@ -127,4 +127,6 @@ a small change that the plan page would have been the cheaper place for. Never w
 `hooks/gate_guard.py` refuses the Approval question and the approved, rejected or accepted report until
 a `gates` row for the stage (under the unit-end rhythm: the `bundles` row of the page the gate needs) was written in this session after the gate was opened and a message of yours
 (in the session's transcript) carries its link `<artifact url>#<id>`, and refuses a question that carries
-the link itself: the link goes in a message of its own. The developer clears it with `/approval-gates:release`.
+the link itself: the link goes in a message of its own. The plan approval counts as open as soon as the engine asks for it (the active
+directive is an `ask` with `ask_type: "plan-approval"`), and any question offering Approve Plan, Approve or Accept
+as-is while a gate is open is guarded, whatever its header. The developer clears it with `/approval-gates:release`.

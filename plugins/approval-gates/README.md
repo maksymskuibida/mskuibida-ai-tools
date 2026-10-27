@@ -139,7 +139,12 @@ the `--reason` of the rejected report. It never writes your notes, and never upd
 ## What the hook refuses
 
 - The Approval question (header `Approval`, an option such as Approve, Approve Plan or Accept as-is, no
-  pull request named) until a `gates` row for the stage was written after the gate opened.
+  pull request named) until a `gates` row for the stage was written after the gate opened. While a gate is open, any
+  question offering one of those options counts, whatever its header. The plan approval is open from the moment the
+  engine asks for it (the active directive is an `ask` with `ask_type: "plan-approval"`), not only after an
+  `aidlc engine log decision --checkpoint plan-approval`. A Request Changes answer (`aidlc engine log answer …
+  --details "Request Changes"`) reopens it for the revised plan.
+- A gate is not opened by a report the engine refused (`"kind": "error"`).
 - The same question until a message of the agent in the session's transcript carries the page's link
   `<artifact url>#<gate id>`: you get the link before the question, every time.
 - The same question with the page's link in its text: the link goes in a message of its own, so the dialog stays readable.
