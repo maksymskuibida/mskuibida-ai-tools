@@ -270,13 +270,16 @@ class TestFinalize(Base):
 class TestRender(Base):
     def test_the_plan_page_renders(self):
         _path, b, _info = self.finished()
-        out = render(b, {"summary": {}, "full": {"mode": "full"}, "v1read": {"read": {"A-1": 1}}})
+        out = render(b, {"default": {}, "summary": {"mode": "summary"}, "full": {"mode": "full"}, "v1read": {"read": {"A-1": 1}}})
         page = out["summary"]
         self.assertIn("U2 · Pick-up slots", page)
         for key in ("narrows", "assumptions", "findings", "plan", "tests", "answers"):
             self.assertIn(f'id="{key}"', page)
         self.assertIn('id="FD-R-02"', page)
-        self.assertNotIn('class="rowbody"', page, "rows start folded")
+        self.assertNotIn('class="rowbody"', page, "rows are folded in the Summary view")
+        self.assertIn('class="rowbody"', out["default"], "everything starts open")
+        read_row = out["v1read"].split('class="row read"', 1)[1].split('class="row', 1)[0]
+        self.assertNotIn('class="rowbody"', read_row, "a row marked read stays folded")
         self.assertIn("look first", page)
         self.assertIn("differs from proposal", page)
         self.assertIn("Step 3 settles it", out["full"])
