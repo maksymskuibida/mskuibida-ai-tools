@@ -425,30 +425,33 @@ class Form(GuardCase):
         _, out, _ = self.h.read_form("open")
         self.assertIn("not marked Done", context(out))
         self.assertRefused(self.h.pre("AskUserQuestion", gate_input()), "Answer the form")
-        _, out, _ = self.h.read_form("done", answers=SORTED)
-        self.assertIn("answers --findings", context(out))
+        accepted = {"R-02": {"k": ["accept"], "note": ""}, "R-03": {"k": ["reject"], "note": "The name is deliberate."}}
+        _, out, _ = self.h.read_form("done", answers=accepted)
+        self.assertNotIn("answers --findings", context(out))  # answers from the form need no summary in chat
+        self.assertIn("nothing marked for Fix. Present the gate", context(out))
         self.assertTrue(self.h.pending()["form"]["done"])
-        self.assertEqual(self.h.pending()["form"]["answers"], SORTED)
-        self.assertRefused(self.h.pre("AskUserQuestion", gate_input()), "Send the summary")
-        _, done = self.h.summary()
-        self.assertEqual(done.stdout, "## Review Findings: User Answer\n### R-02: Fix\n#### Action items:\n"
-                                      "- State the winning event.\n- Add one line on what happens to reserved stock.\n"
-                                      "#### User Note:\nCheckout wins.\n### R-03: Reject\n#### User Note:\n"
-                                      "The name is deliberate.\n")
+        self.assertEqual(self.h.pending()["form"]["answers"], accepted)
         self.assertAllowed(self.h.pre("AskUserQuestion", gate_input()))
         self.assertAllowed(self.h.pre("Bash", {"command": report_command("approved")}))
+
+    def test_a_fix_card_in_the_form_is_request_changes(self):
+        self.h.triage("Open in form")
+        self.h.write_form()
+        _, out, _ = self.h.read_form("done", answers=SORTED)
+        self.assertIn("marked R-02 for Fix: that is Request Changes", context(out))
+        self.assertIn("Do not ask the Approval question", context(out))
+        self.assertRefused(self.h.pre("AskUserQuestion", gate_input()), "already is Request Changes")
+        self.assertRefused(self.h.pre("Bash", {"command": report_command("approved")}), "not approved")
+        self.assertAllowed(self.h.pre("Bash", {"command": report_command("rejected", "R-02: state the winning event")
+                                               + ' --reject-finding "x.md#R-03=The name is deliberate."'}))
 
     def test_a_done_read_without_the_answers_asks_for_a_get(self):
         self.h.triage("Open in form")
         self.h.write_form()
         _, out, _ = self.h.read_form("done")
         self.assertIn("answers were not in this result", context(out))
-        _, done = self.h.summary()
-        self.assertEqual(done.returncode, 1)
-        self.assertIn("not read as done yet", done.stderr)
-        self.assertRefused(self.h.pre("AskUserQuestion", gate_input()), "Send the summary")
-        self.h.read_form("done", answers=SORTED)
-        self.h.summary()
+        self.assertRefused(self.h.pre("AskUserQuestion", gate_input()), "answers have not been read")
+        self.h.read_form("done", answers={"R-02": {"k": ["accept"]}, "R-03": {"k": ["accept"]}})
         self.assertAllowed(self.h.pre("AskUserQuestion", gate_input()))
 
     def test_a_summary_must_follow_the_form_answers(self):
@@ -499,8 +502,7 @@ class Form(GuardCase):
         self.h.triage("Open in form")
         self.h.write_form()
         self.h.read_form("done", answers=SORTED)
-        self.h.summary()
-        self.assertRefused(self.h.pre("Bash", {"command": report_command("rejected", "please fix it")}), "R-02, R-03")
+        self.assertRefused(self.h.pre("Bash", {"command": report_command("rejected", "please fix it")}), "Missing: R-02.")
         self.assertAllowed(self.h.pre("Bash", {"command": report_command("rejected", "R-02 needs a winner")
                                                + ' --reject-finding "x.md#R-03=deliberate"'}))
 
@@ -589,9 +591,7 @@ class CodeReview(GuardCase):
         sorted_ = {"F-01": {"k": ["fix"]}, "F-02": {"k": ["accept"], "note": ""}, "F-03": {"k": ["reject"], "note": "By design."}}
         _, out, _ = self.h.read_form("done", CODE_FORM_ID, answers=sorted_)
         self.assertIn("Fix cards are fixed now", context(out))
-        self.assertRefused(self.h.pre("Edit", self.edit), "Send the summary")
-        self.h.summary()
-        self.assertIsNone(self.h.pending())
+        self.assertIsNone(self.h.pending())  # the answers are the developer's own: no summary to wait for
         self.assertAllowed(self.h.pre("Edit", self.edit))
 
     def test_aidlc_reports_are_not_this_source(self):

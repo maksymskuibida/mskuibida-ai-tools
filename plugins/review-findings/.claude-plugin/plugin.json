@@ -1,7 +1,7 @@
 {
   "name": "review-findings",
   "displayName": "Review findings",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "When review findings reach the developer (an AI-DLC stage review at its approval gate, or a code review), shows each open finding in plain words with a suggested action, above one question: Fix, Accept (only when nothing blocks) or Open in form. A hook keeps the order.",
   "author": {
     "name": "Maksym Skuibida"
