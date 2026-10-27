@@ -56,6 +56,11 @@ stage has a reviewer:
    `--near` the stage's documents, so the page's Q1 and R-01 are this stage's and its BR1.1 this Unit's. Leave it as
    the script wrote it. A warning that the map could not be built leaves `ids` out; the page then links only the ids
    it shows itself.
+   For the `build-and-test` stage the script also writes `buildTest` into the gate row: it reads the stage's tables
+   (the Target Verification Matrix, the commands and results, coverage against its floor, the evidence legend) so the
+   page shows a results strip, a filterable target matrix and a decision card per Not Met or Unverified target, with
+   the instruction files folded under Reference. Nothing for you to do; when the tables are not found the field is left
+   out and the page shows the stage like any other.
 3. Send the rows with **one** `ArtifactData` `batch`: the `writes` array of `writes.json` as it is
    (`file_path` entries, no `if_version`, these are new rows). When the script says the writes do not
    fit one batch, send the files named in `batches`, in order. If a write is refused because the id exists,
@@ -73,6 +78,14 @@ The plan checkpoint of Code Generation (Approve Plan) is a gate too: the same st
 ## 3. After the answer
 
 - `Approve`: the engine's approved report, as usual.
+- **Build and Test only: the target picks.** Whatever the answer, `get` `gates/<id>` and read `targetPicks`
+  (`{<target id>: {pick, note?}}`, written by the page: `accept`, `followup` or `fix`). Act on them with the answer:
+  `fix` → the answer is Request Changes: name those targets (id and the developer's note) in the rejected report's
+  `--reason` as what to fix; `followup` → record each in the stage's follow-up work (a follow-up line in the
+  stage's summary or the project's follow-up list, with its note) and mention them in your next message; `accept` →
+  record each as a known limit (a line in the summary's known limitations). A Not Met or Unverified target with no
+  pick is undecided: say so in one line and ask in chat. Picks do not change the decision itself, which is the chat
+  answer: when the developer approves but picked `fix` for something, say so and ask before approving past it.
 - `Request Changes`: first `ArtifactData` `get` of `gates/<id>`. If `notes` holds anything, quote it
   (each note under its document's title) in the rejected report's `--reason`, together with what the
   developer typed in chat. If the page holds nothing and the chat answer has no feedback, ask what
@@ -81,7 +94,7 @@ The plan checkpoint of Code Generation (Approve Plan) is a gate too: the same st
 
 ## 4. Never
 
-Never write `notes` (they are the developer's) or any decision field (the decision is given in chat),
+Never write `notes` or `targetPicks` (they are the developer's) or any decision field (the decision is given in chat),
 and never update a row: each presentation is a fresh id.
 
 ## 5. Unit-end flow: a Unit with the unit-end rhythm

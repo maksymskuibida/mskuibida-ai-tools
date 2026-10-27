@@ -38,6 +38,7 @@ PAGE_KINDS = {
     "plan": {"narrows", "assumptions", "findings", "visible", "tests", "other"},
     "unit-end": {"changes", "unverified", "built", "other"},
 }
+BUILD_TEST_SCHEMA_PATH = os.path.join(os.path.dirname(HERE), "contract", "build-test.schema.json")
 RESERVED_KEYS = {"plan", "answers", "design"}
 PLAN_RANK = 1.5  # the code plan sits below any section whose top label is critical or high, above the rest
 
@@ -298,6 +299,16 @@ def validate(bundle, schema=None):
 
 # ---------------------------------------------------------------- the order a renderer shows
 
+def validate_build_test(build_test):
+    """Problems (one string each) of a gate row's `buildTest` field against contract/build-test.schema.json; none for an absent field."""
+    if build_test is None:
+        return []
+    schema = load_schema(BUILD_TEST_SCHEMA_PATH)
+    out = []
+    check_schema(build_test, schema, schema, "buildTest", out)
+    return out
+
+
 def section_score(rows):
     if not rows:
         return (9, 0, 0)
@@ -333,6 +344,7 @@ def order(bundle):
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="validate_bundle.py", description="Check a gate bundle against its contract.")
     ap.add_argument("bundle")
+    ap.add_argument("--build-test", action="store_true", help="the file is a per-stage gate row (gate.json): check its `buildTest` field against contract/build-test.schema.json")
     ap.add_argument("--order", action="store_true", help="also print the section order a renderer shows")
     args = ap.parse_args(argv)
     try:
@@ -341,7 +353,7 @@ def main(argv=None):
     except (OSError, ValueError) as why:
         print(f"validate_bundle.py: cannot read {args.bundle}: {why}", file=sys.stderr)
         return 1
-    problems = validate(bundle)
+    problems = validate_build_test(bundle.get("buildTest") if isinstance(bundle, dict) else None) if args.build_test else validate(bundle)
     if problems:
         print("\n".join(problems))
         return 1

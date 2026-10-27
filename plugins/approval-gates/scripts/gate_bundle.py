@@ -40,6 +40,12 @@ Ids: the gate row's `ids` says what each id its texts mention is (US1.1, FR1.4, 
 page's links and tooltips. The script brings the checkout's id map up to date (`aidlc_ids.py sync`, the shared copy next
 to this file) and asks it for the ids of the summary, the brief and every document, nearest the documents shown
 (`aidlc_ids.py refs --near`), so a Q1 or R-01 is this stage's and a BR1.1 this Unit's. A failure leaves `ids` out and warns.
+Build and Test: for the stage `build-and-test` the gate row also carries `buildTest`, the stage's tables read into
+data for the page's results view: `commands` (every `Check | Command | Result` row of the test results), `coverage`
+(the line coverage and floor a result names), `counts`, `targets` (the Target Verification Matrix, one entry per row,
+the Unit from its `###` heading) and `evidence` (the legend of evidence codes). Columns are found by header name;
+what a file does not have is left out, and when nothing is found the field is left out and the page shows the
+stage as any other. Its contract is `contract/build-test.schema.json`.
 Standard library only.
 """
 
@@ -53,6 +59,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import aidlc_ids  # noqa: E402  (the shared copy, next to this file)
+import validate_bundle  # noqa: E402
 
 MAX_DOC_BYTES = 200_000
 MAX_BATCH_WRITES = 50
@@ -342,6 +349,173 @@ def run_brief(project, slug, unit, why):
     return out
 
 
+# ---------------------------------------------------------------- Build and Test
+
+def split_cells(line):
+    """The cells of a Markdown table row; a `|` inside backticks or escaped as `\\|` stays in its cell."""
+    line = line.strip()
+    if line.startswith("|"):
+        line = line[1:]
+    if line.endswith("|") and not line.endswith("\\|"):
+        line = line[:-1]
+    cells, cur, tick, i = [], "", False, 0
+    while i < len(line):
+        ch = line[i]
+        if ch == "\\" and line[i + 1:i + 2] == "|":
+            cur += "|"
+            i += 2
+            continue
+        if ch == "`":
+            tick = not tick
+        if ch == "|" and not tick:
+            cells.append(cur.strip())
+            cur = ""
+        else:
+            cur += ch
+        i += 1
+    cells.append(cur.strip())
+    return cells
+
+
+def md_tables(text):
+    """[(heading, header cells lower-cased, rows as lists of cells)] for every table, with the nearest `###`/`##` heading above it."""
+    out, heading, lines, i = [], "", text.splitlines(), 0
+    while i < len(lines):
+        line = lines[i]
+        found = re.match(r"^#{2,3}\s+(.*?)\s*#*\s*$", line)
+        if found:
+            heading = found.group(1)
+        if line.lstrip().startswith("|") and i + 1 < len(lines) and re.match(r"^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$", lines[i + 1]):
+            header = [c.lower().strip("`* ") for c in split_cells(line)]
+            rows, i = [], i + 2
+            while i < len(lines) and lines[i].lstrip().startswith("|"):
+                rows.append(split_cells(lines[i]))
+                i += 1
+            out.append((heading, header, rows))
+            continue
+        i += 1
+    return out
+
+
+def column(header, *names):
+    for name in names:
+        for n, h in enumerate(header):
+            if h == name:
+                return n
+    return None
+
+
+def cell(row, n):
+    return row[n].strip() if n is not None and n < len(row) else ""
+
+
+def plain(text):
+    return re.sub(r"\s+", " ", text.replace("`", "").replace("**", "")).strip()
+
+
+VERDICTS = {"met": "Met", "not met": "Not Met", "notmet": "Not Met", "unverified": "Unverified", "n/a": "N/A", "na": "N/A"}
+
+
+def verdict_of(text):
+    key = re.sub(r"[\s`*_]+", " ", text).strip().lower()
+    return VERDICTS.get(key, plain(text))
+
+
+def unit_of(heading):
+    found = re.match(r"([A-Za-z]+\d+)\b", heading)
+    return found.group(1).upper() if found else plain(heading)
+
+
+def command_ok(result):
+    """False when a result reports a failure: `failed`, `error` or `timed out`, unless it is `0 failed` / `no errors`."""
+    text = re.sub(r"\b(0|no|zero|without)\s+(failed|failures?|errors?)\b", "", plain(result), flags=re.I)
+    return not re.search(r"\b(fail\w*|error\w*|not ok|timed? ?out|crash\w*)\b", text, re.I)
+
+
+def parse_build_test(folder):
+    """The `buildTest` object of a Build and Test stage folder, or None when its files hold none of the tables."""
+    commands, coverage, targets, legend, counts = [], [], [], {}, {}
+    files = [n for n in candidate_files(folder) if n.endswith(".md")]
+    results = [n for n in files if "result" in n.lower()]  # the instruction files list commands too, to run, not run
+    for name in files:
+        try:
+            with open(os.path.join(folder, name), encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except OSError:
+            continue
+        had_targets = False
+        for heading, header, rows in md_tables(text):
+            vi, ti = column(header, "verdict"), column(header, "target id", "target")
+            if vi is not None and ti is not None:
+                cols = {k: column(header, *names) for k, names in (
+                    ("source", ("source",)), ("expected", ("expected",)), ("actual", ("actual",)),
+                    ("evidence", ("evidence",)), ("owner", ("owning stage", "owner")))}
+                for row in rows:
+                    ident, verdict = plain(cell(row, ti)), verdict_of(cell(row, vi))
+                    if not ident or not verdict:
+                        continue
+                    entry = {"id": ident, "unit": unit_of(heading) if heading else "", "verdict": verdict}
+                    for key, n in cols.items():
+                        value = plain(cell(row, n))
+                        if value:
+                            entry[key] = clip(value, 600)
+                    if not entry["unit"]:
+                        del entry["unit"]
+                    targets.append(entry)
+                    had_targets = True
+                continue
+            ci, ri = column(header, "command"), column(header, "result")
+            if ci is not None and ri is not None and (name in results or not results):
+                label = column(header, "check", "step", "name")
+                for row in rows:
+                    command, result = plain(cell(row, ci)), plain(cell(row, ri))
+                    check = plain(cell(row, label if label is not None else 0))
+                    if not (command or result):
+                        continue
+                    commands.append({k: v for k, v in (("check", check), ("command", command), ("result", clip(result, 300))) if v} | {"ok": command_ok(result)})
+                    pct = re.search(r"\b(?:lines?|coverage|covered)\s+(\d+(?:\.\d+)?)\s*%", result, re.I)
+                    if pct:
+                        floor = re.search(r"\bfloor\s+(\d+(?:\.\d+)?)\s*%", result, re.I)
+                        repo = re.sub(r"\s+(unit\s+)?tests?$", "", check, flags=re.I) or check
+                        coverage.append({k: v for k, v in (("repo", repo), ("pct", float(pct.group(1))),
+                                                          ("floor", float(floor.group(1)) if floor else None)) if v is not None and v != ""})
+                continue
+            if column(header, "result") == 0 and len(header) == 2 and column(header, "count") == 1:
+                for row in rows:
+                    key = re.sub(r"[\s`]+", " ", cell(row, 0)).strip().lower()
+                    number = re.match(r"\d+", cell(row, 1))
+                    if number and key.startswith("targets") and "matrix" not in key:
+                        for label, field in (("met", "met"), ("not met", "notMet"), ("unverified", "unverified"), ("n/a", "na")):
+                            if re.match(r"targets " + re.escape(label) + r"\b", key):
+                                counts[field] = int(number.group(0))
+        if had_targets:
+            for line in text.splitlines():
+                if re.match(r"^\s*[-*]\s+\*\*[A-Z]{1,4}\*\*\s*:", line):
+                    for code, meaning in re.findall(r"\*\*([A-Z]{1,4})\*\*\s*:\s*(.*?)(?=\s+\*\*[A-Z]{1,4}\*\*\s*:|$)", line):
+                        legend.setdefault(code, clip(plain(meaning).rstrip(".;"), 300))
+    if targets:
+        counts = {"met": 0, "notMet": 0, "unverified": 0, "na": 0}
+        for t in targets:
+            field = {"Met": "met", "Not Met": "notMet", "Unverified": "unverified", "N/A": "na"}.get(t["verdict"])
+            if field:
+                counts[field] += 1
+        counts["total"] = len(targets)
+    elif counts:
+        counts["total"] = sum(counts.values())
+    out = {}
+    if commands:
+        out["commands"] = commands
+    if coverage:
+        out["coverage"] = coverage
+    if counts:
+        out["counts"] = counts
+    if targets:
+        out["targets"] = targets
+    if legend:
+        out["evidence"] = legend
+    return out or None
+
+
 # ---------------------------------------------------------------- the rows
 
 def id_map(root, texts, near):
@@ -424,6 +598,13 @@ def build(args):
         {"k": "approve", "t": "Approve", "d": f"Continue to {next_name}" if next_name else "Continue"},
         {"k": "changes", "t": "Request Changes", "d": "Provide revision feedback"},
     ]
+    if args.stage == "build-and-test":
+        found = parse_build_test(folder)
+        problems = validate_bundle.validate_build_test(found) if found else []
+        if problems:
+            print("approval-gates: the Build and Test tables were left out of the row (" + "; ".join(problems[:3]) + ")", file=sys.stderr)
+        elif found:
+            gate["buildTest"] = found
     ids = id_map(root, [gate.get("summary", ""), gate.get("brief", "")] + [row["text"] for row, _index, _path in docs],
                  sorted({path for _row, _index, path in docs}))
     if ids:
