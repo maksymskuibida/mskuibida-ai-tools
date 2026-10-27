@@ -31,7 +31,7 @@ import type { Derived, Two } from './truths'
 import { hasMoreThanBranch, sessionContext } from './session'
 import { readTwo } from './two'
 import { readUnitMatrix, withKinds } from './unit-matrix'
-import { PER_UNIT_STAGES, LAST_UNIT_STAGE, UNIT_SCOPE_FILE, parseUnitProgress, parseUnitScope, progressOf, readUnitFacts, readUnitList, stageStatusesFromRow, unitStageStatuses, withReceipts } from './units'
+import { PER_UNIT_STAGES, LAST_UNIT_STAGE, CLAIM_REGISTRY_FILE, UNIT_SCOPE_FILE, parseClaimRegistry, parseUnitProgress, parseUnitScope, startOf, progressOf, readUnitFacts, readUnitList, stageStatusesFromRow, unitStageStatuses, withReceipts } from './units'
 import { NO_STAGE_POINTS, STAGE_POINTS_FILE, parseStagePoints, stagePointsOf } from './stage-points'
 import { isResumedAfter } from './park'
 import type { StagePoints } from './stage-points'
@@ -68,7 +68,11 @@ export async function loadAidlc(ctx: ProviderContext, detection: Detection): Pro
   const uuid = scope !== null && selection.intent !== null ? await intentUuidOf(fsx, workspace, selection.space, selection.intent) : ''
   // The same space, and the same intent where both say which (a space without intents.json matches on the space).
   const scopeMatches = scope !== null && selection.intent !== null && scope.space === selection.space && (uuid === '' || scope.intentUuid === '' || uuid === scope.intentUuid)
-  const units = text === null ? null : await unitsOf(ctx, workspace.root, selection.statePath, parsed, step, mode === 'stage', scopeMatches ? scope.unit : '', text)
+  // The Units anyone on the team has claimed: the engine's claim registry, for this intent.
+  const registryPath = join(workspace.aidlcDir, CLAIM_REGISTRY_FILE)
+  const registry = selection.intent !== null && (await fsx.exists(registryPath)) ? await fsx.read(registryPath) : null
+  const claims = parseClaimRegistry(registry, registry === null || selection.intent === null ? '' : await intentUuidOf(fsx, workspace, selection.space, selection.intent))
+  const units = text === null ? null : await unitsOf(ctx, workspace.root, selection.statePath, parsed, step, mode === 'stage', scopeMatches ? scope.unit : '', text, claims)
   // Every stage is 1 story point unless the intent's stage-story-points.txt says otherwise (asked first: it is
   // usually not there).
   const stagePointsPath = join(parent(selection.statePath) ?? '', STAGE_POINTS_FILE)
@@ -522,6 +526,8 @@ type UnitView = {
    * `aidlc --claim`, deleted by `aidlc unit finish`) for this intent. '' when there is none, or it names none of the Units.
    */
   claimed: string
+  /** Units (by name) claimed by anyone, from the engine's claim registry, and this checkout's own claim. */
+  claims: ReadonlySet<string>
   /** The engine's Unit Progress table, by Unit (empty when the state has none). */
   rows: Map<string, Map<string, UnitCell>>
   /** Each Unit's story points, by name, and where they came from. */
@@ -560,6 +566,7 @@ async function unitsOf(
   canWrite: boolean,
   claimedUnit: string,
   stateText: string,
+  claims: ReadonlySet<string>,
 ): Promise<UnitView | null> {
   const { fsx } = ctx
   const construction = parsed.phases.find(phase => phase.key === 'CONSTRUCTION')
@@ -584,6 +591,7 @@ async function unitsOf(
     // The checkout's claim (the engine's scope file), not the state's Active Unit: the state is shared by every checkout
     // and is rewritten between stages, while the scope file stays until `aidlc unit finish`.
     claimed: units.some(unit => unit.name === claimedUnit) ? claimedUnit : '',
+    claims: new Set([...claims, ...(claimedUnit === '' ? [] : [claimedUnit])]),
     rows: table,
     points: points.byUnit,
     weights: new Map(units.map(unit => [unitItemId(unit.name), points.byUnit.get(unit.name)?.points ?? 0])),
@@ -639,6 +647,7 @@ function unitSectionOf(
   const unitItems: Item[] = units.units.map(unit => {
     const facts = units.progress.get(unit.name) ?? { phase: 'planned', stage: '' }
     const waitsOn = unit.dependsOn.filter(dep => units.progress.get(dep)?.phase !== 'done')
+    const start = startOf(unit, units.progress, units.claims)
     const word =
       facts.phase === 'awaiting'
         ? t('aidlc.unit.awaitingAt', { stage: facts.stage })
@@ -650,16 +659,20 @@ function unitSectionOf(
           ? t(facts.stage === '' ? 'aidlc.unit.paused' : 'aidlc.unit.pausedAt', { stage: facts.stage })
           : facts.phase === 'between'
             ? t('aidlc.unit.stageDone', { stage: facts.stage })
-            : facts.phase === 'planned' && waitsOn.length > 0
-              ? t('aidlc.unit.waitsOn', { units: waitsOn.map(label).join(', ') })
-              : undefined
+            : start === 'claimed'
+              ? t('aidlc.unit.claimedWord')
+              : facts.phase === 'planned' && waitsOn.length > 0
+                ? t('aidlc.unit.waitsOn', { units: waitsOn.map(label).join(', ') })
+                : undefined
     const item: Item = {
       id: unitItemId(unit.name),
       title: unitTitle(unit),
-      status: STATUS_OF_UNIT[facts.phase],
+      // A claimed Unit nobody has started yet is in progress, whatever its stages say.
+      status: start === 'claimed' ? 'open' : STATUS_OF_UNIT[facts.phase],
       isCurrent: unit.name === units.current,
       chips: pointsChips(units.points.get(unit.name)),
     }
+    if (start === 'ready' || start === 'blocked') item.readiness = start
     if (word !== undefined) item.statusWord = word
     return item
   })

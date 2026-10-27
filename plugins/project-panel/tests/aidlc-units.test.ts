@@ -1,7 +1,7 @@
 // Construction by Unit of work: the Units, their story points and their receipts in, one row per Unit out.
 import { test, expect, describe } from 'claude-code/testing'
 import { aidlc } from '../src/providers/aidlc'
-import { buildOrder, parseUnitDag, parseUnitEvents, parseUnitIndex, parseUnitProgress, parseUnitScope, progressOf, unitStageStatuses, withReceipts } from '../src/providers/aidlc/units'
+import { buildOrder, parseClaimRegistry, parseUnitDag, parseUnitEvents, parseUnitIndex, parseUnitProgress, parseUnitScope, progressOf, startOf, unitStageStatuses, withReceipts } from '../src/providers/aidlc/units'
 import type { Unit, UnitCell, UnitFacts, UnitProgress } from '../src/providers/aidlc/units'
 import { cloudIdsOf, jiraServerOf, parsePointsCsv, storyPointsOf, withRows } from '../src/providers/aidlc/points'
 import { isResumedAfter } from '../src/providers/aidlc/park'
@@ -913,7 +913,7 @@ describe("a Unit's skipped design stages (UNIT_SKIPPED)", () => {
     ])
     expect(construction(model).counts).toEqual({ done: 0, total: 2 })
     // Nothing is done, so the Unit is not started, as it was not before the claim.
-    expect(unitList(model).items.find(item => item.id === 'unit:api-billing')?.status).toBe('planned')
+    expect(unitList(model).items.find(item => item.id === 'unit:api-billing')?.status).toBe('open')
   })
 
   test('between a claim and the next `next`: the table still says planned, the receipt says skipped', async () => {
@@ -961,7 +961,7 @@ describe("a Unit's skipped design stages (UNIT_SKIPPED)", () => {
     })
     const model = await load(t)
     expect(stages(model).map(one => one[1])).toEqual(['open', 'skipped', 'skipped', 'skipped', 'planned'])
-    expect(unitList(model).items.find(item => item.id === 'unit:api-billing')?.status).toBe('planned')
+    expect(unitList(model).items.find(item => item.id === 'unit:api-billing')?.status).toBe('open')
   })
 
   test('progressOf: a skip is no activity, and the skipped list rides on the progress', () => {
@@ -984,5 +984,65 @@ describe("a Unit's skipped design stages (UNIT_SKIPPED)", () => {
     ])
     expect(table.get('u')?.get('nfr-design')).toBe('-')
     expect(table.get('u')?.get('code-generation')).toBe('x')
+  })
+})
+
+describe('Units told apart before they start: claimed, ready, blocked', () => {
+  const REGISTRY_PATH = `${s.ROOT}/aidlc/.aidlc-claim-registry.json`
+  const registry = (claims: Record<string, string>, uuid = '01a1-test') =>
+    JSON.stringify({ version: 1, space: 'default', intent_uuid: uuid, claims: Object.fromEntries(Object.entries(claims).map(([name, status]) => [name, { status, owner: 'x' }])) })
+  const edge = (name: string, dependsOn: string[] = []) => ({ name, kind: '', dependsOn })
+  const progress = (phases: Record<string, UnitProgress['phase']>) => new Map(Object.entries(phases).map(([name, phase]): [string, UnitProgress] => [name, { phase, stage: '' }]))
+
+  test('parseClaimRegistry: only claims whose status is claimed, and only for this intent', () => {
+    const text = registry({ a: 'claimed', b: 'released', c: 'claimed' })
+    expect([...parseClaimRegistry(text, '01a1-test')]).toEqual(['a', 'c'])
+    expect([...parseClaimRegistry(text, '')]).toEqual(['a', 'c'])
+    expect(parseClaimRegistry(text, 'another').size).toBe(0)
+    expect(parseClaimRegistry('not json', '').size).toBe(0)
+    expect(parseClaimRegistry(null, '').size).toBe(0)
+  })
+
+  test('startOf: claimed, ready and blocked; done and started Units are left to their progress', () => {
+    const got = progress({ base: 'done', run: 'active', fresh: 'planned', held: 'planned', waits: 'planned', fin: 'done', mid: 'between' })
+    const claimed = new Set(['held', 'fin', 'mid'])
+    expect(startOf(edge('fresh', ['base']), got, claimed)).toBe('ready')
+    expect(startOf(edge('fresh'), got, claimed)).toBe('ready')
+    expect(startOf(edge('held', ['base']), got, claimed)).toBe('claimed')
+    expect(startOf(edge('held', ['waits']), got, claimed)).toBe('claimed')
+    expect(startOf(edge('waits', ['base', 'fresh']), got, claimed)).toBe('blocked')
+    expect(startOf(edge('waits', ['run']), got, claimed)).toBe('blocked')
+    // A finished Unit stays done, a started one keeps its progress, whatever the registry says.
+    expect(startOf(edge('fin'), got, claimed)).toBeUndefined()
+    expect(startOf(edge('mid'), got, claimed)).toBeUndefined()
+    // A dependency that names no Unit is ignored.
+    expect(startOf(edge('fresh', ['ghost']), got, claimed)).toBe('ready')
+  })
+
+  const world = () =>
+    tree(stateText({}, []), {
+      [`${INTENT_DIR}/audit/host-a.md`]: audit(['2026-10-02T10:00:00Z', 'UNIT_COMPLETED', 'code-generation', 'api-core']),
+      [POINTS_PATH]: POINTS,
+      [`${s.ROOT}/aidlc/spaces/default/intents/intents.json`]: JSON.stringify([{ uuid: '01a1-test', dirName: s.INTENT, slug: 'x' }]),
+    })
+
+  test('the Units list: claimed is in progress, not-started ones are ready or blocked', async () => {
+    const t = world()
+    t.files[REGISTRY_PATH] = registry({ 'api-billing': 'claimed' })
+    const items = unitList(await load(t)).items.filter(item => item.id.startsWith('unit:'))
+    expect(items.map(item => [item.id, item.status, item.statusWord ?? null, item.readiness ?? null])).toEqual([
+      ['unit:api-core', 'done', null, null],
+      ['unit:web-shell', 'planned', null, 'ready'],
+      ['unit:api-billing', 'open', 'claimed', null],
+      ['unit:web-billing', 'planned', 'waits on U3, U2', 'blocked'],
+    ])
+  })
+
+  test('a finished Unit that is still in the registry stays done; another intent\'s claims count for nothing', async () => {
+    const t = world()
+    t.files[REGISTRY_PATH] = registry({ 'api-core': 'claimed' })
+    expect(unitList(await load(t)).items.find(item => item.id === 'unit:api-core')?.status).toBe('done')
+    t.files[REGISTRY_PATH] = registry({ 'api-billing': 'claimed' }, 'another-uuid')
+    expect(unitList(await load(t)).items.find(item => item.id === 'unit:api-billing')?.status).toBe('planned')
   })
 })

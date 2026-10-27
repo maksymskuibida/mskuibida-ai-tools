@@ -26,8 +26,8 @@ const REVIEW_COLOR: Record<ReviewState, string | undefined> = {
  * The word is the item's `statusWord` when it has one ('' hides it), else the status's own; a PR's review
  * state colours it.
  */
-export function itemLook(item: Pick<Item, 'status' | 'landing' | 'statusWord' | 'review'>): Look {
-  const base = statusLook(item.status)
+export function itemLook(item: Pick<Item, 'status' | 'landing' | 'statusWord' | 'review' | 'readiness'>): Look {
+  const base = item.status === 'planned' ? plannedLook(item.readiness) : statusLook(item.status)
   const landed = landingLook(item.landing)
   const look = landed ? { ...base, ...landed } : base
   const worded = item.statusWord === undefined ? look : { ...look, word: item.statusWord }
@@ -45,6 +45,13 @@ function landingLook(landing: Item['landing']): Partial<Look> | undefined {
     default:
       return undefined
   }
+}
+
+/** A not-started item: ready ones read as normal text with an open circle, blocked ones as dim text with a lock. */
+function plannedLook(readiness: Item['readiness']): Look {
+  if (readiness === 'ready') return { glyph: '○', color: undefined, isDim: false, word: '', wordColor: undefined }
+  if (readiness === 'blocked') return { glyph: '⊘', color: undefined, isDim: true, word: '', wordColor: undefined }
+  return statusLook('planned')
 }
 
 function statusLook(status: ItemStatus): Look {
@@ -195,7 +202,7 @@ function chipsOf(ctx: Ctx, chips: Chip[]): (El | false)[] {
 export function itemRow(ctx: Ctx, item: Item, fold: string): El {
   const { Box, Text, Link } = ctx.kit
   const look = itemLook(item)
-  const isQuiet = item.status === 'done' || item.status === 'skipped'
+  const isQuiet = item.status === 'done' || item.status === 'skipped' || item.readiness === 'blocked'
   // S drops the status word, except "local only", a PR's review state, and "reopened" / "stale": nothing else on a
   // narrow row says the work is not pushed, what its review waits on, or that a ✓ no longer holds. A long review
   // word ("approved with comments") may be cut, down to 8 columns; every other word keeps its length.

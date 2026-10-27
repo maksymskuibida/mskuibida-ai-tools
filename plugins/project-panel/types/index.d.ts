@@ -201,6 +201,11 @@ export type Item = {
   caption?: string
   /** When set, the renderer draws the title as a link to it. */
   href?: string
+  /**
+   * A not-started item (status `planned`) told apart: `ready` (nothing it depends on is left; drawn as an open circle)
+   * or `blocked` (waits on something not done; a lock, dimmed). Absent = no dependency data, drawn as plain `planned`.
+   */
+  readiness?: 'ready' | 'blocked'
   /** Where the item's progress lives (M3); drives the glyph: ✓ merged, ◐ in-pr, ◌ local. */
   landing?: Landing
   /**
