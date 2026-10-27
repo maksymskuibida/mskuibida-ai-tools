@@ -2,11 +2,9 @@
 Run: python3 -m unittest discover -s plugins/unit-claim/tests
 
 The hook runs as a subprocess, as the harness runs it, with UNIT_CLAIM_DIR and CLAUDE_PROJECT_DIR pointing into a
-temporary folder that holds a small AI-DLC project."""
+temporary folder that holds a small AI-DLC project. The claim dialog itself is the mod's (hooks/register.tsx); here an
+answer is recorded the way the mod records it, with `claim_choice.py record`."""
 
-import contextlib
-import datetime
-import io
 import json
 import os
 import shutil
@@ -23,28 +21,37 @@ sys.path.insert(0, os.path.join(PLUGIN, "scripts"))
 import claim_choice as cc  # noqa: E402
 
 UNIT = "u4-day-navigation"
-REASONING = ("- Functional Design: run, the calendar has rules.\n- NFR Requirements: skip, nothing new.\n"
-             "- NFR Design: skip, it needs NFR Requirements.\n- Infrastructure Design: skip, nothing changes.")
+# What the engine prints when a claim goes through.
+CLAIMED = '{"claimed":true,"unit":"u4-day-navigation","generation":3}'
+INTENT = "261016-daily-page-mvp"
 os.environ.pop("CLAUDE_PROJECT_DIR", None)
 os.environ.pop("CLAUDE_PLUGIN_DATA", None)
 
+UNIT_OF_WORK = f"""# Units of Work
 
-def dialog(unit=UNIT, picked=("Functional Design",), question=None, multi=True, rhythm=("unit-end", "per-stage"),
-           save=("No", "For me", "For this project"), stages=("Functional Design", "NFR Requirements", "NFR Design", "Infrastructure Design")):
-    question = question or f"Which design stages should `{unit}` run? I'd run {' and '.join(picked) or 'none of them'}."
-    return {"questions": [
-        {"question": question, "header": "Stages", "multiSelect": multi,
-         "options": [{"label": s + (" (Recommended)" if s in picked else ""), "description": "why"} for s in stages]},
-        {"question": "How should this Unit be approved?", "header": "Rhythm", "multiSelect": False,
-         "options": [{"label": r, "description": "x"} for r in rhythm]},
-        {"question": "Save this choice?", "header": "Save", "multiSelect": False,
-         "options": [{"label": s, "description": "x"} for s in save]},
-    ]}
+## Unit details
 
+### U4 — {UNIT}
 
-def answered(ti, stages, rhythm, save):
-    qs = ti["questions"]
-    return {"answers": {qs[0]["question"]: stages, qs[1]["question"]: rhythm, qs[2]["question"]: save}}
+- **What it delivers:** Day navigation: previous and next day, a month picker.
+- **Stories:** US2.1, US2.3
+
+### U5 — u5-live-updates
+
+- **What it delivers:** Live updates.
+"""
+
+STORIES = """# Stories
+
+## US2.1 — Go to the next day
+As a user I move one day forward.
+
+## US2.2 — Not this one
+Unrelated.
+
+## US2.3 — Pick a month
+As a user I jump to a month.
+"""
 
 
 class Case(unittest.TestCase):
@@ -53,22 +60,30 @@ class Case(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.project = os.path.join(self.tmp, "project")
         intents = os.path.join(self.project, "aidlc", "spaces", "default", "intents")
-        os.makedirs(os.path.join(intents, "261016-daily-page-mvp"))
+        inception = os.path.join(intents, INTENT, "inception")
+        os.makedirs(os.path.join(inception, "units-generation"))
+        os.makedirs(os.path.join(inception, "user-stories"))
         with open(os.path.join(self.project, "aidlc", "active-space"), "w") as f:
             f.write("default\n")
         with open(os.path.join(intents, "active-intent"), "w") as f:
-            f.write("261016-daily-page-mvp\n")
+            f.write(INTENT + "\n")
+        with open(os.path.join(inception, "units-generation", "unit-of-work.md"), "w") as f:
+            f.write(UNIT_OF_WORK)
+        with open(os.path.join(inception, "user-stories", "stories.md"), "w") as f:
+            f.write(STORIES)
         self.data = os.path.join(self.tmp, "data")
-        self.transcript = os.path.join(self.tmp, "t.jsonl")
-        open(self.transcript, "w").close()
         os.environ["UNIT_CLAIM_DIR"] = self.data
         self.addCleanup(os.environ.pop, "UNIT_CLAIM_DIR", None)
 
     def run_hook(self, event):
         env = dict(os.environ, UNIT_CLAIM_DIR=self.data, CLAUDE_PROJECT_DIR=self.project)
-        event = dict({"transcript_path": self.transcript, "session_id": "s1", "cwd": self.project}, **event)
+        event = dict({"session_id": "s1", "cwd": self.project}, **event)
         done = subprocess.run([sys.executable, HOOK], input=json.dumps(event), capture_output=True, text=True, env=env, timeout=30)
         return done.returncode, done.stdout, done.stderr
+
+    def run_script(self, *args):
+        env = dict(os.environ, UNIT_CLAIM_DIR=self.data)
+        return subprocess.run([sys.executable, SCRIPT, *args, "--project-dir", self.project], capture_output=True, text=True, env=env)
 
     def pre(self, tool, ti):
         return self.run_hook({"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": ti})
@@ -76,23 +91,14 @@ class Case(unittest.TestCase):
     def post(self, tool, ti, response):
         return self.run_hook({"hook_event_name": "PostToolUse", "tool_name": tool, "tool_input": ti, "tool_response": response})
 
-    def said(self, text, kind="assistant"):
-        stamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        content = [{"type": "text", "text": text}]
-        with open(self.transcript, "a") as f:
-            f.write(json.dumps({"type": kind, "timestamp": stamp, "message": {"role": kind, "content": content}}) + "\n")
-
     def context(self, out):
         return json.loads(out)["hookSpecificOutput"]["additionalContext"]
 
-    def answer(self, stages="Functional Design (Recommended)", rhythm="unit-end", save="No", ti=None):
-        ti = ti or dialog()
-        self.said(REASONING)
-        code, _out, err = self.pre("AskUserQuestion", ti)
-        self.assertEqual(code, 0, err)
-        code, out, err = self.post("AskUserQuestion", ti, answered(ti, stages, rhythm, save))
-        self.assertEqual(code, 0, err)
-        return self.context(out)
+    def answer(self, stages="functional-design", rhythm="unit-end", unit=UNIT):
+        """Record an answer as the mod does after the claim dialog."""
+        done = self.run_script("record", "--unit", unit, "--stages", stages, "--rhythm", rhythm)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout)
 
     def claim(self, extra=" --rhythm unit-end", unit=UNIT):
         return self.pre("Bash", {"command": f"aidlc unit claim {unit} --team A{extra}"})
@@ -102,7 +108,7 @@ class TestClaimIsGated(Case):
     def test_claim_refused_until_the_dialog_is_answered(self):
         code, _out, err = self.claim()
         self.assertEqual(code, 2)
-        self.assertIn("unit-claim skill", err)
+        self.assertIn(f'"source": "unit-claim:{UNIT}"', err)
         self.answer()
         code, _out, err = self.claim()
         self.assertEqual(code, 0, err)
@@ -147,128 +153,32 @@ class TestClaimIsGated(Case):
         self.assertEqual(self.claim()[0], 0)
 
 
-class TestDialog(Case):
-    def test_reasoning_comes_first(self):
-        code, _out, err = self.pre("AskUserQuestion", dialog())
-        self.assertEqual(code, 2)
-        self.assertIn("reasoning first", err)
-        self.said("- Functional Design: run.\n- NFR Requirements: skip.")  # two of four
-        self.assertEqual(self.pre("AskUserQuestion", dialog())[0], 2)
-        self.said(REASONING)
-        self.assertEqual(self.pre("AskUserQuestion", dialog())[0], 0)
-
-    def test_reasoning_from_before_the_last_prompt_does_not_count(self):
-        self.said(REASONING)
-        self.said("claim u4", kind="user")
-        self.assertEqual(self.pre("AskUserQuestion", dialog())[0], 2)
-
-    def test_the_dialog_shape(self):
-        self.said(REASONING)
-        bad = [
-            dialog(multi=False),
-            dialog(question="Which design stages should this Unit run? I'd run Functional Design."),
-            dialog(question="Which design stages should `u4` run?"),  # the pick is not named
-            dialog(rhythm=("one", "two")),
-            dialog(save=("No", "Yes")),
-            dialog(stages=("Functional Design", "NFR Requirements", "NFR Design")),
-            {"questions": dialog()["questions"][:2]},
-        ]
-        for ti in bad:
-            code, _out, err = self.pre("AskUserQuestion", ti)
-            self.assertEqual(code, 2, json.dumps(ti)[:200])
-        self.assertEqual(self.pre("AskUserQuestion", dialog(picked=()))[0], 0, "no pick is a pick")
-
-    def test_a_saved_choice_is_not_asked_again(self):
-        self.answer(save="For me")
-        self.said(REASONING)
-        code, _out, err = self.pre("AskUserQuestion", dialog(unit="u5-live-updates"))
-        self.assertEqual(code, 2)
-        self.assertIn("not shown again", err)
-        code, _out, err = self.claim(unit="u5-live-updates")
+class TestTheAnswerIsTheDevelopers(Case):
+    def test_the_agent_cannot_record_an_answer(self):
+        for cmd in (f"python3 {SCRIPT} record --unit {UNIT} --stages none --rhythm unit-end",
+                    f"cd x && python3 scripts/claim_choice.py record --unit {UNIT} --stages none --rhythm per-stage"):
+            code, _out, err = self.pre("Bash", {"command": cmd})
+            self.assertEqual(code, 2, cmd)
+            self.assertIn("unit-claim mod", err)
+        code, _out, err = self.pre("Bash", {"command": f"python3 {SCRIPT} status --unit {UNIT}"})
         self.assertEqual(code, 0, err)
 
-    def test_other_questions_pass(self):
-        ti = {"questions": [{"question": "Approve?", "header": "Approval", "options": [{"label": "Approve", "description": "x"}, {"label": "No", "description": "y"}]}]}
-        self.assertEqual(self.pre("AskUserQuestion", ti)[0], 0)
-        self.assertEqual(self.post("AskUserQuestion", ti, {"answers": {"Approve?": "Approve"}})[1], "")
+    def test_an_answer_file_is_not_written_by_hand(self):
+        code, _out, err = self.pre("Write", {"file_path": os.path.join(self.data, "answers", "x", f"{UNIT}.json"), "content": "{}"})
+        self.assertEqual(code, 2)
+        self.assertIn("never written by hand", err)
+        code, _out, err = self.pre("Write", {"file_path": os.path.join(self.project, "notes.md"), "content": "x"})
+        self.assertEqual(code, 0, err)
 
-
-class TestAnswer(Case):
-    def test_answer_is_recorded(self):
-        said = self.answer("Functional Design (Recommended), Infrastructure Design", "unit-end (Recommended)", "No")
-        self.assertIn("Functional Design, Infrastructure Design", said)
-        self.assertIn("--rhythm unit-end", said)
-        choice = cc.choice_for(self.project, UNIT)
-        self.assertEqual((choice["stages"], choice["rhythm"], choice["source"]), (["functional-design", "infrastructure-design"], "unit-end", "answer"))
-        self.assertIsNone(cc.saved_choice(self.project)[0])
-
-    def test_nfr_design_brings_nfr_requirements_back(self):
-        said = self.answer("Functional Design, NFR Design")
-        self.assertIn("NFR Requirements was added back: NFR Design needs it.", said)
-        self.assertEqual(cc.choice_for(self.project, UNIT)["stages"], ["functional-design", "nfr-requirements", "nfr-design"])
-
-    def test_save_for_me(self):
-        said = self.answer(save="For me")
-        self.assertIn("not shown again", said)
-        with open(os.path.join(self.data, "choice.json")) as f:
-            self.assertEqual(json.load(f)["stages"], ["functional-design"])
-        self.assertEqual(cc.choice_for(self.project, "u9-other")["source"], "me")
-
-    def test_save_for_the_project_points_to_the_bookkeeping_pull_request(self):
-        said = self.answer(save="For this project")
-        self.assertIn("bookkeeping pull request", said)
-        self.assertIn("save --scope project --stages functional-design --rhythm unit-end", said)
-        self.assertFalse(os.path.exists(os.path.join(self.project, ".unit-claim.json")), "the file lands through the pull request")
-        self.assertEqual(self.claim()[0], 0, "the Unit carries on with the choice")
-
-    def test_a_typed_answer(self):
-        self.answer("none", "per-stage", "No")
-        self.assertEqual(cc.choice_for(self.project, UNIT)["stages"], [])
-
-    def test_an_answer_that_cannot_be_read(self):
-        ti = dialog()
-        self.said(REASONING)
-        _code, out, _err = self.post("AskUserQuestion", ti, answered(ti, "only the important ones", "unit-end", "No"))
-        self.assertIn("could not be read", self.context(out))
-        self.assertIsNone(cc.choice_for(self.project, UNIT))
-
-    def test_the_text_form_of_the_answer(self):
-        ti = dialog()
-        q = ti["questions"]
-        text = f'User has answered your questions: "{q[0]["question"]}"="Functional Design", "{q[1]["question"]}"="unit-end", "{q[2]["question"]}"="No". You can now continue.'
-        self.post("AskUserQuestion", ti, text)
-        self.assertEqual(cc.choice_for(self.project, UNIT)["rhythm"], "unit-end")
-
-
-class TestSaving(Case):
-    def save_cmd(self, scope="me", stages="none", rhythm="per-stage"):
-        return {"command": f'python3 "{SCRIPT}" save --scope {scope} --stages {stages} --rhythm {rhythm}'}
-
-    def test_the_agent_cannot_save_on_its_own(self):
-        self.said("claim u4", kind="user")
-        for scope in ("me", "project"):
-            code, _out, err = self.pre("Bash", self.save_cmd(scope))
-            self.assertEqual(code, 2, scope)
-        for path in (os.path.join(self.project, ".unit-claim.json"), os.path.join(self.data, "choice.json"),
-                     os.path.join(self.data, "answers", "x", "y", f"{UNIT}.json")):
-            self.assertEqual(self.pre("Write", {"file_path": path, "content": "{}"})[0], 2, path)
-        self.assertEqual(self.pre("Write", {"file_path": os.path.join(self.project, "notes.md"), "content": "x"})[0], 0)
-
-    def test_the_developer_asking_allows_it(self):
-        self.said("please save my claim choice: no design stages, per-stage", kind="user")
-        self.assertEqual(self.pre("Bash", self.save_cmd())[0], 0)
-
-    def test_for_this_project_allows_exactly_that_answer(self):
-        self.answer("Functional Design", "unit-end", "For this project")
-        self.said("go on", kind="user")
-        self.assertEqual(self.pre("Bash", self.save_cmd("project", "functional-design", "unit-end"))[0], 0)
-        self.assertEqual(self.pre("Bash", self.save_cmd("project", "none", "unit-end"))[0], 2)
+    def test_the_dialog_is_not_checked_by_the_hook(self):
+        code, _out, err = self.pre("AskUserQuestion", {"questions": [{"question": "Anything?", "header": "Stages", "options": []}]})
+        self.assertEqual(code, 0, err)
 
 
 class TestAfterTheClaim(Case):
     def test_skips_are_named_after_the_claim(self):
         self.answer()
-        _code, out, _err = self.post("Bash", {"command": f"aidlc unit claim {UNIT} --team A --rhythm unit-end"}, {"stdout": "claimed"})
+        _code, out, _err = self.post("Bash", {"command": f"aidlc unit claim {UNIT} --team A --rhythm unit-end"}, {"stdout": CLAIMED})
         said = self.context(out)
         for slug in ("nfr-requirements", "nfr-design", "infrastructure-design"):
             self.assertIn(f'--stage {slug} --unit {UNIT} --result skipped --reason "skipped at claim by the developer"', said)
@@ -285,18 +195,172 @@ class TestAfterTheClaim(Case):
         self.assertEqual(code, 0, err)
 
 
-class TestPrompt(Case):
-    def test_claim_prompt_points_to_the_skill(self):
-        _code, out, _err = self.run_hook({"hook_event_name": "UserPromptSubmit", "prompt": f"/aidlc --claim {UNIT} --team A"})
-        self.assertIn("unit-claim skill", self.context(out))
+class TestWorktrees(Case):
+    """A session in a git worktree may have its hooks run from the main checkout and its mod's processes from the
+    worktree; both must find the same answer. A worktree also lacks the gitignored cursors (active-space,
+    active-intent)."""
 
-    def test_claim_prompt_with_a_saved_choice(self):
-        with contextlib.redirect_stdout(io.StringIO()):
-            cc.main(["save", "--scope", "project", "--stages", "functional-design,nfr-design", "--rhythm", "unit-end", "--project-dir", self.project])
+    def setUp(self):
+        super().setUp()
+        os.makedirs(os.path.join(self.project, ".git", "worktrees", "wt"))
+        self.worktree = os.path.join(self.project, ".claude", "worktrees", "wt")
+        os.makedirs(os.path.join(self.worktree, "aidlc", "spaces", "default", "intents", INTENT))
+        with open(os.path.join(self.worktree, ".git"), "w") as f:
+            f.write(f"gitdir: {os.path.join(self.project, '.git', 'worktrees', 'wt')}\n")
+        with open(os.path.join(self.project, ".git", "worktrees", "wt", "commondir"), "w") as f:
+            f.write("../..\n")
+
+    def record_in_worktree(self):
+        env = dict(os.environ)  # as the mod starts it: no CLAUDE_PLUGIN_DATA
+        env.pop("CLAUDE_PLUGIN_DATA", None)
+        done = subprocess.run([sys.executable, SCRIPT, "record", "--unit", UNIT, "--stages", "functional-design",
+                               "--rhythm", "unit-end"], capture_output=True, text=True, env=env, cwd=self.worktree)
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_an_answer_recorded_in_the_worktree_lets_the_main_checkout_claim(self):
+        self.record_in_worktree()
+        self.assertEqual(cc.intent_of(self.worktree), INTENT)
+        self.assertEqual(cc.answer_path(self.worktree, UNIT), cc.answer_path(self.project, UNIT))
+        code, _out, err = self.claim()
+        self.assertEqual(code, 0, err)
+        code, _out, err = self.run_hook({"hook_event_name": "PreToolUse", "tool_name": "Bash", "cwd": self.worktree,
+                                         "tool_input": {"command": f"aidlc unit claim {UNIT} --team A --rhythm unit-end"}})
+        self.assertEqual(code, 0, err)
+
+    def test_the_plugin_data_folder_the_hook_is_given_does_not_split_the_answers(self):
+        os.environ.pop("UNIT_CLAIM_DIR")
+        os.environ["HOME"], home = self.tmp, os.environ.get("HOME", "")
+        self.addCleanup(os.environ.__setitem__, "HOME", home)
+        self.record_in_worktree()
+        env = dict(os.environ, CLAUDE_PLUGIN_DATA=os.path.join(self.tmp, "elsewhere"), CLAUDE_PROJECT_DIR=self.project)
+        event = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "cwd": self.project,
+                 "tool_input": {"command": f"aidlc unit claim {UNIT} --team A --rhythm unit-end"}}
+        done = subprocess.run([sys.executable, HOOK], input=json.dumps(event), capture_output=True, text=True, env=env)
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+
+class TestSkipStagesAtClaim(Case):
+    """An engine whose claim takes --skip-stages (2.11.2-preview.20261026.101 on): the claim carries exactly the stages
+    the developer left out, and they are skipped by the claim itself."""
+
+    USAGE = ("Usage: aidlc-unit claim <unit> [--team <label>] [--rhythm per-stage|unit-end] "
+             "[--skip-stages <stage[,stage...]>]")
+
+    def setUp(self):
+        super().setUp()
+        tools = os.path.join(self.project, ".claude", "tools")
+        os.makedirs(tools)
+        with open(os.path.join(tools, "aidlc-unit.ts"), "w") as f:
+            f.write(f'  if (!unit) fail("{self.USAGE}");\n')
+
+    def test_the_engine_is_read_from_the_harness(self):
+        eng = json.loads(self.run_script("engine").stdout)
+        self.assertEqual((eng["rhythms"], eng["skipStages"]), (["per-stage", "unit-end"], True))
+
+    def test_the_claim_carries_exactly_the_left_out_stages(self):
+        got = self.answer("functional-design")
+        self.assertEqual(got["claimFlags"], "--rhythm unit-end --skip-stages nfr-requirements,nfr-design,infrastructure-design")
+        self.assertEqual(got["skips"], [])
+        code, _out, err = self.claim()
+        self.assertEqual(code, 2)
+        self.assertIn("--skip-stages nfr-requirements,nfr-design,infrastructure-design", err)
+        code, _out, err = self.claim(" --rhythm unit-end --skip-stages nfr-requirements,infrastructure-design")
+        self.assertEqual(code, 2)
+        self.assertIn("not --skip-stages nfr-requirements,infrastructure-design", err)
+        self.assertEqual(self.claim(" --rhythm unit-end --skip-stages infrastructure-design,nfr-design,nfr-requirements")[0], 0)
+        self.assertEqual(self.claim(" --rhythm=unit-end --skip-stages=nfr-requirements,nfr-design,infrastructure-design")[0], 0)
+
+    def test_every_stage_runs_so_no_flag(self):
+        self.answer("functional-design,nfr-requirements,nfr-design,infrastructure-design")
+        self.assertEqual(self.claim()[0], 0)
+        code, _out, err = self.claim(" --rhythm unit-end --skip-stages nfr-design")
+        self.assertEqual(code, 2)
+        self.assertIn("its flags are `--rhythm unit-end`", err)
+
+    def test_after_the_claim_and_a_skipped_stages_start(self):
+        self.answer("functional-design")
+        cmd = f"aidlc unit claim {UNIT} --team A --rhythm unit-end --skip-stages nfr-requirements,nfr-design,infrastructure-design"
+        _code, out, _err = self.post("Bash", {"command": cmd}, {"stdout": CLAIMED})
+        said = self.context(out)
+        self.assertIn("NFR Requirements, NFR Design, Infrastructure Design are skipped for this Unit only", said)
+        self.assertIn("aidlc engine orchestrate next", said)
+        self.assertNotIn("--result skipped", said)
+        code, _out, err = self.pre("Bash", {"command": f"aidlc engine state unit start --stage nfr-design --unit {UNIT}"})
+        self.assertEqual(code, 2)
+        self.assertIn("skipped at the claim", err)
+
+    def test_status_and_the_prompt_name_the_flags(self):
+        self.answer("functional-design,nfr-requirements")
+        status = json.loads(self.run_script("status", "--unit", UNIT).stdout)
+        self.assertEqual(status["claimFlags"], "--rhythm unit-end --skip-stages nfr-design,infrastructure-design")
+        _code, out, _err = self.run_hook({"hook_event_name": "UserPromptSubmit", "prompt": f"/aidlc --claim {UNIT}"})
+        self.assertIn("`--rhythm unit-end --skip-stages nfr-design,infrastructure-design`", self.context(out))
+
+
+class TestOlderEngine(Case):
+    def test_an_engine_without_the_flag_refuses_it_and_keeps_the_per_stage_reports(self):
+        got = self.answer("functional-design")
+        self.assertEqual(got["claimFlags"], "--rhythm unit-end")
+        self.assertEqual(len(got["skips"]), 3)
+        code, _out, err = self.claim(" --rhythm unit-end --skip-stages nfr-requirements,nfr-design,infrastructure-design")
+        self.assertEqual(code, 2)
+        self.assertIn("has no `--skip-stages`", err)
+        self.assertEqual(self.claim()[0], 0)
+
+
+class TestEveryClaimAsks(Case):
+    """An answer serves the one claim it was given for: once that claim goes through, a later claim of the Unit asks."""
+
+    def claimed(self, stdout=CLAIMED, error=False):
+        response = {"stdout": stdout, "is_error": error} if error else {"stdout": stdout}
+        return self.post("Bash", {"command": f"aidlc unit claim {UNIT} --team A --rhythm unit-end"}, response)
+
+    def test_a_used_answer_asks_again(self):
+        self.answer()
+        self.assertEqual(self.claim()[0], 0)
+        self.claimed()
+        status = json.loads(self.run_script("status", "--unit", UNIT).stdout)
+        self.assertEqual((status["used"], status["ask"], status["claimFlags"]), (True, True, None))
+        code, _out, err = self.claim()
+        self.assertEqual(code, 2)
+        self.assertIn("used by an earlier claim", err)
+        self.assertIn(f'"source": "unit-claim:{UNIT}"', err)
+        self.answer("functional-design,nfr-requirements", "per-stage")
+        self.assertEqual(self.claim(" --rhythm per-stage")[0], 0)
+
+    def test_the_rest_of_the_claim_still_uses_it(self):
+        self.answer()
+        self.claimed()
+        code, _out, err = self.pre("Bash", {"command": f"aidlc engine state unit start --stage nfr-design --unit {UNIT}"})
+        self.assertEqual(code, 2)
+        self.assertIn("left out", err)
+
+    def test_only_a_claim_that_went_through_uses_it(self):
+        self.answer()
+        self.claimed('{"message":"Run `aidlc --claim u4-day-navigation --rhythm unit-end`","kind":"print"}')
+        self.claimed('{"error":"claim refused"}')
+        self.claimed(CLAIMED, error=True)
+        self.assertFalse(json.loads(self.run_script("status", "--unit", UNIT).stdout)["used"])
+        self.assertEqual(self.claim()[0], 0)
+
+    def test_the_prompt_asks_once_the_answer_is_used(self):
+        self.answer()
+        self.claimed()
+        _code, out, _err = self.run_hook({"hook_event_name": "UserPromptSubmit", "prompt": f"/aidlc --claim {UNIT}"})
+        self.assertIn(f'"source": "unit-claim:{UNIT}"', self.context(out))
+
+
+class TestPrompt(Case):
+    def test_claim_prompt_says_how_to_open_the_dialog(self):
+        _code, out, _err = self.run_hook({"hook_event_name": "UserPromptSubmit", "prompt": f"/aidlc --claim {UNIT} --team A"})
+        self.assertIn(f'"source": "unit-claim:{UNIT}"', self.context(out))
+
+    def test_claim_prompt_with_a_recorded_answer(self):
+        self.answer("functional-design,nfr-design")
         _code, out, _err = self.run_hook({"hook_event_name": "UserPromptSubmit", "prompt": f"/aidlc --claim {UNIT}"})
         said = self.context(out)
-        self.assertIn("(project)", said)
         self.assertIn("Functional Design, NFR Requirements, NFR Design", said)
+        self.assertIn("--rhythm unit-end", said)
 
     def test_other_prompts(self):
         _code, out, _err = self.run_hook({"hook_event_name": "UserPromptSubmit", "prompt": "what is a claim?"})
@@ -304,10 +368,6 @@ class TestPrompt(Case):
 
 
 class TestScript(Case):
-    def run_script(self, *args):
-        env = dict(os.environ, UNIT_CLAIM_DIR=self.data)
-        return subprocess.run([sys.executable, SCRIPT, *args, "--project-dir", self.project], capture_output=True, text=True, env=env)
-
     def test_stages_reads_the_conditions_from_the_graph(self):
         done = self.run_script("stages")
         self.assertEqual([s["slug"] for s in json.loads(done.stdout)], list(cc.DESIGN_STAGES))
@@ -317,48 +377,47 @@ class TestScript(Case):
             json.dump([{"slug": "nfr-design", "name": "NFR Design", "condition": "From the graph."}], f)
         self.assertIn("From the graph.", self.run_script("stages").stdout)
 
-    def test_project_choice_wins_over_mine(self):
-        self.run_script("save", "--scope", "me", "--stages", "none", "--rhythm", "per-stage")
-        self.assertEqual(json.loads(self.run_script("status", "--unit", UNIT).stdout)["choice"]["source"], "me")
-        self.run_script("save", "--scope", "project", "--stages", "nfr-design", "--rhythm", "unit-end")
-        status = json.loads(self.run_script("status", "--unit", UNIT).stdout)
-        self.assertEqual((status["choice"]["source"], status["choice"]["stages"]), ("project", ["nfr-requirements", "nfr-design"]))
+    def test_brief_holds_the_unit_and_its_stories(self):
+        brief = json.loads(self.run_script("brief", "--unit", UNIT).stdout)
+        self.assertTrue(brief["entry"].startswith(f"### U4 — {UNIT}"))
+        self.assertNotIn("u5-live-updates", brief["entry"])
+        self.assertEqual([s.splitlines()[0] for s in brief["stories"]], ["## US2.1 — Go to the next day", "## US2.3 — Pick a month"])
+        self.assertEqual(len(brief["stages"]), 4)
 
-    def test_agent_pick_only_with_a_saved_agent_choice(self):
-        done = self.run_script("pick", "--unit", UNIT, "--stages", "functional-design")
+    def test_record_status_and_needs(self):
+        self.assertIsNone(json.loads(self.run_script("status", "--unit", UNIT).stdout)["choice"])
+        got = self.answer("nfr-design", "per-stage")
+        self.assertEqual(got["choice"]["stages"], ["nfr-requirements", "nfr-design"])
+        self.assertIn("NFR Requirements was added back", got["notes"][0])
+        status = json.loads(self.run_script("status", "--unit", UNIT).stdout)["choice"]
+        self.assertEqual((status["stages"], status["rhythm"]), (["nfr-requirements", "nfr-design"], "per-stage"))
+        done = self.run_script("record", "--unit", UNIT, "--stages", "security", "--rhythm", "unit-end")
         self.assertEqual(done.returncode, 1)
-        self.assertIn("ask the claim dialog", done.stderr)
-        self.run_script("save", "--scope", "me", "--stages", "agent", "--rhythm", "unit-end")
-        status = json.loads(self.run_script("status", "--unit", UNIT).stdout)
-        self.assertEqual((status["agentPick"], status["ask"]), (True, False))
-        self.assertEqual(self.claim()[0], 2)
-        done = self.run_script("pick", "--unit", UNIT, "--stages", "functional-design")
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(self.claim()[0], 0)
+        self.assertEqual(self.run_script("record", "--unit", UNIT, "--stages", "none", "--rhythm", "weekly").returncode, 2)
 
     def test_skips_and_forget(self):
-        self.answer("Functional Design, NFR Requirements")
+        self.answer("functional-design,nfr-requirements")
         lines = self.run_script("skips", "--unit", UNIT).stdout.splitlines()
         self.assertEqual(len(lines), 2)
         self.run_script("forget", "--unit", UNIT)
         self.assertIsNone(cc.choice_for(self.project, UNIT))
 
     def test_parsing(self):
-        self.assertEqual(cc.parse_stages("NFR Design (Recommended), functional design"), ["functional-design", "nfr-design"])
-        self.assertEqual(cc.parse_stages(["Infrastructure Design"]), ["infrastructure-design"])
-        self.assertIsNone(cc.parse_stages("Functional Design, Security"))
-        self.assertEqual(cc.parse_rhythm("unit-end (Recommended)"), "unit-end")
-        self.assertEqual(cc.parse_save("For this project"), "project")
+        self.assertEqual(cc.parse_stages("nfr-design, functional design"), ["functional-design", "nfr-design"])
+        self.assertEqual(cc.parse_stages("none"), [])
+        self.assertIsNone(cc.parse_stages("functional-design, security"))
         self.assertEqual(cc.with_needs(["nfr-design"])[0], ["nfr-requirements", "nfr-design"])
 
 
 class TestHooksJson(unittest.TestCase):
-    def test_events_and_matchers(self):
+    def test_events_matchers_and_the_mod(self):
         with open(os.path.join(PLUGIN, "hooks", "hooks.json")) as f:
-            hooks = json.load(f)["hooks"]
+            config = json.load(f)
+        self.assertEqual(config["modules"], ["./register.tsx"])
+        hooks = config["hooks"]
         self.assertEqual(set(hooks), {"PreToolUse", "PostToolUse", "UserPromptSubmit"})
-        self.assertEqual(hooks["PreToolUse"][0]["matcher"], "Bash|AskUserQuestion|Write|Edit|MultiEdit")
-        self.assertEqual(hooks["PostToolUse"][0]["matcher"], "Bash|AskUserQuestion")
+        self.assertEqual(hooks["PreToolUse"][0]["matcher"], "Bash|Write|Edit|MultiEdit")
+        self.assertEqual(hooks["PostToolUse"][0]["matcher"], "Bash")
         for entries in hooks.values():
             self.assertIn("claim_guard.py", entries[0]["hooks"][0]["command"])
 

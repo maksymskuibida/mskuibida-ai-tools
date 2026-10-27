@@ -15,6 +15,10 @@
       bundle: a gate bundle, as contract/gate-bundle.schema.json and contract/README.md define it.
       id:     the bundle's id, <intent>-<unit>-<page>-v<revision>-<YYYYMMDDTHHMM>.
 
+  Ids. Every id the page shows (US1.1, FR1.4, BR1.2, Q3, R-01, ADR-009, …), in any text, is a link with a tooltip by the
+  shared AidlcIds (aidlc-ids.js below; shared/aidlc-ids/README.md is its contract), from the bundle's `ids`. A row or an
+  answer that shows an id's definition carries data-aidlc-id, and a link to it opens what holds it and lands there.
+
   What the page writes:
 
     bundles/<id>.notes[<row anchor>] = "text"          a note to the agent on a row or a step (step-<n>)
@@ -44,7 +48,8 @@
   --ok-bg: #E6F4EA; --ok-fg: #1F6B36; --warn-bg: #FFF4DB; --warn-fg: #7A4B00; --warn-dot: #B26B00;
   --r2-tint: #F8F5FE; --r2-bg: #EDE5FC; --r2-fg: #5B2FA8; --r3-tint: #F1FAF8; --r3-bg: #DCF2EE; --r3-fg: #0F665F;
   --r4-tint: #FFF8EC; --r4-bg: #FCEBCB; --r4-fg: #8A5A00; --r5-tint: #FDF3F7; --r5-bg: #F9DCE8; --r5-fg: #9B2C5C;
-  --band-bg: #171A21; --band-fg: #FFFFFF; --band-muted: #C9CDD6; --tip-bg: #171A21; --tip-fg: #FFFFFF;
+  --band-bg: #171A21; --band-fg: #FFFFFF; --band-muted: #C9CDD6; --tip-bg: #171A21; --tip-fg: #FFFFFF; --tip-line: #171A21;
+  --on-accent: #FFFFFF;
   --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
   --bar-h: 120px;
@@ -59,7 +64,9 @@
   --ok-bg: #183024; --ok-fg: #8FD3A6; --warn-bg: #3A2C12; --warn-fg: #F0C36B; --warn-dot: #F0A93B;
   --r2-tint: #1E1A2B; --r2-bg: #2E2547; --r2-fg: #C7B1F5; --r3-tint: #15221F; --r3-bg: #1A3833; --r3-fg: #86DACB;
   --r4-tint: #241E12; --r4-bg: #3D3016; --r4-fg: #F0C36B; --r5-tint: #26161D; --r5-bg: #45212F; --r5-fg: #F2A2C2;
-  --band-bg: #E6E8EE; --band-fg: #111318; --band-muted: #3D4350; --tip-bg: #E6E8EE; --tip-fg: #111318;
+  /* the band, tooltips and the toast stay dark surfaces in dark mode, lifted off the page, never inverted to light */
+  --band-bg: #252A34; --band-fg: #E6E8EE; --band-muted: #C3C8D2; --tip-bg: #2B303B; --tip-fg: #E6E8EE; --tip-line: #3A3F4B;
+  --on-accent: #111318;
   color-scheme: dark } }
 :root[data-theme="dark"] {
   --bg: #111318; --surface: #1A1D24; --raised: #20232B; --fg: #E6E8EE; --fg-2: #C3C8D2; --muted: #9AA1AF;
@@ -71,7 +78,9 @@
   --ok-bg: #183024; --ok-fg: #8FD3A6; --warn-bg: #3A2C12; --warn-fg: #F0C36B; --warn-dot: #F0A93B;
   --r2-tint: #1E1A2B; --r2-bg: #2E2547; --r2-fg: #C7B1F5; --r3-tint: #15221F; --r3-bg: #1A3833; --r3-fg: #86DACB;
   --r4-tint: #241E12; --r4-bg: #3D3016; --r4-fg: #F0C36B; --r5-tint: #26161D; --r5-bg: #45212F; --r5-fg: #F2A2C2;
-  --band-bg: #E6E8EE; --band-fg: #111318; --band-muted: #3D4350; --tip-bg: #E6E8EE; --tip-fg: #111318;
+  /* the band, tooltips and the toast stay dark surfaces in dark mode, lifted off the page, never inverted to light */
+  --band-bg: #252A34; --band-fg: #E6E8EE; --band-muted: #C3C8D2; --tip-bg: #2B303B; --tip-fg: #E6E8EE; --tip-line: #3A3F4B;
+  --on-accent: #111318;
   color-scheme: dark }
 
 * { box-sizing: border-box; }
@@ -170,8 +179,12 @@ h2 .hint { margin-left: 8px; font-weight: 400; font-size: 13px; color: var(--mut
 .refs > span { font-size: 12px; color: var(--muted); }
 .ref { position: relative; display: inline-flex; align-items: center; min-height: 24px; padding: 0 7px; border-radius: 5px; background: var(--accent-soft); color: var(--accent); font-family: var(--mono); font-size: 12px; text-decoration: none; white-space: nowrap; }
 .ref:hover { color: var(--accent-strong); filter: brightness(.97); }
-.ref::after { content: attr(data-tip); position: absolute; left: 0; bottom: calc(100% + 6px); width: max-content; max-width: min(340px, 80vw); white-space: normal; padding: 8px 10px; border-radius: 6px; background: var(--tip-bg); color: var(--tip-fg); font-family: var(--body); font-size: 12px; line-height: 1.45; opacity: 0; pointer-events: none; transition: opacity .12s; z-index: 6; }
-.ref:hover::after, .ref:focus-visible::after { opacity: 1; }
+/* a design id among the references: the shared link, in the reference chip's look */
+.refs a.aidlc-id { display: inline-flex; align-items: center; min-height: 24px; padding: 0 7px; border-radius: 5px; background: var(--accent-soft); font-family: var(--mono); font-size: 12px; }
+.refs a.aidlc-id.aidlc-id-unknown { background: var(--line-soft); }
+a.aidlc-id:hover { color: var(--accent-strong); }
+/* the one tooltip: every reference and every id link, on hover and on keyboard focus */
+#tip { position: fixed; z-index: 30; max-width: min(360px, calc(100vw - 24px)); padding: 8px 10px; border-radius: 6px; background: var(--tip-bg); color: var(--tip-fg); border: 1px solid var(--tip-line); font: 12px/1.45 var(--body); pointer-events: none; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
 .covered { font-size: 12px; padding: 2px 8px; border-radius: 4px; }
 .notebox { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
 .notebox label { flex: 1 1 300px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
@@ -214,7 +227,7 @@ h2 .hint { margin-left: 8px; font-weight: 400; font-size: 13px; color: var(--mut
 .design .drow { display: flex; align-items: center; gap: 12px; min-height: 34px; border-top: 1px solid var(--line-soft); }
 .design .drows { display: flex; flex-direction: column; padding: 0 16px 14px 50px; }
 .design .dt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.band { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 14px 18px; border-radius: 12px; background: var(--band-bg); color: var(--band-fg); }
+.band { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 14px 18px; border-radius: 12px; background: var(--band-bg); color: var(--band-fg); border: 1px solid var(--tip-line); }
 .band span { color: var(--band-muted); } .band b { font-weight: 500; } .band .end { margin-left: auto; font-family: var(--mono); font-size: 12px; }
 .list h2 { padding: 16px 16px 4px; }
 .lrow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 10px 16px; border-top: 1px solid var(--line-soft); color: var(--fg); text-decoration: none; }
@@ -223,7 +236,7 @@ h2 .hint { margin-left: 8px; font-weight: 400; font-size: 13px; color: var(--mut
 .lrow .end { margin-left: auto; }
 .msg { padding: 28px 24px; display: flex; flex-direction: column; gap: 6px; }
 .msg p { margin: 0; color: var(--fg-2); max-width: 70ch; }
-#toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--tip-bg); color: var(--tip-fg); padding: 8px 14px; border-radius: 8px; font-size: 13px; z-index: 20; }
+#toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--tip-bg); color: var(--tip-fg); border: 1px solid var(--tip-line); padding: 8px 14px; border-radius: 8px; font-size: 13px; z-index: 20; }
 
 @media (max-width: 767px) {
   .head { padding: 16px; }
@@ -234,13 +247,183 @@ h2 .hint { margin-left: 8px; font-weight: 400; font-size: 13px; color: var(--mut
   .tools { margin-left: 0; }
   .meter { width: 64px; }
 }
+/* aidlc-ids.css:begin */
+/* Shared: the canonical copy is shared/aidlc-ids/aidlc-ids.css; scripts/sync-shared.py copies it into every page.
+   It uses the page's own tokens: --accent, --muted, --tip-bg (each page defines them). */
+a.aidlc-id { color: var(--accent, currentColor); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; cursor: pointer; white-space: nowrap; font-variant-numeric: tabular-nums; }
+a.aidlc-id:hover, a.aidlc-id:focus-visible { text-decoration-thickness: 2px; }
+a.aidlc-id.aidlc-id-out { text-decoration-style: dotted; }
+a.aidlc-id.aidlc-id-unknown { color: var(--muted, currentColor); text-decoration-style: dashed; }
+a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outline-offset: 2px; border-radius: 3px; }
+[data-aidlc-id] { scroll-margin-top: 96px; }
+@keyframes aidlc-flash { from { box-shadow: 0 0 0 3px var(--accent, #3b82f6); } to { box-shadow: 0 0 0 3px transparent; } }
+.aidlc-flash { animation: aidlc-flash 1.6s ease-out; border-radius: 6px; }
+@media (prefers-reduced-motion: reduce) { .aidlc-flash { animation: none; outline: 2px solid var(--accent, #3b82f6); } }
+/* aidlc-ids.css:end */
 </style>
 
 <div class="wrap">
   <div id="app"><div class="card msg"><b>Loading…</b><p>The page fills in as soon as the stored row answers.</p></div></div>
 </div>
+<div id="tip" role="tooltip" hidden></div>
 <div id="toast" role="status" aria-live="polite" hidden></div>
 
+<script>
+/* aidlc-ids.js:begin */
+/* The ids an AI-DLC page shows (US1.1, AC1.1.2, FR1.4, NFR3, BR1.2, Q4, U31, C2, ADR-009, R-01, ...), each a link with
+   a tooltip saying what it is. Shared: the canonical copy is shared/aidlc-ids/aidlc-ids.js in mskuibida-ai-tools,
+   copied into every page by scripts/sync-shared.py. Edit it there.
+
+   The page gives it a map of what each id is, `ids` = {"FR1.4": {kind, title, text, doc}}, the output of
+   `aidlc_ids.py refs` written with the page's data, and marks each element that shows an id's own definition with
+   data-aidlc-id="<id>". Then:
+
+     AidlcIds.linkify(root, ids, { toast: fn })   turn every id in root's text into a link; run after each render
+     AidlcIds.observe(root, getIds, { toast: fn }) the same, again whenever root's content changes
+
+   A link whose id is shown in the page jumps there and flashes it. One that is not shown still looks like a link: its
+   tooltip says what it is, and a click shows a toast that it is not in this page. An id no document defines says so.
+   The tooltip is the page's own: the link carries data-tip and aria-label, which every page's tooltip reads. */
+var AidlcIds = (function () {
+  "use strict";
+  var ID = /(^|[^\w-])([A-Z][A-Z]{0,4}-?\d+[a-z]?(?:[.-]\d+[a-z]?)*(?:-[A-Z]{1,4}\d+[a-z]?)?)(?![\w-])/g;
+  var NOT_IDS = /^(UTF-?\d+|SHA-?\d+|ISO-?\d+|RFC-?\d+|HTTP-?\d+|TLS-?\d|H[1-6]|V\d+|X\d+|P\d|ES\d+|ID\d*)$/;
+  var KINDS = { US: "Story", AC: "Acceptance criterion", FR: "Functional requirement", NFR: "Non-functional requirement",
+    BR: "Business rule", Q: "Question", U: "Unit", C: "Contract", E: "External interface", ADR: "Decision record",
+    R: "Review finding", D: "Decision", DR: "Design rule", S: "Screen", M: "Mockup", T: "Task" };
+  var SKIP = "a, button, code, pre, script, style, textarea, input, select, option, [data-aidlc-noids]";
+
+  function prefix(id) { return (/^[A-Z]+/.exec(id) || [""])[0]; }
+  function docName(doc) { return String(doc || "").split("/").pop(); }
+
+  function anchorOf(id) {
+    var css = window.CSS && CSS.escape ? CSS.escape(id) : id.replace(/["\\]/g, "\\$&");
+    return document.querySelector('[data-aidlc-id="' + css + '"]');
+  }
+
+  /** The tooltip of an id: what it is, in plain words, and where it is written. */
+  function tip(id, def) {
+    if (!def) return id + ": not found in this project's documents.";
+    var kind = def.kind || KINDS[prefix(id)] || "";
+    var head = (kind ? kind + " " : "") + id + (def.title ? ": " + def.title : "");
+    var body = def.text && def.text !== def.title ? " " + def.text : "";
+    return head + (/[.!?…]$/.test(head) || !body ? "" : ".") + body + (def.doc ? " (" + docName(def.doc) + ")" : "");
+  }
+
+  /** Whether a word is an id this page knows of, or looks like one of a kind it knows. */
+  function isId(word, ids, prefixes) {
+    if (NOT_IDS.test(word)) return false;
+    return Object.prototype.hasOwnProperty.call(ids, word) || prefixes[prefix(word)] === true;
+  }
+
+  function linkify(root, ids, opts) {
+    if (!root) return;
+    ids = ids || {};
+    opts = opts || {};
+    var prefixes = {};
+    Object.keys(ids).forEach(function (k) { prefixes[prefix(k)] = true; });
+    Object.keys(KINDS).forEach(function (k) { prefixes[k] = true; });
+    // Keys of the page's own map that are not id-shaped (a form's q1, a card's f-3) are linked by their exact text.
+    var own = Object.keys(ids).filter(function (k) { return !/^[A-Z]/.test(k) && /^[\w.-]+$/.test(k); })
+      .sort(function (a, b) { return b.length - a.length; })
+      .map(function (k) { return k.replace(/[.-]/g, "\\$&"); });
+    var OWN = own.length ? new RegExp("(^|[^\\w-])(" + own.join("|") + ")(?![\\w-])", "g") : null;
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (n) {
+        if (!n.nodeValue || !(OWN ? /\d/ : /[A-Z]-?\d/).test(n.nodeValue)) return NodeFilter.FILTER_REJECT;
+        var p = n.parentElement;
+        return p && !p.closest(SKIP) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      }
+    });
+    var nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(function (node) {
+      var text = node.nodeValue, last = 0, frag = null, m;
+      var self = node.parentElement.closest("[data-aidlc-id]");
+      var found = [];
+      [ID, OWN].forEach(function (re) {
+        if (!re) return;
+        re.lastIndex = 0;
+        while ((m = re.exec(text))) found.push({ word: m[2], start: m.index + m[1].length, own: re === OWN });
+      });
+      found.sort(function (a, b) { return a.start - b.start; });
+      for (var i = 0; i < found.length; i++) {
+        var word = found[i].word, start = found[i].start;
+        if (start < last) continue;
+        if (!found[i].own && !isId(word, ids, prefixes)) continue;
+        if (self && self.getAttribute("data-aidlc-id") === word) continue;
+        frag = frag || document.createDocumentFragment();
+        frag.appendChild(document.createTextNode(text.slice(last, start)));
+        var a = document.createElement("a");
+        var def = ids[word];
+        a.className = "aidlc-id" + (def ? "" : " aidlc-id-unknown");
+        a.href = "#" + encodeURIComponent(word);
+        a.textContent = word;
+        a.setAttribute("data-aidlc-ref", word);
+        a.setAttribute("data-tip", tip(word, def));
+        a.setAttribute("aria-label", tip(word, def));
+        frag.appendChild(a);
+        last = start + word.length;
+      }
+      if (frag) {
+        frag.appendChild(document.createTextNode(text.slice(last)));
+        node.parentNode.replaceChild(frag, node);
+      }
+    });
+    markLive(root);
+    bind(root, opts);
+  }
+
+  /** Links whose id is shown in the page get the live look; the rest the out-of-page one. */
+  function markLive(root) {
+    Array.prototype.forEach.call(root.querySelectorAll("a.aidlc-id"), function (a) {
+      a.classList.toggle("aidlc-id-out", !anchorOf(a.getAttribute("data-aidlc-ref")));
+    });
+  }
+
+  function bind(root, opts) {
+    if (root.__aidlcIds) { root.__aidlcIds.opts = opts; return; }
+    root.__aidlcIds = { opts: opts };
+    root.addEventListener("click", function (e) {
+      var a = e.target.closest && e.target.closest("a.aidlc-id");
+      if (!a || !root.contains(a)) return;
+      e.preventDefault();
+      var id = a.getAttribute("data-aidlc-ref"), target = anchorOf(id);
+      var say = root.__aidlcIds.opts.toast || function (t) { window.alert(t); };
+      if (target) {
+        var closed = target.closest("details:not([open])");
+        if (closed) closed.open = true;
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+        target.classList.remove("aidlc-flash");
+        void target.offsetWidth;
+        target.classList.add("aidlc-flash");
+        if (target.tabIndex < 0 && !target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+        target.focus({ preventScroll: true });
+      } else if (a.classList.contains("aidlc-id-unknown")) {
+        say(id + " isn't defined in this project's documents.");
+      } else {
+        say(id + " isn't in this page. What it is: in its tooltip.");
+      }
+    });
+  }
+
+  function observe(root, getIds, opts) {
+    if (!root) return;
+    var busy = false;
+    var run = function () {
+      if (busy) return;
+      busy = true;
+      try { linkify(root, getIds(), opts); } finally { busy = false; }
+    };
+    run();
+    new MutationObserver(function () { if (!busy) window.requestAnimationFrame(run); })
+      .observe(root, { childList: true, subtree: true, characterData: true });
+  }
+
+  return { linkify: linkify, observe: observe, tip: tip, KINDS: KINDS };
+})();
+/* aidlc-ids.js:end */
+</script>
 <script>
 /* RENDER-START: no DOM below, until RENDER-END */
 var GateView = (function () {
@@ -292,7 +475,8 @@ var GateView = (function () {
   /* ---------- state helpers ---------- */
   function revOf(item) { return item.rev || 1; }
   function isRead(st, key, item) { return (st.read[key] || 0) >= revOf(item); }
-  function isOpen(st, key) { var o = st.open[key]; return o === undefined ? st.mode === "full" : o; }
+  /* Everything is open in the Full view; a row the viewer marked read stays folded until they open it. */
+  function isOpen(st, key, read) { var o = st.open[key]; return o === undefined ? st.mode === "full" && !read : o; }
   function secOpen(st, key, dflt) { var o = st.sec[key]; return o === undefined ? dflt : o; }
   function passes(st, item, key, isStep) {
     var f = st.filter;
@@ -324,8 +508,44 @@ var GateView = (function () {
     var t = revTone(item.rev);
     return '<span class="tag' + (extra || "") + '" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">v' + int(item.rev) + " " + (item.revKind === "new" ? "new" : "changed") + "</span>";
   }
+  /* An id the shared AidlcIds links: the same shape as its matcher (US1.1, FR1.4, BR1.2, R-01, ADR-009, U3-SD2). */
+  var IDISH = /^[A-Z][A-Z]{0,4}-?\d+[a-z]?(?:[.-]\d+[a-z]?)*(?:-[A-Z]{1,4}\d+[a-z]?)?$/;
+  /* The project id a row or an answer shows the definition of ("FD R-06" shows R-06), only when no other row or answer
+     of the page claims the same id: every stage has its own R-01 and its own Q1. {anchor: id} */
+  function definedIds(bundle) {
+    var byId = {}, out = {};
+    var add = function (id, key) { id = String(id || "").split(" ").pop(); if (IDISH.test(id)) (byId[id] = byId[id] || []).push(key); };
+    (bundle.sections || []).forEach(function (s) { (s.rows || []).forEach(function (r) { add(r.id, anchor(r.id)); }); });
+    (bundle.answers || []).forEach(function (g) { (g.questions || []).forEach(function (q) { add(q.id, q.anchor); }); });
+    Object.keys(byId).forEach(function (id) { if (byId[id].length === 1) out[byId[id][0]] = id; });
+    return out;
+  }
+  function idAttr(defs, key) { return defs[key] ? ' data-aidlc-id="' + esc(defs[key]) + '"' : ""; }
+  /* The map AidlcIds links from: the bundle's `ids` (aidlc_ids.py refs), and, for an id the bundle has no entry for,
+     what the page knows of it: the tip of a reference to it, or the row that defines it. */
+  function idMap(bundle) {
+    var out = {}, defs = definedIds(bundle);
+    var fromRef = function (x) { var l = String(x.label || ""); if (IDISH.test(l) && !out[l]) out[l] = { title: String(x.tip || ""), doc: String(x.target || "").indexOf("path:") === 0 ? String(x.target).slice(5).replace(/#.*/, "") : "" }; };
+    (bundle.sections || []).forEach(function (s) { (s.rows || []).forEach(function (r) {
+      var id = defs[anchor(r.id)]; if (id && !out[id]) out[id] = { title: String(r.title || "") };
+      (r.refs || []).forEach(fromRef);
+    }); });
+    ((bundle.plan || {}).steps || []).forEach(function (st) { (st.implements || []).forEach(fromRef); });
+    (bundle.answers || []).forEach(function (g) { (g.questions || []).forEach(function (q) { var id = defs[q.anchor]; if (id && !out[id]) out[id] = { title: String(q.text || ""), text: "Your answer: " + String(q.answer || ""), doc: g.file }; }); });
+    var ids = bundle.ids || {};
+    Object.keys(ids).forEach(function (k) { out[k] = ids[k]; });
+    return out;
+  }
+  /* Every id the page can show the definition of, rendered or not, so a link to one in a folded section is live: the
+     jump opens what holds it. */
+  function idIndex(bundle) {
+    var defs = definedIds(bundle);
+    return '<div hidden data-aidlc-noids>' + Object.keys(defs).map(function (k) { return '<span data-aidlc-id="' + esc(defs[k]) + '" data-anchor="' + esc(k) + '"></span>'; }).join("") + "</div>";
+  }
   function refHtml(ref, bundle) {
     var t = String(ref.target || ""), href = "#", data = "";
+    /* a design id in a record: the shared linker makes it a link, with what the project says of it */
+    if (IDISH.test(String(ref.label || "")) && (t === "" || t.indexOf("path:") === 0)) return '<span class="refid">' + esc(ref.label) + "</span>";
     if (t.charAt(0) === "#") { href = safeHref(t); data = ' data-jump="' + esc(href.slice(1)) + '"'; }
     else if (/^https?:\/\//i.test(t)) href = t;
     else if (t.indexOf("path:") === 0) {
@@ -343,7 +563,7 @@ var GateView = (function () {
   }
 
   function rowHtml(st, bundle, sec, r) {
-    var key = anchor(r.id), open = isOpen(st, key), read = isRead(st, key, r);
+    var key = anchor(r.id), read = isRead(st, key, r), open = isOpen(st, key, read);
     var t = r.rev ? revTone(r.rev) : null;
     var bg = t ? "background:var(--" + t + "-tint)" : (r.lookFirst ? "background:var(--accent-tint)" : "");
     var head = '<div class="rowhead">' +
@@ -364,7 +584,7 @@ var GateView = (function () {
         (refs || cov ? '<div class="refs">' + (refs && sec.refsLabel ? "<span>" + esc(sec.refsLabel) + "</span>" : "") + refs + cov + "</div>" : "") +
         noteBox(st, key, "Only if something should change", r.suggestion) + "</div>";
     }
-    return '<div class="row' + (read ? " read" : "") + '" id="' + esc(key) + '" style="' + bg + '">' + head + body + "</div>";
+    return '<div class="row' + (read ? " read" : "") + '" id="' + esc(key) + '"' + idAttr(definedIds(bundle), key) + ' style="' + bg + '">' + head + body + "</div>";
   }
 
   function sectionHead(key, title, hint, open, right) {
@@ -419,14 +639,13 @@ var GateView = (function () {
     if (open) {
       body = '<div class="secbody">' + (s.map && st.filter === "all" ? mapHtml(s.map) : "") +
         (s.asApproved ? '<p class="asapproved">The design stays as approved.</p>' : "") +
-        (!s.asApproved && !shownRows.length ? '<p class="empty">' + (rows.length ? "Nothing here for this filter." : "Nothing in this section.") + "</p>" : "") +
         shownRows.map(function (r) { return rowHtml(st, bundle, s, r); }).join("") + "</div>";
     }
     return '<section class="card" id="' + esc(s.key) + '" data-sec="' + esc(s.key) + '">' + sectionHead(s.key, s.title, s.hint, open, right) + body + "</section>";
   }
 
   function stepHtml(st, bundle, step) {
-    var key = "step-" + int(step.n), open = isOpen(st, key), read = isRead(st, stepKey(step), step), t = step.rev ? revTone(step.rev) : null;
+    var key = "step-" + int(step.n), read = isRead(st, stepKey(step), step), open = isOpen(st, key, read), t = step.rev ? revTone(step.rev) : null;
     var lt = LAYER_TONE[step.layer] || "low";
     var head = '<div class="rowhead"><button type="button" class="twist" data-act="row" data-key="' + key + '" aria-expanded="' + open + '" aria-label="' + (open ? "Collapse" : "Expand") + " step " + int(step.n) + '">' + CHEVRON + "</button>" +
       '<span class="rid">Step ' + int(step.n) + "</span>" +
@@ -460,11 +679,12 @@ var GateView = (function () {
       var t = revTone(+v); return '<span class="lc" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">v' + int(v) + "<b>" + steps.filter(function (s) { return s.rev === +v; }).length + "</b></span>";
     }).join("");
     var right = layers + revs + '<span class="shown">' + (st.filter === "all" ? steps.length : shown.length + "/" + steps.length) + "</span>";
-    var body = open ? '<div class="secbody">' + (shown.length ? shown.map(function (s) { return stepHtml(st, bundle, s); }).join("") : '<p class="empty">' + (/^(look|top)$/.test(st.filter) ? "Steps carry no label; switch to All to read them." : "Nothing here for this filter.") + "</p>") + "</div>" : "";
+    var body = open ? '<div class="secbody">' + shown.map(function (s) { return stepHtml(st, bundle, s); }).join("") + "</div>" : "";
     return '<section class="card" id="plan" data-sec="plan">' + sectionHead("plan", p.title || "Code plan", p.hint || "", open, right) + body + "</section>";
   }
 
   function answersHtml(st, bundle) {
+    var defs = definedIds(bundle);
     var groups = bundle.answers || [], open = secOpen(st, "answers", true);
     var total = 0, differ = 0;
     groups.forEach(function (g) { (g.questions || []).forEach(function (q) { total++; if (q.proposed && q.answer.charAt(0) !== q.proposed.charAt(0)) differ++; }); });
@@ -472,7 +692,7 @@ var GateView = (function () {
     var body = "";
     if (open) {
       body = '<div class="secbody">' + groups.map(function (g) {
-        var gk = "ans-" + g.key, go = !!st.open[gk];
+        var gk = "ans-" + g.key, go = st.open[gk] !== false;
         var d = (g.questions || []).filter(function (q) { return q.proposed && q.answer.charAt(0) !== q.proposed.charAt(0); }).length;
         return '<div class="row qgroup" id="' + esc(g.key) + '"><div class="rowhead"><button type="button" class="twist" data-act="group" data-key="' + esc(gk) + '" aria-expanded="' + go + '" aria-label="' + (go ? "Collapse " : "Expand ") + esc(g.title) + ' answers">' + CHEVRON + "</button>" +
           '<button type="button" class="rtitle" data-act="group" data-key="' + esc(gk) + '" title="' + esc(g.file) + '">' + esc(g.title) + "</button>" +
@@ -480,7 +700,7 @@ var GateView = (function () {
           '<span class="shown">' + plural((g.questions || []).length, "answer") + "</span></div>" +
           (go ? '<div class="qs">' + (g.questions || []).map(function (q) {
             var df = q.proposed && q.answer.charAt(0) !== q.proposed.charAt(0);
-            return '<div class="q" id="' + esc(q.anchor) + '"><span class="qid">' + esc(q.id) + '</span><span class="ans" title="' + esc(q.answer) + '">' + esc(q.answer.length > 3 ? q.answer.slice(0, 1) + "…" : q.answer) + '</span><span class="qt" title="' + esc(q.text + (q.answer.length > 3 ? " — " + q.answer : "")) + '">' + esc(q.text) + "</span>" + (df ? '<span class="prop">proposed ' + esc(q.proposed) + "</span>" : "") + "</div>";
+            return '<div class="q" id="' + esc(q.anchor) + '"' + idAttr(defs, q.anchor) + '><span class="qid">' + esc(q.id) + '</span><span class="ans" title="' + esc(q.answer) + '">' + esc(q.answer.length > 3 ? q.answer.slice(0, 1) + "…" : q.answer) + '</span><span class="qt" title="' + esc(q.text + (q.answer.length > 3 ? " — " + q.answer : "")) + '">' + esc(q.text) + "</span>" + (df ? '<span class="prop">proposed ' + esc(q.proposed) + "</span>" : "") + "</div>";
           }).join("") + "</div>" : "") + "</div>";
       }).join("") + "</div>";
     }
@@ -488,7 +708,7 @@ var GateView = (function () {
   }
 
   function designHtml(st, bundle) {
-    var d = bundle.design, open = secOpen(st, "design", false), rows = d.rows || [];
+    var d = bundle.design, open = secOpen(st, "design", true), rows = d.rows || [];
     var link = d.bundle ? '<a href="#' + esc(d.bundle) + '" data-nav="' + esc(d.bundle) + '" style="margin-top:10px;font-size:13px">Open the full plan-approval page</a>' : (d.url ? '<a href="' + esc(safeHref(d.url)) + '" target="_blank" rel="noopener">Open the full plan-approval page</a>' : "");
     var body = open ? '<div class="drows">' + rows.map(function (r) {
       return '<div class="drow"><span class="rid">' + esc(r.id) + '</span><span class="dt" title="' + esc(r.title) + '">' + esc(r.title) + '</span><span class="lab" style="' + tone(LABEL_TONE[r.label] || "low") + '">' + esc(r.label) + "</span></div>";
@@ -555,15 +775,28 @@ var GateView = (function () {
     return '<footer class="band"><b>' + esc(lead) + "</b><span>" + esc(rest) + '</span><span class="end num">read ' + read + "/" + items.length + "</span></footer>";
   }
 
+  /* A section with nothing to show is left out, with its heading, counts and nav chip: it has no rows, or the filter hides
+     every one. A section that says something without rows (the design stays as approved, a map) stays. */
+  function hasContent(st, bundle, key) {
+    if (key === "plan") { var steps = bundle.plan.steps || []; return steps.some(function (x) { return passes(st, x, stepKey(x), true); }); }
+    if (key === "answers") return (bundle.answers || []).length > 0;
+    if (key === "design") return !!((bundle.design.rows || []).length || bundle.design.bundle || bundle.design.url);
+    var s = (bundle.sections || []).filter(function (x) { return x.key === key; })[0];
+    if (!s) return false;
+    if (s.asApproved || (s.map && st.filter === "all")) return true;
+    return (s.rows || []).some(function (r) { return passes(st, r, anchor(r.id), false); });
+  }
+
   /* The whole page for one bundle. st: {mode, filter, open, sec, read, notes, picks, noteStat}. */
   function render(bundle, st) {
-    st = Object.assign({ mode: "summary", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {} }, st || {});
-    var keys = order(bundle), parts = {};
+    st = Object.assign({ mode: "full", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {} }, st || {});
+    var keys = order(bundle).filter(function (k) { return hasContent(st, bundle, k); }), parts = {};
     (bundle.sections || []).forEach(function (s) { parts[s.key] = sectionHtml(st, bundle, s); });
     if (bundle.plan) parts.plan = planHtml(st, bundle);
     if ((bundle.answers || []).length) parts.answers = answersHtml(st, bundle);
     if (bundle.design) parts.design = designHtml(st, bundle);
-    return headerHtml(st, bundle) + barHtml(st, bundle, keys) + "<main>" + keys.map(function (k) { return parts[k]; }).join("") + footerHtml(st, bundle) + "</main>";
+    var empty = keys.length || st.filter === "all" ? "" : '<p class="empty card">Nothing here for this filter.</p>';
+    return headerHtml(st, bundle) + barHtml(st, bundle, keys) + "<main>" + keys.map(function (k) { return parts[k]; }).join("") + empty + footerHtml(st, bundle) + idIndex(bundle) + "</main>";
   }
 
   function listHtml(rows) {
@@ -579,7 +812,7 @@ var GateView = (function () {
       }).join("");
   }
 
-  return { render: render, listHtml: listHtml, order: order, sortRows: sortRows, anchor: anchor, itemsOf: itemsOf, isRead: isRead, esc: esc };
+  return { render: render, listHtml: listHtml, order: order, sortRows: sortRows, anchor: anchor, itemsOf: itemsOf, isRead: isRead, esc: esc, idMap: idMap };
 })();
 if (typeof module !== "undefined") module.exports = GateView;
 /* RENDER-END */
@@ -589,9 +822,9 @@ if (typeof module !== "undefined") module.exports = GateView;
   "use strict";
   var app = document.getElementById("app"), toastEl = document.getElementById("toast");
   var db = null, user = null, uid = null;
-  var view = { id: "", row: null, bundle: null, unsub: [], st: null, readKey: "", saving: false, unsaved: false, timer: 0 };
+  var view = { id: "", row: null, bundle: null, ids: {}, unsub: [], st: null, readKey: "", saving: false, unsaved: false, timer: 0 };
 
-  function freshState() { return { mode: "summary", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {} }; }
+  function freshState() { return { mode: "full", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {} }; }
   function toast(text) { toastEl.textContent = text; toastEl.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(function () { toastEl.hidden = true; }, 2400); }
   function teardown() {
     if (view.unsaved) flush();  /* sends the pending note of the page being left; flush reads the id before it awaits */
@@ -604,6 +837,7 @@ if (typeof module !== "undefined") module.exports = GateView;
 
   function paint() {
     if (!view.bundle) return;
+    hideTip();
     var y = window.scrollY, active = document.activeElement, focusKey = active && (active.dataset.note || null);
     app.innerHTML = GateView.render(view.bundle, view.st);
     barHeight();
@@ -666,8 +900,33 @@ if (typeof module !== "undefined") module.exports = GateView;
     if (el) { el.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); }
   }
 
+  /* ---------- tooltips: every reference and every id link says what it is, on hover and on keyboard focus ---------- */
+  var tipEl = document.getElementById("tip"), tipOn = null;
+  function showTip(t) {
+    if (tipOn && tipOn !== t) tipOn.removeAttribute("aria-describedby");
+    tipEl.textContent = t.dataset.tip; tipEl.hidden = false; tipOn = t; t.setAttribute("aria-describedby", "tip");
+    var r = t.getBoundingClientRect(), w = tipEl.offsetWidth, h = tipEl.offsetHeight;
+    var top = r.top - h - 6; if (top < 8) top = Math.min(window.innerHeight - h - 8, r.bottom + 6);
+    tipEl.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + "px"; tipEl.style.top = top + "px";
+  }
+  function hideTip() { if (tipOn) tipOn.removeAttribute("aria-describedby"); tipOn = null; tipEl.hidden = true; }
+  function tipTarget(n) { return n && n.closest ? n.closest(".ref[data-tip], a.aidlc-id[data-tip]") : null; }
+  document.addEventListener("mouseover", function (e) { var t = tipTarget(e.target); if (t) { if (t !== tipOn) showTip(t); } else if (tipOn && document.activeElement !== tipOn) hideTip(); });
+  document.addEventListener("focusin", function (e) { var t = tipTarget(e.target); if (t) showTip(t); else hideTip(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") hideTip(); });
+  window.addEventListener("scroll", function () { if (tipOn && document.activeElement !== tipOn) hideTip(); }, { passive: true });
+
   /* ---------- events ---------- */
   app.addEventListener("click", function (e) {
+    /* an id this page shows the definition of: open what holds it and land there (before the shared linker's click,
+       which only toasts for an id the page does not show) */
+    var ida = e.target.closest("a.aidlc-id");
+    if (ida) {
+      var css = window.CSS && CSS.escape ? CSS.escape(ida.dataset.aidlcRef) : ida.dataset.aidlcRef;
+      var def = app.querySelector('[data-aidlc-id="' + css + '"]');
+      if (def) { e.preventDefault(); e.stopImmediatePropagation(); hideTip(); reveal(def.dataset.anchor || def.id); }
+      return;
+    }
     var nav = e.target.closest("[data-nav]");
     if (nav) { e.preventDefault(); var to = nav.dataset.nav; if (to) location.hash = to; else history.pushState(null, "", location.pathname + location.search), route(); return; }
     var jump = e.target.closest("[data-jump]");
@@ -684,16 +943,16 @@ if (typeof module !== "undefined") module.exports = GateView;
     if (!btn || !view.st) return;
     var st = view.st, act = btn.dataset.act, key = btn.dataset.key, val = btn.dataset.val, rev = view.bundle.header.revision || 1;
     if (act === "row") {
-      var now = !(st.open[key] === undefined ? st.mode === "full" : st.open[key]);
-      st.open[key] = now;
+      var twist = app.querySelector('.twist[data-act="row"][data-key="' + key + '"]');
+      st.open[key] = twist ? twist.getAttribute("aria-expanded") !== "true" : !st.open[key];
       /* opening a row only opens it: the read dot is the one thing that marks a row read */
     } else if (act === "sec") {
-      var dflt = key === "design" ? false : true;
-      st.sec[key] = !(st.sec[key] === undefined ? dflt : st.sec[key]);
-    } else if (act === "group") st.open[key] = !st.open[key];
+      st.sec[key] = st.sec[key] === false;
+    } else if (act === "group") st.open[key] = st.open[key] === false;
     else if (act === "read") {
       var it = GateView.itemsOf(view.bundle).filter(function (x) { return x.anchor === key; })[0];
-      if (it) { var r = it.item.rev || 1; if (GateView.isRead(st, it.key, it.item)) { st.read[it.key] = r - 1; saveReads(); } else markRead([it.key], r); }
+      /* marking a row read folds it; marking it unread opens it again */
+      if (it) { var r = it.item.rev || 1; if (GateView.isRead(st, it.key, it.item)) { st.read[it.key] = r - 1; saveReads(); st.open[key] = true; } else { markRead([it.key], r); st.open[key] = false; } }
     } else if (act === "mode") { st.mode = val; st.open = {}; st.sec = {}; }
     else if (act === "filter") { st.filter = val; st.sec = {}; }
     else if (act === "expand" || act === "collapse") {
@@ -701,7 +960,10 @@ if (typeof module !== "undefined") module.exports = GateView;
       GateView.order(view.bundle).forEach(function (k) { st.sec[k] = on; });
       GateView.itemsOf(view.bundle).forEach(function (x) { st.open[x.anchor] = on; });
       (view.bundle.answers || []).forEach(function (g) { st.open["ans-" + g.key] = on; });
-    } else if (act === "allread") markRead(GateView.itemsOf(view.bundle).map(function (x) { return x.key; }), rev);
+    } else if (act === "allread") {
+      markRead(GateView.itemsOf(view.bundle).map(function (x) { return x.key; }), rev);
+      GateView.itemsOf(view.bundle).forEach(function (x) { st.open[x.anchor] = false; });
+    }
     else if (act === "pick") { st.picks[key] = st.picks[key] === val ? "" : val; queueSave(); }
     paint();
   });
@@ -711,6 +973,8 @@ if (typeof module !== "undefined") module.exports = GateView;
     view.st.notes[key] = e.target.value; setStat(key, "Unsaved"); queueSave();
   });
   window.addEventListener("resize", barHeight);
+  /* every id on the page: a link with a tooltip, by the shared AidlcIds */
+  AidlcIds.observe(app, function () { return view.ids; }, { toast: toast });
 
   /* ---------- views ---------- */
   function showList() {
@@ -730,7 +994,7 @@ if (typeof module !== "undefined") module.exports = GateView;
         return;
       }
       var row = snap.data(), first = !view.bundle;
-      view.row = row; view.bundle = row.bundle || null;
+      view.row = row; view.bundle = row.bundle || null; view.ids = view.bundle ? GateView.idMap(view.bundle) : {};
       if (!view.bundle) { app.innerHTML = '<div class="card msg"><b>This row holds no page.</b><p>Ask the agent to build it again.</p></div>'; return; }
       if (view.bundle.schema !== "aidlc-gate-bundle/1") { app.innerHTML = '<div class="card msg"><b>This page is newer than this view.</b><p>It uses ' + GateView.esc(view.bundle.schema) + '. Ask the agent to republish the unit approvals page from the plugin.</p></div>'; return; }
       if (first) {

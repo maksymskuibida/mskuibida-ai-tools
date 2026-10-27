@@ -1,6 +1,6 @@
 ---
 name: review-findings
-description: Use whenever review findings reach the developer — the review brief printed at an AI-DLC approval gate (`aidlc engine review-brief review --stage …`) with open findings, or the result of a code review (`/code-review`, the ReportFindings tool). Show a compact summary of the open findings, ask one question first (Fix / Accept / Open in form), and act on the answer; Open in form sorts each finding in a board form in the developer's "AI-DLC question forms" artifact. A hook holds back everything else until the question is answered.
+description: Use whenever review findings reach the developer — the review brief printed at an AI-DLC approval gate (`aidlc engine review-brief review --stage …`) with open findings, or the result of a code review (`/code-review`, the ReportFindings tool). Show each open finding in plain words with a suggested action, ask one question first (Fix / Accept / Open in form), and act on the answer; Open in form sorts each finding in a board form in the developer's "AI-DLC question forms" artifact. A hook holds back everything else until the question is answered.
 ---
 
 # Review findings
@@ -39,18 +39,28 @@ brief or the report. It holds the summary block and the path of a saved findings
 ## 2. The summary and the question
 
 Print the summary block from the hook message in chat (or render it again with `FINDINGS summary
---findings <file>`):
+--findings <file>`), as the text of a message of its own, before the question. The hook refuses the
+triage question until a message of yours since the findings were saved shows it: the review named
+and a **Suggested:** action for every open finding. It shows each open finding in plain words, with
+its suggested action in bold and no ids, rule codes or paths in the sentences:
 
 ```
 **Review findings — Domain Design:** 2 open, 1 blocking
-| ID | Severity | Where | Finding |
-|---|---|---|---|
-| R-02 | Major | domain-model.md > Cart aggregate | The `Cart` rule is ambiguous. |
+
+1. **The `Cart` rule `checkout | expire` is ambiguous.** (Blocking, domain model › Cart aggregate, invariants list) Two events can fire on the same cart, …
+   **Suggested:** State the winning event. Add one line on what happens to reserved stock.
 ```
 
-Then ask one `AskUserQuestion` and nothing else before it (`FINDINGS question --findings <file>`
-prints it as JSON): header `Findings`, question `"3 review findings are open (1 blocking). What
-should I do with them?"` (`(none blocking)` when no finding blocks), and the options in this order:
+When you talk about a finding in chat, do the same: its number in this list and its words, never
+`R-02` or `src/cart.py:42` in the sentence.
+
+Then ask one `AskUserQuestion` and nothing else before it: `FINDINGS question --findings <file>`
+prints its input as JSON, `metadata: {"source": "review-findings"}` included; pass it as it is.
+The plugin's mod builds the question again from the saved findings and draws every finding above
+the dialog (Markdown on desktop, plain lines on the terminal), with a suggested action written by
+a model for each finding whose reviewer named none. The question: header `Findings`, question
+`"3 review findings are open (1 blocking). What should I do with them?"` (`(none blocking)` when no
+finding blocks), and the options in this order:
 
 - `Fix`: "Fix every open finding. At a stage gate this goes through Request Changes with the
   findings as the reason."
@@ -62,6 +72,28 @@ Until it is answered the hook refuses every other question (the Approval gate in
 approved and rejected reports and, for a code review, edits and `git commit|push`.
 
 ## 3. What each answer means
+
+**First, the summary of the answers.** As soon as Fix or Accept is answered here, run `FINDINGS answers --findings <file>` with no other arguments. It
+prints the developer's answers, finding by finding, from what the hook recorded:
+
+```
+## Review Findings: User Answer
+### R-02: Fix
+#### Action items:
+- State the winning event.
+- Add one line on what happens to reserved stock.
+#### User Note:
+Checkout wins.
+### R-03: Reject
+#### User Note:
+The name is deliberate.
+```
+
+Action items appear only where something will be done (Fix): one item as a line, several as a
+list. The note appears only where the developer wrote one, as they wrote it. Send the output in
+chat exactly as printed, before anything else. Until it has run, the hook refuses the gate, the
+approved and rejected reports and, for a code review, edits and `git commit|push`. It also checks
+that the output covers every finding with the recorded answer.
 
 **Fix**
 
@@ -92,11 +124,22 @@ that skill's § 1 to publish it first.
 
 1. Build the rows: `FINDINGS board --findings <file> --out <scratch dir>`. It prints the form id
    (`<intent>-<stage>[-<unit>]-findings-<YYYYMMDDTHHMM>`, or `code-review-<YYYYMMDDTHHMM>`) and
-   the path of `writes.json`. The board is titled "Review findings · <stage name>" and has three
-   boxes: **Fix** ("Fixed before approval"), **Accept** ("Carried as a known risk") and **Reject
-   (reason required)** ("Not applicable; write why in the note"). Each finding is one card: the
-   title is its first sentence, the details hold Where, Finding and Required action, and it starts
-   in Fix when it blocks and in Accept when it does not.
+   the path of `writes.json`. The board is titled "Review findings · <stage name>" and is a
+   list of cards in two sections (Blocking, then Can be carried; for a code review Confirmed, then Possible)
+   with three decision buttons on each card: **Fix** ("Fixed before approval"), **Accept** ("Carried as a known
+   risk") and **Reject** ("Not applicable"; its note field opens and a reason is required). Each finding is one
+   card: the title is its first sentence, the details hold Where, Finding and Required action, and the card shows
+   its severity and whether it blocks. The review suggests Fix for a blocking finding and Accept for the rest; the
+   suggestion is marked on the card, but nothing is picked for the developer: every card has to be decided
+   (Done stays off until it is), or the developer takes the suggestion with the bulk buttons. Its details say, in plain words, what is
+   wrong, the suggested action and where; the card also carries them apart (`plain`, `action`,
+   `detail`), with `refs` (what the finding points at, `{label, tip, target}`, a live link when the
+   target is `#<qid>` of another card) for the page (question-forms § 5). In an AI-DLC project,
+   `board` also syncs the project's id map (`aidlc_ids.py sync`) and writes the form's `ids`: the
+   definition of every id the cards mention (US, AC, FR, NFR, BR, Q, U, C, E, ADR, R, …), nearest the
+   reviewed document, so the page shows each one as a link with a tooltip. Its output says how many
+   (`"ids": n`), and `ids_note` why there are none. Write ids as they are in the cards' text; never
+   paste them into a sentence that plain words can say.
 2. Write the rows with **one** `ArtifactData` `batch` whose `writes` are the array in
    `writes.json`, as it is (new rows: no `if_version`).
 3. Send the form check, as `question-forms` § 5b A says: `AskUserQuestion`, header `Form`, question
@@ -106,8 +149,13 @@ that skill's § 1 to publish it first.
    not done, say so and wait. If something is wrong in the form, fix the rows (the same batch sets
    the form's `status` back to `open`) and ask again. You never write `status: "done"`; the hook
    refuses it.
-4. Read the answers back: `answers[qid].k[0]` is the card's box, `note` the developer's words.
-   Show one line per card with its box and note ("Summary of your answers"), then:
+4. Read the answers back with `ArtifactData` `get` of `forms/<form id>` (the hook records the
+   answers from that result; `answers[qid].k[0]` is the card's box, `note` the developer's words).
+   No summary of the answers is sent: the developer wrote them in the form. Then:
+   - **Any card in Fix** (a stage review): that is Request Changes. Do not ask the Approval
+     question; report rejected at once, with the Fix cards and the Reject cards as below, and say in
+     chat which findings go back for fixing. The hook refuses the Approval question and an approved
+     report here.
    - **Fix** cards: as Fix above. The rejected report's `--reason` names these cards by id with
      their required action.
    - **Accept** cards: carried; on Approve the engine records them as accepted risks.

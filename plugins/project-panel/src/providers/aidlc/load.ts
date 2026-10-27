@@ -711,7 +711,7 @@ function claimedSectionOf(
   // Stage for a fresh claim.
   const statuses = row
     ? stageStatusesFromRow(row, isPaused)
-    : unitStageStatuses(fallback ? { phase: known.phase === 'paused' ? 'paused' : 'active', stage: currentStage } : known)
+    : unitStageStatuses(fallback ? { phase: known.phase === 'paused' ? 'paused' : 'active', stage: currentStage, skipped: known.skipped } : known)
   const items: Item[] = phase.stages
     .map((stage, at) => ({ stage, ordinal: ordinalOf(phaseNo, at + 1) }))
     .filter(({ stage }) => PER_UNIT_STAGES.includes(stage.slug))

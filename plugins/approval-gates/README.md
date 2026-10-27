@@ -37,7 +37,7 @@ design stages with their reviewer rounds and no approval between them. You stop 
   - what changed after the plan was approved, or "the design stays as approved";
   - what isn't verified yet;
   - what was built, in plain words, with a small map of how the pieces connect;
-  - the approved design, folded.
+  - the approved design.
 
 Each page is one **gate bundle**: a JSON file whose contract is [`contract/README.md`](contract/README.md) and
 [`contract/gate-bundle.schema.json`](contract/gate-bundle.schema.json). `unit_bundle.py draft` fills every row it can
@@ -49,7 +49,8 @@ validates the bundle.
 The page lives in a second private artifact, **AI-DLC unit approvals** (`unit-gate.html`, with the `db` and `user`
 capabilities):
 
-- Every section starts open, with its rows folded to one line.
+- Everything starts open: every section and every row (the Summary view folds rows to one line). Pressing a
+  row's read dot marks it read and folds it; marking it unread opens it again. Mark all read folds every row.
 - A sticky bar holds Summary/Full, the filters (All, Look first, Unread, High and critical), Expand all and Collapse
   all, your read progress, and a chip per section.
 - Revisions v2, v3 and so on each have their own colour, down to the sub-step, with one filter per revision.
@@ -61,13 +62,31 @@ Per-stage gates are unchanged.
 
 ## What you see
 
-A page per gate, newest first in a list grouped by intent. A gate uses the whole width: a compact
-header with the stage, round and what comes next; an outline on the left (every document and its
-sections, with Expand all and Collapse all); and a column of collapsible blocks: the agent's summary,
-the review (verdict, open-finding count, a findings table whose rows open to the finding, where and
-required action), then every document, each with its sections collapsible and a Note button for a
-note to Claude. JSON, questions and review copies start collapsed. A document longer than a database
-row is split at its headings and joined back on the page.
+On both pages every id (US1.1, AC1.1.2, FR1.4, NFR3, BR1.2, Q4, U31, C2, E7, ADR-009, R-01 and every other kind the
+project's documents define) is a link with a tooltip, on hover and on keyboard focus, saying what it is and where it is
+written: live when the page shows its definition (a click opens what holds it, lands there and flashes it), dotted when
+it is defined elsewhere in the project (a click says so), dashed when no document defines it. The pages find ids the one
+shared way (`shared/aidlc-ids`, the `aidlc-ids` plugin): the writer syncs the project's id map and stores what each id
+the page shows is, nearest the stage's documents, so a Q1 or R-01 is this stage's and a BR1.1 this Unit's.
+
+A page per gate, newest first in a list grouped by intent. A gate looks and works like the unit approvals page:
+
+- A header card with the stage, the intent and phase, and its facts: the round (and why), the documents, the open
+  findings and your notes.
+- A sticky bar: filters (All, Unread, Changed, With notes, each with its count), your read progress, Expand all,
+  Collapse all, Mark all read, whether your notes are saved, and a chip per block (summary, review, every document)
+  that jumps to it. On wide screens an outline of every document's sections sits beside the blocks; on a phone it
+  opens from the bar.
+- Read marks are yours: a block is marked read with its dot. On a new round only the blocks whose text changed turn
+  unread.
+- From the second presentation of a stage on, the page compares itself with the previous one: changed and new
+  documents, and the changed sections inside them, carry the round's colour, and the Changed filter shows only those.
+- Then the blocks: the agent's summary, the review (verdict, open-finding count, a findings table whose rows open to
+  the finding, where and required action), then every document, each with its sections collapsible and an Add a
+  note button for a note to Claude. A note says whether it is saving, saved or not saved; a failed save is sent again
+  when you type, or with Retry in the bar. Everything starts open; pressing a block's read dot marks
+  it read and folds it (unread opens it again), and a block already read starts folded. A document longer than a
+  database row is split at its headings and joined back on the page.
 
 Each document kind has its own view, with a Text switch back to the document as written:
 
@@ -104,9 +123,13 @@ Each document kind has its own view, with a Text switch back to the document as 
   steppers and every H2 as a collapsible section. Source tags such as `[Q3]` or `[assumption]` are
   quiet tags, and a `Q` id links to its question.
 
-Every id that names something in the gate (FR1.2, BR3.5, US1.1, AC1.1.2, ADR-003, U3, C4, R-02, an
-entity or component name) is a link: hover for the text, click to jump. A document whose shape is not
-recognised is Markdown with every H2 a collapsible section.
+Every id that names something in the gate (FR1.2, BR3.5, US1.1, AC1.1.2, ADR-003, U3, C4, R-02, Step 2), every
+entity, component or type name, and every file name of a document in the gate is a link: hover or focus it for the
+text, press it to jump there and see it highlighted. An id of a known kind (FR, NFR, BR, US, AC, ADR, U, Q, Step,
+Bolt, RAID, R-) whose target is not in the gate is still shown as a link: its tooltip says what kind of thing it is,
+and pressing it says it is not in this page. Badges explain themselves the same way: severity, likelihood and impact,
+priority, verdicts, statuses, source tags such as `[Q3]` or `[assumption]`, and the change marks. A document whose
+shape is not recognised is Markdown with every H2 a collapsible section.
 
 ## What the agent does
 
@@ -118,7 +141,12 @@ the `--reason` of the rejected report. It never writes your notes, and never upd
 ## What the hook refuses
 
 - The Approval question (header `Approval`, an option such as Approve, Approve Plan or Accept as-is, no
-  pull request named) until a `gates` row for the stage was written after the gate opened.
+  pull request named) until a `gates` row for the stage was written after the gate opened. While a gate is open, any
+  question offering one of those options counts, whatever its header. The plan approval is open from the moment the
+  engine asks for it (the active directive is an `ask` with `ask_type: "plan-approval"`), not only after an
+  `aidlc engine log decision --checkpoint plan-approval`. A Request Changes answer (`aidlc engine log answer …
+  --details "Request Changes"`) reopens it for the revised plan.
+- A gate is not opened by a report the engine refused (`"kind": "error"`).
 - The same question until a message of the agent in the session's transcript carries the page's link
   `<artifact url>#<gate id>`: you get the link before the question, every time.
 - The same question with the page's link in its text: the link goes in a message of its own, so the dialog stays readable.
@@ -135,9 +163,10 @@ per-clone pointers (`aidlc/active-space`, `active-intent`, `.aidlc-engine/`) are
 
 ```
 gates/<id>                  {title, stage, stageName, phase?, intent, project?, unit?, round, why?, status,
-                             createdAt, summary?, brief?, review?, nextStage?, options, documents: [index]}
+                             createdAt, summary?, brief?, review?, nextStage?, options, ids?, documents: [index]}
 gates/<id>/documents/<key>  {n, key, title, path, kind, text}
 page writes                 gates/<id>.notes[<key>]
+                            data/users/<viewer>/reads-<intent>--<stage>--<unit>   (the viewer's read marks)
 ```
 
 `<id>` is `<intent>-<stage>[-<unit>]-<YYYYMMDDTHHMM>`, new for every presentation. The full contract is

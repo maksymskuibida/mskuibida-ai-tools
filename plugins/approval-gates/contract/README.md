@@ -17,13 +17,14 @@ app may render the same file later. The bundle therefore says **what** to show a
 | [`../scripts/unit_bundle.py`](../scripts/unit_bundle.py) | The builder the agent runs: `draft` from the stage records, `finalize` to mark revisions and validate. |
 
 The schema uses only `type`, `const`, `enum`, `pattern`, `minLength`, `maxLength`, `minimum`, `maximum`, `required`,
-`properties`, `additionalProperties: false`, `items`, `minItems`, `maxItems` and local `$ref`. The validator reads the
+`properties`, `additionalProperties` (`false`, or a schema for a map's values), `propertyNames`, `items`, `minItems`,
+`maxItems` and local `$ref`. The validator reads the
 schema file itself, so the two cannot drift. Keep to that subset when the schema changes.
 
 ## The bundle
 
 ```
-{schema: "aidlc-gate-bundle/1", page: "plan"|"unit-end", id, createdAt, header, sections[], plan?, answers[], design?, provenance?}
+{schema: "aidlc-gate-bundle/1", page: "plan"|"unit-end", id, createdAt, header, sections[], plan?, answers[], design?, ids?, provenance?}
 ```
 
 | Field | Meaning |
@@ -34,6 +35,7 @@ schema file itself, so the two cannot drift. Keep to that subset when the schema
 | `plan` | Plan page only: `{title?, hint?, path?, steps[]}`. |
 | `answers[]` | The person's answers, one group per questions file: `{key, stage, title, file, questions[] {id: "Q3", anchor, text, answer, proposed?}}`. An answer differs from the proposal when its first letter is not the proposed one. |
 | `design` | Unit-end page only: the approved plan page folded to `{bundle, url?, counts?, rows[] {id, title, label}}`. |
+| `ids` | What each id the page shows is: `{"FR1.4": {kind, title, text?, doc?, line?}}`, the output of the shared `aidlc_ids.py refs` (its contract: `shared/aidlc-ids/README.md` in the repository) over every text of the bundle, with `--near` the Unit's stage folders, so a BR1.1 is this Unit's and never another's. `unit_bundle.py finalize` writes it after `aidlc_ids.py sync`; the agent never edits it. |
 | `provenance` | Where the bundle was built from. Renderers ignore it. |
 
 ### Section kinds
@@ -138,6 +140,11 @@ rule, and the tests hold them to each other.
 There is no side column. A jump to an anchor lands below the bar, and it opens whatever holds the target.
 
 **References.** Every reference shows its tip on hover and focus, and it is a link.
+
+**Ids.** Every id the page shows, in any text, is a link whose tooltip (on hover and on focus) says what `ids` says of
+it: live when the page shows its definition (a row or an answer whose id it is, when no other row or answer has the same
+id), so the link opens what holds it and lands there; dotted when it is defined elsewhere in the project; dashed when no
+document defines it. A design id among a row's references (a `path:` target) is drawn the same way.
 
 **Revisions.**
 - Each revision from v2 on has its own colour, used on the rows, the steps and the exact sub-steps that changed.

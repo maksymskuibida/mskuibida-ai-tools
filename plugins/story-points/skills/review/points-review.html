@@ -3,27 +3,43 @@
 <!--
   AI-DLC story points — the one template for reviewing an intent's story points without Jira.
 
-  Published ONCE per developer as a private Artifact with the `db` capability
-  (capabilities: {db: {}}, icon "cards"); never regenerated per review. Every review is rows
+  Published ONCE per developer as a private Artifact with the `db` and `user` capabilities
+  (capabilities: {db: {}, user: {}}, icon "cards"); never regenerated per review. Every review is rows
   INSIDE this artifact, written by the agent with the ArtifactData tool (see SKILL.md next to
-  this file). The page renders whatever the rows say, live.
+  this file). The page renders whatever the rows say, live. After a plugin update, republish this
+  file to the same artifact URL.
 
   Data contract (what the agent writes):
 
     reviews/<id>                 {title, intent, file, scale: [1, 2, 3, 5, 8],
-                                  status: "open"|"done", createdAt (ISO), picks: {}, savedAt?}
+                                  status: "open"|"done", createdAt (ISO), picks: {}, savedAt?,
+                                  ids?: {"FR1.4": {kind, title, text, doc, line}}}
       id: [a-z0-9._-]+ — the intent's directory name, lowercased.
+      ids: what each id the cards mention is, the output of the shared `aidlc_ids.py refs` over all
+        the text the rows show (shared/aidlc-ids/README.md is its contract). The shared AidlcIds
+        script makes every id in the page a link with this tooltip: live when the page shows its
+        card (each Unit card carries data-aidlc-id), dotted when it is defined elsewhere, dashed when
+        no document defines it. A review written before `ids` existed still gets every id linked;
+        the rows' own titles fill in for the ids they name.
     reviews/<id>/units/<Unit>    {n: 3, unit: "U3", name: "api-billing", title, ctx?,
                                   points: 5 | null, source: "ai" | "human" | null,
-                                  dependsOn?: ["U1"]}
+                                  dependsOn?: ["U1" | {unit: "U1", title}],
+                                  stories?: [{id: "US-3.1", title, text?}],
+                                  requirements?: [{id: "FR-4", title, text?}]}
       points/source: the row that counts in unit-points.csv now; null/null without a row.
       title: one line a person understands without the ids. name: the Unit's slug.
+      dependsOn: the Units it depends on, each shown as its id (a link) and title. A Unit in this
+        review links to its card; for one that is not, give its title in the object form.
+      stories, requirements (optional): what the Unit delivers, each shown as its id (a link) and
+        title. They are not cards on this page, so their links say so on a click.
+      A string entry ("US-3.1") is accepted wherever an object is, and shows only the id.
 
     Markdown the page renders in ctx: blocks separated by a blank line; a block whose every line
     starts with "- " is a one-level list; inside both, `code` and **bold**. title: `code` and
-    **bold** only. Nothing else renders.
+    **bold** only. Nothing else renders. Any id in any of it (U3, US-2.1, FR1.4, BR1.2, ADR-009)
+    becomes a link with a tooltip, found by the shared AidlcIds script, not here.
 
-  What the page writes (the only thing the agent reads back, one `get` of reviews/<id>):
+  What the page writes:
 
     reviews/<id>.picks[<Unit>] = {points: 5, at: ISO}   the developer pressed 5 on that Unit
                                = null                    they cleared it again
@@ -31,333 +47,820 @@
       as the developer's own estimate.
     reviews/<id>.status        = "done" when the developer presses Done; "open" again after
                                  a later pick.   reviews/<id>.savedAt = ISO of Done.
+    data/users/<viewer>/reads-<id>  {marks: {<Unit>: <stamp>}}
+      Read marks are the viewer's own (localStorage when the user capability is not served), set only
+      with a card's read dot. The stamp is a hash of what the card shows, so a Unit whose row changes
+      turns unread again. The agent never reads them.
 
+  The agent reads back only reviews/<id> (one `get`).
   Link to a review: <artifact url>#<id>. No hash: the list of reviews.
+
+  The render functions between RENDER-START and RENDER-END use no DOM, so tests render a review under Node.
 -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
-/* Layout: one column of Unit cards, each ending in a row of estimate cards like a planning-poker
-   hand. Navy marks the developer, amber the assistant. A fixed bar carries save state and Done. */
+/* Dark mode keeps the band, the tooltip and the toast dark surfaces (raised, with a line), never inverted to light;
+   text on an accent fill is --on-accent in both themes. */
+/* Layout: one reading column, the approval-gates family. A header card with the review's facts and the legend; a sticky
+   bar (filters, counts, save state, Done, one chip per Unit); then one card per Unit ending in its hand of points. */
 :root {
-  --bg: #f2f4f7; --surface: #ffffff; --fg: #151b26; --muted: #5a6474; --line: #d6dce6;
-  --human: #24427a; --human-soft: #e2e9f6; --on-human: #ffffff;
-  --ai: #b06f0c; --ai-soft: #fbefd9;
-  --ok: #2c7a4f; --warn: #a63a2b;
-  --display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
-  --body: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
-  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --bg: #F5F6F8; --surface: #FFFFFF; --raised: #F8F9FB; --fg: #171A21; --fg-2: #3D4350; --muted: #5A6170;
+  --line: #E4E7EC; --line-soft: #EEF0F3; --control: #D5D9E0; --pt-line: #8A919E; --hover: #F7F8FA;
+  --accent: #2F49C4; --accent-strong: #1E3399; --accent-soft: #EEF1FB; --accent-tint: #F4F6FE; --on-accent: #FFFFFF;
+  --ai: #8A5A00; --ai-soft: #FCEBCB; --ai-tint: #FFF8EC;
+  --low-bg: #EEF0F3; --low-fg: #4A5160;
+  --ok-bg: #E6F4EA; --ok-fg: #1F6B36; --warn-bg: #FFF4DB; --warn-fg: #7A4B00; --warn-dot: #B26B00;
+  --crit-bg: #FDE4E4; --crit-fg: #9B1C1C;
+  --band-bg: #171A21; --band-fg: #FFFFFF; --band-muted: #C9CDD6; --band-line: #171A21; --tip-bg: #171A21; --tip-fg: #FFFFFF; --tip-line: #171A21;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --bar-h: 120px;
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
-  --bg: #10141b; --surface: #181e28; --fg: #e5e9f0; --muted: #98a2b3; --line: #2b3442;
-  --human: #8fb0ec; --human-soft: #1d2a42; --on-human: #0f1624;
-  --ai: #eab062; --ai-soft: #3a2b14;
-  --ok: #6cc28f; --warn: #ef8f7c; color-scheme: dark } }
+  --bg: #111318; --surface: #1A1D24; --raised: #20232B; --fg: #E6E8EE; --fg-2: #C3C8D2; --muted: #9AA1AF;
+  --line: #2A2E38; --line-soft: #22262F; --control: #3A3F4B; --pt-line: #6B7280; --hover: #20242C;
+  --accent: #8FA2FF; --accent-strong: #B5C2FF; --accent-soft: #222B4D; --accent-tint: #1B2035; --on-accent: #111318;
+  --ai: #F0C36B; --ai-soft: #3D3016; --ai-tint: #241E12;
+  --low-bg: #262A33; --low-fg: #AEB4C0;
+  --ok-bg: #183024; --ok-fg: #8FD3A6; --warn-bg: #3A2C12; --warn-fg: #F0C36B; --warn-dot: #F0A93B;
+  --crit-bg: #3D1D1D; --crit-fg: #F4A4A4;
+  --band-bg: #252A34; --band-fg: #E6E8EE; --band-muted: #C3C8D2; --band-line: #343946; --tip-bg: #2B303B; --tip-fg: #E6E8EE; --tip-line: #3A3F4B;
+  color-scheme: dark } }
 :root[data-theme="dark"] {
-  --bg: #10141b; --surface: #181e28; --fg: #e5e9f0; --muted: #98a2b3; --line: #2b3442;
-  --human: #8fb0ec; --human-soft: #1d2a42; --on-human: #0f1624;
-  --ai: #eab062; --ai-soft: #3a2b14;
-  --ok: #6cc28f; --warn: #ef8f7c; color-scheme: dark }
+  --bg: #111318; --surface: #1A1D24; --raised: #20232B; --fg: #E6E8EE; --fg-2: #C3C8D2; --muted: #9AA1AF;
+  --line: #2A2E38; --line-soft: #22262F; --control: #3A3F4B; --pt-line: #6B7280; --hover: #20242C;
+  --accent: #8FA2FF; --accent-strong: #B5C2FF; --accent-soft: #222B4D; --accent-tint: #1B2035; --on-accent: #111318;
+  --ai: #F0C36B; --ai-soft: #3D3016; --ai-tint: #241E12;
+  --low-bg: #262A33; --low-fg: #AEB4C0;
+  --ok-bg: #183024; --ok-fg: #8FD3A6; --warn-bg: #3A2C12; --warn-fg: #F0C36B; --warn-dot: #F0A93B;
+  --crit-bg: #3D1D1D; --crit-fg: #F4A4A4;
+  --band-bg: #252A34; --band-fg: #E6E8EE; --band-muted: #C3C8D2; --band-line: #343946; --tip-bg: #2B303B; --tip-fg: #E6E8EE; --tip-line: #3A3F4B;
+  color-scheme: dark }
 
-body { background: var(--bg); color: var(--fg); font: 15px/1.55 var(--body);
-  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
-main { max-width: 780px; margin: 0 auto; padding-block: 36px 150px; display: grid; gap: 28px; }
-header { display: grid; gap: 10px; }
-.eyebrow { font: 500 12px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--human); display: flex; gap: 12px; flex-wrap: wrap; }
-.eyebrow a { color: inherit; text-decoration: none; }
-.eyebrow a:hover { text-decoration: underline; }
-h1 { font: 700 clamp(28px, 5vw, 38px)/1.1 var(--display); margin: 0; text-wrap: balance; }
-.lede { color: var(--muted); margin: 0; max-width: 62ch; }
-.meta { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; color: var(--muted); font-size: 14px; min-width: 0; }
-.file { font: 500 12.5px var(--mono); background: var(--human-soft); color: var(--human); padding: 4px 8px; border-radius: 4px; max-width: 100%; overflow-wrap: anywhere; }
-.pill { font: 500 12px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; padding: 5px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
-.pill.done { color: var(--ok); border-color: var(--ok); }
-.pill.open { color: var(--human); border-color: var(--human); }
+* { box-sizing: border-box; }
+html { overflow-x: hidden; }
+body { background: var(--bg); color: var(--fg); font: 14px/1.5 var(--body); margin: 0; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+[hidden] { display: none !important; }
+a { color: var(--accent); }
+a:hover { color: var(--accent-strong); }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mono { font-family: var(--mono); }
+.num { font-variant-numeric: tabular-nums; }
+#app { display: flex; flex-direction: column; gap: 16px; }
+.wrap { width: 100%; max-width: 1040px; margin: 0 auto; padding-block: 24px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
 
-/* The legend and the tally: what the two marks mean, and how far the hand is. */
-.key { display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; padding: 12px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
-.key span { display: inline-flex; gap: 8px; align-items: center; }
-.key .tally { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
-.mark { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; flex: none; }
-.mark svg { width: 12px; height: 12px; }
+/* header */
+.head { display: flex; flex-direction: column; gap: 14px; padding: 20px 24px; }
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--muted); font-size: 13px; }
+.crumbs a { color: inherit; text-decoration: none; } .crumbs a:hover { text-decoration: underline; }
+.status { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 2px 10px; border-radius: 13px; background: var(--warn-bg); color: var(--warn-fg); font-weight: 500; }
+.status i { width: 7px; height: 7px; border-radius: 4px; background: var(--warn-dot); }
+.status.done { background: var(--ok-bg); color: var(--ok-fg); } .status.done i { background: var(--ok-fg); }
+.titlerow { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px 32px; }
+.titlerow > div:first-child { flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.25; text-wrap: balance; overflow-wrap: anywhere; }
+.lede { margin: 0; color: var(--fg-2); line-height: 1.55; max-width: 76ch; }
+.facts { display: flex; flex-wrap: wrap; gap: 10px; }
+.fact { display: flex; flex-direction: column; gap: 2px; padding: 8px 14px; border-radius: 8px; background: var(--bg); min-width: 108px; }
+.fact span { font-size: 12px; color: var(--muted); } .fact b { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; padding: 10px 12px; border-radius: 8px; background: var(--raised); font-size: 13px; color: var(--fg-2); }
+.legend .term { display: inline-flex; align-items: center; gap: 8px; border-radius: 4px; }
+.legend .file { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; min-width: 0; border-radius: 4px; }
+.scale { display: inline-flex; gap: 4px; }
+.scale b { min-width: 22px; height: 22px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; background: var(--surface); border: 1px solid var(--control); font-family: var(--mono); font-size: 12px; font-weight: 500; }
+.mark { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; flex: none; }
+.mark svg { width: 11px; height: 11px; }
 .mark.ai { background: var(--ai-soft); color: var(--ai); box-shadow: inset 0 0 0 1px var(--ai); }
-.mark.human { background: var(--human); color: var(--on-human); }
+.mark.human { background: var(--accent); color: var(--on-accent); }
 
-#list { display: grid; gap: 10px; }
-.row { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; align-items: center; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; color: inherit; text-decoration: none; }
-.row:hover { border-color: var(--human); }
-.row b { font: 600 17px/1.3 var(--display); }
-.row small { color: var(--muted); display: block; margin-top: 2px; }
-.empty { padding: 20px; border: 1px dashed var(--line); border-radius: 8px; color: var(--muted); display: grid; gap: 8px; max-width: 66ch; }
-.empty p { margin: 0; }
+/* sticky bar */
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 8; display: flex; flex-direction: column; gap: 10px; padding: 10px 14px; background: color-mix(in srgb, var(--surface) 96%, transparent); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 2px 8px rgba(23, 26, 33, .06); backdrop-filter: blur(6px); }
+.barrow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.filters { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.pill { height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid var(--control); background: var(--surface); font-weight: 500; display: inline-flex; align-items: center; gap: 6px; }
+.pill .n { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.pill[aria-pressed="true"] { background: var(--fg); color: var(--surface); border-color: var(--fg); }
+.pill[aria-pressed="true"] .n { color: inherit; opacity: .8; }
+.counts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.lc { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; }
+.lc b { font-family: var(--mono); font-weight: 500; }
+.lc.human { background: var(--accent-soft); color: var(--accent); }
+.lc.ai { background: var(--ai-soft); color: var(--ai); }
+.lc.none { background: var(--low-bg); color: var(--low-fg); }
+.tools { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.progress { display: inline-flex; align-items: center; gap: 10px; font-size: 13px; color: var(--fg-2); }
+.meter { width: 100px; height: 6px; border-radius: 3px; background: var(--line-soft); overflow: hidden; display: block; }
+.meter i { display: block; height: 6px; background: var(--accent); }
+.save { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 10px; border-radius: 13px; font-size: 12px; font-weight: 500; background: var(--low-bg); color: var(--low-fg); }
+.save i { width: 7px; height: 7px; border-radius: 4px; background: currentColor; flex: none; }
+.save.saving i { animation: pulse 1s ease-in-out infinite; }
+.save.saved { background: var(--ok-bg); color: var(--ok-fg); }
+.save.failed, .save.readonly { background: var(--crit-bg); color: var(--crit-fg); }
+.save button { border: 0; background: transparent; padding: 0 0 0 4px; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; color: inherit; }
+@keyframes pulse { 50% { opacity: .3; } }
+.done { height: 32px; padding: 0 16px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.done:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+.done:disabled { opacity: .5; cursor: default; }
+.done.is-done { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-fg); }
+.chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
+.chip { flex: none; display: inline-flex; align-items: center; gap: 7px; height: 32px; max-width: 240px; padding: 0 10px 0 4px; border-radius: 16px; border: 1px solid var(--control); background: var(--surface); color: var(--fg); text-decoration: none; font-size: 13px; white-space: nowrap; }
+.chip:hover { border-color: var(--accent); color: var(--fg); }
+.chip .cl { overflow: hidden; text-overflow: ellipsis; }
+.chip.read .cl { color: var(--muted); }
+.cv { flex: none; min-width: 24px; height: 24px; padding: 0 5px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 12px; font-weight: 500; }
+.cv.human { background: var(--accent); color: var(--on-accent); }
+.cv.ai { background: var(--ai-soft); color: var(--ai); box-shadow: inset 0 0 0 1px var(--ai); }
+.cv.none { background: var(--low-bg); color: var(--low-fg); }
 
-/* A Unit. */
-#units { display: grid; gap: 16px; }
-.unit { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px 16px; display: grid; gap: 12px; scroll-margin-top: 24px; min-width: 0; }
-.uhead { display: flex; gap: 10px 12px; align-items: center; flex-wrap: wrap; }
-.uid { font: 500 13px/1 var(--mono); color: var(--human); background: var(--human-soft); padding: 5px 8px; border-radius: 4px; flex: none; }
-.uname { font: 500 13px var(--mono); color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
-.state { margin-left: auto; }
-.state.need { color: var(--ai); border-color: var(--ai); }
-.state.set { color: var(--human); border-color: var(--human); }
-h2 { font: 600 20px/1.3 var(--display); margin: 0; text-wrap: balance; min-width: 0; }
-.ctx { display: grid; gap: 8px; max-width: 68ch; font-size: 14.5px; }
+/* Unit cards */
+main { display: flex; flex-direction: column; gap: 16px; }
+.unit { scroll-margin-top: calc(var(--bar-h) + 16px); overflow: hidden; }
+.unit.need { box-shadow: inset 3px 0 0 var(--ai); }
+.unit:focus { outline: none; }
+.uhead { display: flex; align-items: flex-start; gap: 10px 12px; padding: 14px 12px 0 16px; }
+.uid { flex: none; margin-top: 2px; min-width: 36px; height: 24px; padding: 0 7px; display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; background: var(--low-bg); color: var(--fg-2); font-family: var(--mono); font-size: 12px; }
+h2 { flex: 1 1 auto; min-width: 0; margin: 0; padding-top: 2px; font-size: 16px; font-weight: 600; line-height: 1.4; text-wrap: balance; overflow-wrap: anywhere; }
+.unit.read h2 { color: var(--fg-2); }
+.state { flex: none; margin-top: 2px; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border-radius: 5px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.state.human { background: var(--accent-soft); color: var(--accent); }
+.state.ai { background: var(--ai-soft); color: var(--ai); }
+.state.none { background: var(--low-bg); color: var(--low-fg); }
+.dot { flex: none; width: 32px; height: 32px; margin-top: -2px; border: 0; border-radius: 6px; background: transparent; display: inline-flex; align-items: center; justify-content: center; }
+.dot:hover { background: var(--hover); }
+.dot i { width: 10px; height: 10px; border-radius: 5px; background: var(--accent); border: 2px solid var(--accent); }
+.unit.read .dot i { background: transparent; border-color: var(--control); }
+.ubody { display: flex; flex-direction: column; gap: 12px; padding: 10px 16px 16px 64px; }
+.ctx { display: flex; flex-direction: column; gap: 8px; max-width: 72ch; color: var(--fg); line-height: 1.55; }
 .ctx p, .ctx ul { margin: 0; }
-.ctx ul { padding-left: 20px; display: grid; gap: 4px; }
-code { font: 500 13px var(--mono); background: var(--human-soft); padding: 1px 5px; border-radius: 3px; }
-.deps { font-size: 13px; color: var(--muted); margin: 0; }
-
-/* The hand: one card per value on the scale. */
-.hand { display: flex; flex-wrap: wrap; gap: 10px; padding-top: 4px; }
-.pt { position: relative; width: 52px; height: 66px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--fg);
-  font: 700 22px/1 var(--display); font-variant-numeric: tabular-nums; display: grid; place-items: center; cursor: pointer; padding: 0;
-  transition: transform .12s ease, border-color .12s ease, background-color .12s ease; }
-.pt:hover { border-color: var(--human); transform: translateY(-2px); }
-.pt:focus-visible { outline: 2px solid var(--human); outline-offset: 2px; }
-.pt .mark { position: absolute; top: -8px; right: -8px; outline: 2px solid var(--surface); }
-.pt.is-ai { border-color: var(--ai); background: var(--ai-soft); }
-.pt.is-human { border-color: var(--human); box-shadow: inset 0 0 0 1px var(--human); }
-.pt.picked { background: var(--human); border-color: var(--human); color: var(--on-human); transform: translateY(-4px); box-shadow: 0 6px 14px -8px var(--human); }
+.ctx ul { padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+code { font-family: var(--mono); font-size: 12.5px; background: var(--line-soft); padding: 1px 5px; border-radius: 4px; }
+.refs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.refs > span { width: 100px; font-size: 12px; color: var(--muted); }
+.ref { display: inline-flex; align-items: baseline; gap: 7px; min-height: 26px; max-width: 100%; padding: 3px 9px; border-radius: 6px; background: var(--raised); box-shadow: inset 0 0 0 1px var(--line); color: var(--fg-2); font-size: 13px; overflow-wrap: anywhere; cursor: pointer; }
+.ref:hover { box-shadow: inset 0 0 0 1px var(--accent); color: var(--fg); }
+.ref .rid { font-family: var(--mono); font-size: 12px; flex: none; }
+.ref:has(.aidlc-id:not(.aidlc-id-out):not(.aidlc-id-unknown)) { background: var(--accent-tint); }
+.handrow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding-top: 4px; }
+.hand { display: flex; flex-wrap: wrap; gap: 8px; }
+.pt { position: relative; width: 48px; height: 56px; border-radius: 8px; border: 1px solid var(--pt-line); background: var(--surface); color: var(--fg); font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; display: grid; place-items: center; padding: 0; transition: transform .12s ease, border-color .12s ease, background-color .12s ease; }
+.pt:hover { border-color: var(--accent); transform: translateY(-2px); }
+.pt .mark { position: absolute; top: -7px; right: -7px; box-shadow: 0 0 0 2px var(--surface); }
+.pt .mark.ai { box-shadow: inset 0 0 0 1px var(--ai), 0 0 0 2px var(--surface); }
+.pt.is-ai { border-color: var(--ai); background: var(--ai-tint); }
+.pt.is-human { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.pt.picked { background: var(--accent); border-color: var(--accent); color: var(--on-accent); transform: translateY(-3px); box-shadow: 0 6px 14px -8px var(--accent); }
 .pt.picked .mark.ai { display: none; }
 .pt.off { border-style: dashed; }
-.pt:disabled { cursor: default; transform: none; }
-.ufoot { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; font-size: 14px; color: var(--muted); }
+.pt:disabled { cursor: default; transform: none; opacity: .7; }
+.ustat { font-size: 12px; color: var(--muted); min-height: 18px; display: inline-flex; align-items: center; gap: 6px; }
+.ustat.saved { color: var(--ok-fg); }
+.ustat.failed { color: var(--crit-fg); font-weight: 500; }
+.ustat button { border: 0; background: transparent; padding: 0; color: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.ufoot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; font-size: 13px; color: var(--fg-2); }
 .ufoot b { color: var(--fg); font-weight: 600; }
-.clear { background: none; border: 0; padding: 0; font: 500 13px var(--body); color: var(--human); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
-.clear:focus-visible { outline: 2px solid var(--human); outline-offset: 2px; }
-.warnline { color: var(--warn); }
+.clear { border: 0; background: none; padding: 0; font-size: 13px; font-weight: 500; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.warnline { color: var(--crit-fg); }
+.empty { margin: 0; padding: 16px; color: var(--muted); }
+.flash { animation: flash 1.6s ease-out; }
+@keyframes flash { 0% { background: var(--accent-soft); } 100% { background: var(--surface); } }
 
-button { font: 600 14px var(--body); border-radius: 6px; cursor: pointer; }
-.bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--line);
-  padding-top: 12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
-.barin { max-width: 780px; margin: 0 auto; display: flex; gap: 10px 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
-#status { color: var(--muted); font-size: 14px; min-width: 0; flex: 1 1 260px; }
-#status.ok { color: var(--ok); }
-#status.warn { color: var(--warn); }
-.done { background: var(--human); color: var(--on-human); border: 0; padding: 10px 20px; }
-.done:focus-visible { outline: 2px solid var(--human); outline-offset: 2px; }
-.done:disabled { opacity: .5; cursor: default; }
-.done.is-done { background: var(--ok); }
-@media (max-width: 420px) { .unit { padding: 16px; } .hand { gap: 7px; } .pt { width: 44px; height: 58px; font-size: 20px; } }
-@media (prefers-reduced-motion: reduce) { .pt { transition: none; } .pt:hover, .pt.picked { transform: none; } }
+.band { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 14px 18px; border-radius: 12px; background: var(--band-bg); color: var(--band-fg); border: 1px solid var(--band-line); }
+.band span { color: var(--band-muted); } .band b { font-weight: 500; } .band .end { margin-left: auto; font-family: var(--mono); font-size: 12px; }
+.list h2 { padding: 16px 16px 4px; }
+.lrow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 10px 16px; border-top: 1px solid var(--line-soft); color: var(--fg); text-decoration: none; }
+.lrow:hover { background: var(--hover); color: var(--fg); }
+.lrow b { font-weight: 500; } .lrow small { color: var(--muted); }
+.lrow .end { margin-left: auto; }
+.msg { padding: 28px 24px; display: flex; flex-direction: column; gap: 6px; }
+.msg p { margin: 0; color: var(--fg-2); max-width: 70ch; }
+#toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); max-width: calc(100vw - 32px); background: var(--tip-bg); color: var(--tip-fg); border: 1px solid var(--tip-line); padding: 8px 14px; border-radius: 8px; font-size: 13px; z-index: 20; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
+#tip { position: fixed; z-index: 30; max-width: min(340px, calc(100vw - 24px)); padding: 8px 10px; border-radius: 6px; background: var(--tip-bg); color: var(--tip-fg); border: 1px solid var(--tip-line); font-size: 12px; line-height: 1.45; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
+
+@media (max-width: 767px) {
+  .head { padding: 16px; }
+  .wide { display: none; }
+  .tools { margin-left: 0; }
+  .meter { width: 64px; }
+  .uhead { flex-wrap: wrap; padding: 12px 8px 0 12px; }
+  .uhead h2 { flex-basis: calc(100% - 100px); }
+  .state { order: 5; margin-left: 48px; }
+  .ubody { padding: 10px 12px 14px; }
+  .refs > span { width: 100%; }
+  .legend .file { margin-left: 0; }
+}
+@media (max-width: 420px) { .hand { gap: 6px; } .pt { width: 42px; height: 50px; font-size: 18px; } }
+/* aidlc-ids.css:begin */
+/* Shared: the canonical copy is shared/aidlc-ids/aidlc-ids.css; scripts/sync-shared.py copies it into every page.
+   It uses the page's own tokens: --accent, --muted, --tip-bg (each page defines them). */
+a.aidlc-id { color: var(--accent, currentColor); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; cursor: pointer; white-space: nowrap; font-variant-numeric: tabular-nums; }
+a.aidlc-id:hover, a.aidlc-id:focus-visible { text-decoration-thickness: 2px; }
+a.aidlc-id.aidlc-id-out { text-decoration-style: dotted; }
+a.aidlc-id.aidlc-id-unknown { color: var(--muted, currentColor); text-decoration-style: dashed; }
+a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outline-offset: 2px; border-radius: 3px; }
+[data-aidlc-id] { scroll-margin-top: 96px; }
+@keyframes aidlc-flash { from { box-shadow: 0 0 0 3px var(--accent, #3b82f6); } to { box-shadow: 0 0 0 3px transparent; } }
+.aidlc-flash { animation: aidlc-flash 1.6s ease-out; border-radius: 6px; }
+@media (prefers-reduced-motion: reduce) { .aidlc-flash { animation: none; outline: 2px solid var(--accent, #3b82f6); } }
+/* aidlc-ids.css:end */
 </style>
 
-<main>
-  <header>
-    <div class="eyebrow"><a href="#">Story points</a><span id="crumb"></span></div>
-    <h1 id="title">Story points</h1>
-    <p class="lede" id="lede">Loading…</p>
-    <div class="meta" id="meta" hidden></div>
-  </header>
-  <div class="key" id="key" hidden>
-    <span><i class="mark ai" data-icon="ai"></i>AI suggestion</span>
-    <span><i class="mark human" data-icon="human"></i>Developer estimate</span>
-    <span class="tally" id="tally"></span>
-  </div>
-  <div id="list"></div>
-  <div id="units" hidden></div>
-</main>
-<div class="bar" id="bar" hidden><div class="barin">
-  <span id="status">Connecting…</span>
-  <button class="done" id="done" type="button" disabled>Done</button>
-</div></div>
+<div class="wrap">
+  <div id="app"><div class="card msg"><b>Loading…</b><p>The page fills in as soon as the stored review answers.</p></div></div>
+</div>
+<div id="tip" role="tooltip" hidden></div>
+<div id="toast" role="status" aria-live="polite" hidden></div>
 
 <script>
-(() => {
-  const $ = (id) => document.getElementById(id);
-  const el = { title: $("title"), lede: $("lede"), meta: $("meta"), crumb: $("crumb"), key: $("key"), tally: $("tally"), list: $("list"), units: $("units"), bar: $("bar"), status: $("status"), done: $("done") };
-  const ICON = {
-    ai: '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0.8l1.7 4.6 4.6 1.7-4.6 1.7L8 13.4 6.3 8.8 1.7 7.1l4.6-1.7z"/><path fill="currentColor" d="M13.2 10.6l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z"/></svg>',
-    human: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="4.6" r="3.1" fill="currentColor"/><path fill="currentColor" d="M1.8 15.2c.4-3.5 3-5.6 6.2-5.6s5.8 2.1 6.2 5.6z"/></svg>',
-  };
-  const mark = (kind) => `<i class="mark ${kind}" title="${kind === "ai" ? "AI suggestion" : "Developer estimate"}">${ICON[kind]}</i>`;
-  document.querySelectorAll("[data-icon]").forEach((n) => { n.innerHTML = ICON[n.dataset.icon]; });
-  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const inline = (s) => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  const md = (s) => String(s ?? "").trim().split(/\n\s*\n/).filter(Boolean).map((b) => {
-    const lines = b.split("\n");
-    if (lines.every((l) => /^\s*-\s+/.test(l))) return "<ul>" + lines.map((l) => "<li>" + inline(l.replace(/^\s*-\s+/, "")) + "</li>").join("") + "</ul>";
-    return "<p>" + lines.map(inline).join("<br>") + "</p>";
-  }).join("");
-  const fmt = (iso) => { try { return new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }); } catch { return iso || ""; } };
-  const num = (v) => (v === null || v === undefined || v === "" || !isFinite(Number(v)) ? null : Number(v));
-  const setStatus = (t, cls) => { el.status.textContent = t; el.status.className = cls || ""; };
-  const reviewId = () => { const h = decodeURIComponent(location.hash.replace(/^#/, "")); return /^[a-z0-9._-]+$/i.test(h) ? h : ""; };
+/* aidlc-ids.js:begin */
+/* The ids an AI-DLC page shows (US1.1, AC1.1.2, FR1.4, NFR3, BR1.2, Q4, U31, C2, ADR-009, R-01, ...), each a link with
+   a tooltip saying what it is. Shared: the canonical copy is shared/aidlc-ids/aidlc-ids.js in mskuibida-ai-tools,
+   copied into every page by scripts/sync-shared.py. Edit it there.
 
-  let db = null;
-  const view = { id: "", unsub: [], review: null, units: new Map(), loaded: false, picks: {}, pending: {}, inflight: false, readOnly: false };
+   The page gives it a map of what each id is, `ids` = {"FR1.4": {kind, title, text, doc}}, the output of
+   `aidlc_ids.py refs` written with the page's data, and marks each element that shows an id's own definition with
+   data-aidlc-id="<id>". Then:
 
-  function teardown() {
-    view.unsub.forEach((u) => { try { u(); } catch {} });
-    Object.assign(view, { unsub: [], review: null, units: new Map(), loaded: false, picks: {}, pending: {}, readOnly: false });
-    el.units.innerHTML = "";
+     AidlcIds.linkify(root, ids, { toast: fn })   turn every id in root's text into a link; run after each render
+     AidlcIds.observe(root, getIds, { toast: fn }) the same, again whenever root's content changes
+
+   A link whose id is shown in the page jumps there and flashes it. One that is not shown still looks like a link: its
+   tooltip says what it is, and a click shows a toast that it is not in this page. An id no document defines says so.
+   The tooltip is the page's own: the link carries data-tip and aria-label, which every page's tooltip reads. */
+var AidlcIds = (function () {
+  "use strict";
+  var ID = /(^|[^\w-])([A-Z][A-Z]{0,4}-?\d+[a-z]?(?:[.-]\d+[a-z]?)*(?:-[A-Z]{1,4}\d+[a-z]?)?)(?![\w-])/g;
+  var NOT_IDS = /^(UTF-?\d+|SHA-?\d+|ISO-?\d+|RFC-?\d+|HTTP-?\d+|TLS-?\d|H[1-6]|V\d+|X\d+|P\d|ES\d+|ID\d*)$/;
+  var KINDS = { US: "Story", AC: "Acceptance criterion", FR: "Functional requirement", NFR: "Non-functional requirement",
+    BR: "Business rule", Q: "Question", U: "Unit", C: "Contract", E: "External interface", ADR: "Decision record",
+    R: "Review finding", D: "Decision", DR: "Design rule", S: "Screen", M: "Mockup", T: "Task" };
+  var SKIP = "a, button, code, pre, script, style, textarea, input, select, option, [data-aidlc-noids]";
+
+  function prefix(id) { return (/^[A-Z]+/.exec(id) || [""])[0]; }
+  function docName(doc) { return String(doc || "").split("/").pop(); }
+
+  function anchorOf(id) {
+    var css = window.CSS && CSS.escape ? CSS.escape(id) : id.replace(/["\\]/g, "\\$&");
+    return document.querySelector('[data-aidlc-id="' + css + '"]');
   }
 
-  /* ---------- the list of reviews ---------- */
-  function showIndex() {
-    teardown(); view.id = "";
-    el.title.textContent = "Story points"; el.crumb.textContent = "";
-    el.lede.textContent = "Each intent's Units with their story points. Pick a number on every Unit you estimate; Claude writes your picks into unit-points.csv as the developers' estimates.";
-    el.meta.hidden = true; el.key.hidden = true; el.units.hidden = true; el.bar.hidden = true; el.list.hidden = false;
-    el.list.innerHTML = '<div class="empty"><p>Loading reviews…</p></div>';
-    if (!db) return;
-    view.unsub.push(db.collection("reviews").orderBy("createdAt", "desc").limit(100).onSnapshot((snap) => {
-      if (snap.empty) { el.list.innerHTML = '<div class="empty"><p><b>No reviews yet.</b></p><p>Run <code>/story-points:review</code> in Claude Code. Claude puts the intent\'s Units here and sends you the link.</p></div>'; return; }
-      el.list.innerHTML = snap.docs.map((d) => {
-        const r = d.data(); const n = Object.values(r.picks || {}).filter(Boolean).length; const done = r.status === "done";
-        return `<a class="row" href="#${esc(d.id)}"><span><b>${esc(r.title || d.id)}</b><small>${esc(r.intent || "")} · ${fmt(r.createdAt)}${n ? ` · ${n} picked` : ""}</small></span><span class="pill ${done ? "done" : "open"}">${done ? "done" : "open"}</span></a>`;
-      }).join("");
-    }, () => { el.list.innerHTML = '<div class="empty"><p>Couldn’t load the reviews. Reload the page.</p></div>'; }));
+  /** The tooltip of an id: what it is, in plain words, and where it is written. */
+  function tip(id, def) {
+    if (!def) return id + ": not found in this project's documents.";
+    var kind = def.kind || KINDS[prefix(id)] || "";
+    var head = (kind ? kind + " " : "") + id + (def.title ? ": " + def.title : "");
+    var body = def.text && def.text !== def.title ? " " + def.text : "";
+    return head + (/[.!?…]$/.test(head) || !body ? "" : ".") + body + (def.doc ? " (" + docName(def.doc) + ")" : "");
   }
 
-  /* ---------- one review ---------- */
-  function showReview(id) {
-    teardown(); view.id = id;
-    el.list.hidden = true; el.units.hidden = false; el.bar.hidden = false; el.meta.hidden = false; el.key.hidden = false;
-    el.title.textContent = id; el.crumb.textContent = ""; el.lede.textContent = ""; el.meta.innerHTML = "";
-    el.units.innerHTML = '<p class="lede">Loading Units…</p>';
-    setStatus("Connecting…"); el.done.disabled = true;
-    if (!db) return;
-    const ref = db.doc("reviews/" + id);
-    view.unsub.push(ref.onSnapshot((snap) => {
-      if (!snap.exists) {
-        el.title.textContent = "No such review"; el.lede.textContent = "Nothing is stored under this id. Check the link Claude sent you, or open the list.";
-        el.units.innerHTML = ""; el.key.hidden = true; el.bar.hidden = true; return;
+  /** Whether a word is an id this page knows of, or looks like one of a kind it knows. */
+  function isId(word, ids, prefixes) {
+    if (NOT_IDS.test(word)) return false;
+    return Object.prototype.hasOwnProperty.call(ids, word) || prefixes[prefix(word)] === true;
+  }
+
+  function linkify(root, ids, opts) {
+    if (!root) return;
+    ids = ids || {};
+    opts = opts || {};
+    var prefixes = {};
+    Object.keys(ids).forEach(function (k) { prefixes[prefix(k)] = true; });
+    Object.keys(KINDS).forEach(function (k) { prefixes[k] = true; });
+    // Keys of the page's own map that are not id-shaped (a form's q1, a card's f-3) are linked by their exact text.
+    var own = Object.keys(ids).filter(function (k) { return !/^[A-Z]/.test(k) && /^[\w.-]+$/.test(k); })
+      .sort(function (a, b) { return b.length - a.length; })
+      .map(function (k) { return k.replace(/[.-]/g, "\\$&"); });
+    var OWN = own.length ? new RegExp("(^|[^\\w-])(" + own.join("|") + ")(?![\\w-])", "g") : null;
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (n) {
+        if (!n.nodeValue || !(OWN ? /\d/ : /[A-Z]-?\d/).test(n.nodeValue)) return NodeFilter.FILTER_REJECT;
+        var p = n.parentElement;
+        return p && !p.closest(SKIP) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
       }
-      const r = snap.data(); view.review = r;
-      el.title.textContent = r.title || id; el.crumb.textContent = r.intent || "";
-      el.lede.textContent = "Press a number to give a Unit your estimate. To keep an AI suggestion, press its number: it becomes your estimate. Picks save as you go; press Done when you are finished.";
-      const done = r.status === "done";
-      el.meta.innerHTML = `${r.file ? `<span class="file">${esc(r.file)}</span>` : ""}<span class="pill ${done ? "done" : "open"}">${done ? "done" : "open"}</span>`;
-      for (const [u, p] of Object.entries(r.picks || {})) if (!(u in view.pending)) view.picks[u] = p;
-      el.done.disabled = view.readOnly; el.done.classList.toggle("is-done", done);
-      el.done.textContent = done ? "Done ✓" : "Done";
-      if (!view.inflight && !Object.keys(view.pending).length) {
-        setStatus(done ? `Done ${fmt(r.savedAt)}. Tell Claude in chat: form is done.` : "Picks save as you go.", done ? "ok" : "");
-      }
-      render();
-    }, () => setStatus("Couldn’t load the review. Reload the page.", "warn")));
-    view.unsub.push(ref.collection("units").orderBy("n").onSnapshot((snap) => {
-      view.units = new Map(snap.docs.map((d) => [d.id, { id: d.id, ...d.data() }])); view.loaded = true; render();
-    }, () => setStatus("Couldn’t load the Units. Reload the page.", "warn")));
-  }
-
-  const scale = () => (view.review?.scale || [1, 2, 3, 5, 8]).map(Number).filter((n) => isFinite(n));
-  const pickOf = (u) => { const p = view.picks[u]; return p && num(p.points) !== null ? num(p.points) : null; };
-
-  function render() {
-    if (!view.review) return;
-    if (!view.loaded) return;
-    const units = [...view.units.values()].sort((a, b) => (a.n ?? 0) - (b.n ?? 0));
-    if (!units.length) { el.units.innerHTML = '<p class="lede">No Units in this review yet. Claude adds them as rows; they appear here as soon as they are written.</p>'; tally(units); return; }
-    el.units.querySelectorAll(":scope > p").forEach((n) => n.remove());
-    const seen = new Set();
-    units.forEach((u, i) => {
-      seen.add(u.id);
-      let node = document.getElementById("u-" + u.id);
-      const fresh = renderUnit(u);
-      if (node) node.replaceWith(fresh); else el.units.appendChild(fresh);
-      node = fresh;
-      const want = el.units.children[i]; if (want !== node) el.units.insertBefore(node, want || null);
     });
-    el.units.querySelectorAll("[data-unit]").forEach((n) => { if (!seen.has(n.dataset.unit)) n.remove(); });
-    tally(units);
+    var nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(function (node) {
+      var text = node.nodeValue, last = 0, frag = null, m;
+      var self = node.parentElement.closest("[data-aidlc-id]");
+      var found = [];
+      [ID, OWN].forEach(function (re) {
+        if (!re) return;
+        re.lastIndex = 0;
+        while ((m = re.exec(text))) found.push({ word: m[2], start: m.index + m[1].length, own: re === OWN });
+      });
+      found.sort(function (a, b) { return a.start - b.start; });
+      for (var i = 0; i < found.length; i++) {
+        var word = found[i].word, start = found[i].start;
+        if (start < last) continue;
+        if (!found[i].own && !isId(word, ids, prefixes)) continue;
+        if (self && self.getAttribute("data-aidlc-id") === word) continue;
+        frag = frag || document.createDocumentFragment();
+        frag.appendChild(document.createTextNode(text.slice(last, start)));
+        var a = document.createElement("a");
+        var def = ids[word];
+        a.className = "aidlc-id" + (def ? "" : " aidlc-id-unknown");
+        a.href = "#" + encodeURIComponent(word);
+        a.textContent = word;
+        a.setAttribute("data-aidlc-ref", word);
+        a.setAttribute("data-tip", tip(word, def));
+        a.setAttribute("aria-label", tip(word, def));
+        frag.appendChild(a);
+        last = start + word.length;
+      }
+      if (frag) {
+        frag.appendChild(document.createTextNode(text.slice(last)));
+        node.parentNode.replaceChild(frag, node);
+      }
+    });
+    markLive(root);
+    bind(root, opts);
   }
 
-  function renderUnit(u) {
-    const cur = num(u.points); const src = cur === null ? null : (u.source === "human" ? "human" : "ai");
-    const pick = pickOf(u.id);
-    const values = scale(); const off = cur !== null && !values.includes(cur);
-    if (off) values.push(cur);
-    values.sort((a, b) => a - b);
-    const hand = values.map((v) => {
-      const isCur = v === cur; const isPick = v === pick;
-      const cls = ["pt", isCur ? (src === "human" ? "is-human" : "is-ai") : "", isPick ? "picked" : "", isCur && off ? "off" : ""].filter(Boolean).join(" ");
-      const badge = isPick ? mark("human") : isCur ? mark(src) : "";
-      const label = `${v} points${isCur ? (src === "ai" ? ", AI suggestion" : ", developer estimate") : ""}${isCur && off ? ", off the scale" : ""}${isPick ? ", your pick" : ""}`;
-      return `<button type="button" class="${cls}" data-v="${v}" aria-pressed="${isPick}" aria-label="${esc(label)}" ${view.readOnly ? "disabled" : ""}>${v}${badge}</button>`;
+  /** Links whose id is shown in the page get the live look; the rest the out-of-page one. */
+  function markLive(root) {
+    Array.prototype.forEach.call(root.querySelectorAll("a.aidlc-id"), function (a) {
+      a.classList.toggle("aidlc-id-out", !anchorOf(a.getAttribute("data-aidlc-ref")));
+    });
+  }
+
+  function bind(root, opts) {
+    if (root.__aidlcIds) { root.__aidlcIds.opts = opts; return; }
+    root.__aidlcIds = { opts: opts };
+    root.addEventListener("click", function (e) {
+      var a = e.target.closest && e.target.closest("a.aidlc-id");
+      if (!a || !root.contains(a)) return;
+      e.preventDefault();
+      var id = a.getAttribute("data-aidlc-ref"), target = anchorOf(id);
+      var say = root.__aidlcIds.opts.toast || function (t) { window.alert(t); };
+      if (target) {
+        var closed = target.closest("details:not([open])");
+        if (closed) closed.open = true;
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+        target.classList.remove("aidlc-flash");
+        void target.offsetWidth;
+        target.classList.add("aidlc-flash");
+        if (target.tabIndex < 0 && !target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+        target.focus({ preventScroll: true });
+      } else if (a.classList.contains("aidlc-id-unknown")) {
+        say(id + " isn't defined in this project's documents.");
+      } else {
+        say(id + " isn't in this page. What it is: in its tooltip.");
+      }
+    });
+  }
+
+  function observe(root, getIds, opts) {
+    if (!root) return;
+    var busy = false;
+    var run = function () {
+      if (busy) return;
+      busy = true;
+      try { linkify(root, getIds(), opts); } finally { busy = false; }
+    };
+    run();
+    new MutationObserver(function () { if (!busy) window.requestAnimationFrame(run); })
+      .observe(root, { childList: true, subtree: true, characterData: true });
+  }
+
+  return { linkify: linkify, observe: observe, tip: tip, KINDS: KINDS };
+})();
+/* aidlc-ids.js:end */
+</script>
+<script>
+/* RENDER-START: no DOM below, until RENDER-END */
+var PointsView = (function () {
+  "use strict";
+  var ICON = {
+    ai: '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0.8l1.7 4.6 4.6 1.7-4.6 1.7L8 13.4 6.3 8.8 1.7 7.1l4.6-1.7z"/><path fill="currentColor" d="M13.2 10.6l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z"/></svg>',
+    human: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="4.6" r="3.1" fill="currentColor"/><path fill="currentColor" d="M1.8 15.2c.4-3.5 3-5.6 6.2-5.6s5.8 2.1 6.2 5.6z"/></svg>'
+  };
+  var TIP = {
+    ai: "AI suggestion: a number an assistant proposed from the Unit documents. It doesn’t count as the developers’ estimate until a developer presses it.",
+    human: "Developer estimate: a number a developer gave. It is a human row in unit-points.csv and is what the Unit is planned with.",
+    none: "No estimate: the Unit has no row in unit-points.csv yet."
+  };
+
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function num(v) { return v === null || v === undefined || v === "" || !isFinite(Number(v)) ? null : Number(v); }
+  function plural(n, one, many) { return n + " " + (n === 1 ? one : (many || one + "s")); }
+  function uidOf(u) { return String(u.unit || u.id || ""); }
+  function anchorOf(id) { return "u-" + String(id).replace(/[^A-Za-z0-9._-]+/g, "-"); }
+  function fmt(iso) { try { return iso ? new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : ""; } catch (e) { return iso || ""; } }
+  function mark(kind) { return '<i class="mark ' + kind + '">' + ICON[kind] + "</i>"; }
+  /* A short hash of what a card shows: a read mark holds it, so a Unit whose row changed turns unread. */
+  function stamp(u) {
+    var s = JSON.stringify([u.title, u.ctx, u.points, u.source, u.dependsOn, u.stories, u.requirements]), h = 5381;
+    for (var i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(36);
+  }
+  function items(list, key) {
+    return (list || []).filter(Boolean).map(function (x) {
+      return typeof x === "string" ? { id: x } : { id: String(x[key] || x.id || ""), title: x.title || "", text: x.text || "" };
+    }).filter(function (x) { return x.id; });
+  }
+
+  /* ---------- state helpers ---------- */
+  function scaleOf(review) { return (review.scale || [1, 2, 3, 5, 8]).map(Number).filter(function (n) { return isFinite(n); }); }
+  function pickOf(st, u) { var p = st.picks[uidOf(u)]; return p && num(p.points) !== null ? num(p.points) : null; }
+  function srcOf(u) { return num(u.points) === null ? null : (u.source === "human" ? "human" : "ai"); }
+  function hasDev(st, u) { return pickOf(st, u) !== null || srcOf(u) === "human"; }
+  function kindOf(st, u) { return hasDev(st, u) ? "human" : (srcOf(u) === "ai" ? "ai" : "none"); }
+  function isRead(st, u) { return st.read[uidOf(u)] === stamp(u); }
+  function passes(st, u) {
+    if (st.filter === "need") return !hasDev(st, u);
+    if (st.filter === "unread") return !isRead(st, u);
+    return true;
+  }
+  function tally(st, units) {
+    var t = { all: units.length, human: 0, ai: 0, none: 0, unread: 0 };
+    units.forEach(function (u) { t[kindOf(st, u)]++; if (!isRead(st, u)) t.unread++; });
+    t.need = t.ai + t.none;
+    return t;
+  }
+
+  /* ---------- ids: shown as text here; the shared AidlcIds script makes each one a link with a tooltip ---------- */
+  /* One reference: its id, then its title in words. Clicking the title follows the id's link. */
+  function ref(id, title) {
+    return '<span class="ref"><span class="rid">' + esc(id) + "</span>" + (title ? "<span>" + inline(title) + "</span>" : "") + "</span>";
+  }
+  /* What AidlcIds links from: the review's `ids` (aidlc_ids.py refs), filled in from the rows for ids it lacks. */
+  function idMap(review, units) {
+    var own = review && review.ids && typeof review.ids === "object" ? review.ids : {}, map = Object.assign({}, own);
+    function add(id, def) { if (id && !Object.prototype.hasOwnProperty.call(map, id)) map[id] = def; }
+    units.forEach(function (u) {
+      add(uidOf(u), { kind: "Unit", title: u.title || u.name || "", text: u.name && u.title ? u.name : "", doc: "" });
+    });
+    units.forEach(function (u) {
+      items(u.dependsOn, "unit").forEach(function (d) { if (d.title) add(d.id, { kind: "Unit", title: d.title, text: "", doc: "" }); });
+      items(u.stories).forEach(function (x) { if (x.title || x.text) add(x.id, { kind: "Story", title: x.title, text: x.text, doc: "" }); });
+      items(u.requirements).forEach(function (x) { if (x.title || x.text) add(x.id, { title: x.title, text: x.text, doc: "" }); });
+    });
+    return map;
+  }
+  function inline(s) {
+    return String(s == null ? "" : s).split(/(`[^`]+`)/).map(function (part, i) {
+      if (i % 2) return "<code>" + esc(part.slice(1, -1)) + "</code>";
+      return esc(part).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
     }).join("");
-    let foot;
+  }
+  function md(s) {
+    return String(s == null ? "" : s).trim().split(/\n\s*\n/).filter(Boolean).map(function (b) {
+      var lines = b.split("\n");
+      if (lines.every(function (l) { return /^\s*-\s+/.test(l); })) return "<ul>" + lines.map(function (l) { return "<li>" + inline(l.replace(/^\s*-\s+/, "")) + "</li>"; }).join("") + "</ul>";
+      return "<p>" + lines.map(function (l) { return inline(l); }).join("<br>") + "</p>";
+    }).join("");
+  }
+
+  /* ---------- one Unit ---------- */
+  function stateTag(st, u, cur, src, pick) {
+    if (pick !== null) return '<span class="state human" tabindex="0" data-tip="You picked ' + pick + ". It is saved in this review and becomes a developer estimate in unit-points.csv once you tell Claude the form is done." + '">' + mark("human") + "Your pick " + pick + "</span>";
+    if (src === "human") return '<span class="state human" tabindex="0" data-tip="' + esc(TIP.human) + '">' + mark("human") + "Developer estimate " + cur + "</span>";
+    if (src === "ai") return '<span class="state ai" tabindex="0" data-tip="' + esc(TIP.ai + " Press " + cur + " to keep it.") + '">' + mark("ai") + "AI suggests " + cur + "</span>";
+    return '<span class="state none" tabindex="0" data-tip="' + esc(TIP.none) + '">No estimate</span>';
+  }
+  function unitHtml(st, review, u, byId) {
+    var id = uidOf(u), cur = num(u.points), src = srcOf(u), pick = pickOf(st, u), scale = scaleOf(review), top = Math.max.apply(null, scale);
+    var values = scale.slice(), off = cur !== null && values.indexOf(cur) < 0;
+    if (off) values.push(cur);
+    values.sort(function (a, b) { return a - b; });
+    var label = u.title || u.name || id, read = isRead(st, u), ro = st.readOnly ? " disabled" : "";
+    var hand = values.map(function (v) {
+      var isCur = v === cur, isPick = v === pick;
+      var cls = ["pt", isCur ? (src === "human" ? "is-human" : "is-ai") : "", isPick ? "picked" : "", isCur && off ? "off" : ""].filter(Boolean).join(" ");
+      var what = isPick ? "your pick; press again to clear it" : isCur ? (src === "ai" ? "the AI suggestion; press to keep it as your estimate" : "the developer estimate in the file") : "press to pick it";
+      var tip = plural(v, "point") + ": " + what + "." + (isCur && off ? " It is off the project’s scale." : "") + (v > top ? " Above the top of the scale, the Unit is split instead." : "");
+      return '<button type="button" id="pt-' + esc(id) + "-" + v + '" class="' + cls + '" data-act="pick" data-unit="' + esc(id) + '" data-v="' + v + '" aria-pressed="' + isPick + '" aria-label="' + esc(plural(v, "point") + (isCur ? (src === "ai" ? ", AI suggestion" : ", developer estimate") : "") + (isPick ? ", your pick" : "")) + '" data-tip="' + esc(tip) + '"' + ro + ">" + v + (isPick ? mark("human") : isCur ? mark(src) : "") + "</button>";
+    }).join("");
+    var foot;
     if (pick !== null) {
-      const was = cur === null ? "no estimate before" : pick === cur ? (src === "ai" ? "confirms the AI suggestion" : "same as the estimate in the file") : `was ${cur}, ${src === "ai" ? "AI suggestion" : "developer estimate"}`;
-      foot = `<span>Your estimate: <b>${pick}</b> · ${was}</span><button type="button" class="clear" data-clear>Clear</button>`;
-    } else if (cur === null) {
-      foot = "<span>No estimate yet.</span>";
-    } else if (off) {
-      foot = `<span>${src === "ai" ? "AI suggests" : "Developer estimate"} <b>${cur}</b>, off the scale. Pick a number from the scale${cur > Math.max(...scale()) ? ", or split the Unit" : ""}.</span>`;
-    } else if (src === "ai") {
-      foot = `<span>AI suggests <b>${cur}</b>. Press ${cur} to keep it as your estimate, or pick another number.</span>`;
-    } else {
-      foot = `<span>Developer estimate <b>${cur}</b>. Pick another number to change it.</span>`;
-    }
-    if (pick !== null && pick > Math.max(...scale())) foot += '<span class="warnline">Above the top of the scale: split the Unit instead.</span>';
-    const state = pick !== null ? ["set", "picked"] : src === "human" ? ["", "estimated"] : ["need", "needs a look"];
-    const deps = (u.dependsOn || []).filter(Boolean);
-    const card = document.createElement("article");
-    card.className = "unit"; card.id = "u-" + u.id; card.dataset.unit = u.id;
-    card.innerHTML = `<div class="uhead"><span class="uid">${esc(u.unit || u.id)}</span>${u.name ? `<span class="uname">${esc(u.name)}</span>` : ""}<span class="pill state ${state[0]}">${state[1]}</span></div>
-      <h2>${inline(u.title || u.name || u.id)}</h2>
-      ${u.ctx ? `<div class="ctx">${md(u.ctx)}</div>` : ""}
-      ${deps.length ? `<p class="deps">Depends on ${deps.map(esc).join(", ")}</p>` : ""}
-      <div class="hand" role="group" aria-label="Story points for ${esc(u.unit || u.id)}">${hand}</div>
-      <div class="ufoot">${foot}</div>`;
-    card.querySelectorAll(".pt").forEach((b) => b.addEventListener("click", () => choose(u.id, Number(b.dataset.v))));
-    card.querySelector("[data-clear]")?.addEventListener("click", () => choose(u.id, null));
-    return card;
+      var was = cur === null ? "there was no estimate before" : pick === cur ? (src === "ai" ? "it confirms the AI suggestion" : "the same as the estimate in the file") : "it was " + cur + ", " + (src === "ai" ? "an AI suggestion" : "a developer estimate");
+      foot = "<span>Your estimate is <b>" + pick + "</b>; " + was + '.</span><button type="button" class="clear" id="clr-' + esc(id) + '" data-act="clear" data-unit="' + esc(id) + '"' + ro + ">Clear</button>";
+    } else if (cur === null) foot = "<span>No estimate yet. Pick a number.</span>";
+    else if (off) foot = "<span>" + (src === "ai" ? "The AI suggests" : "The developer estimate is") + " <b>" + cur + "</b>, off the scale. Pick a number from the scale" + (cur > top ? ", or split the Unit" : "") + ".</span>";
+    else if (src === "ai") foot = "<span>The AI suggests <b>" + cur + "</b>. Press " + cur + " to keep it as your estimate, or pick another number.</span>";
+    else foot = "<span>A developer estimated <b>" + cur + "</b>. Pick another number to change it.</span>";
+    if (pick !== null && pick > top) foot += '<span class="warnline">Above the top of the scale: split the Unit instead.</span>';
+
+    var save = st.unitSave[id], ustat = "";
+    if (save === "saving") ustat = '<span class="ustat">Saving…</span>';
+    else if (save === "saved") ustat = '<span class="ustat saved">Saved</span>';
+    else if (save === "failed") ustat = '<span class="ustat failed">Not saved. <button type="button" id="rt-' + esc(id) + '" data-act="retry">Retry</button></span>';
+
+    var deps = items(u.dependsOn, "unit"), stories = items(u.stories), reqs = items(u.requirements);
+    var refs = (deps.length ? '<div class="refs"><span>Depends on</span>' + deps.map(function (d) { var b = byId[d.id]; return ref(d.id, b ? b.title || b.name : d.title); }).join("") + "</div>" : "") +
+      (stories.length ? '<div class="refs"><span>Stories</span>' + stories.map(function (x) { return ref(x.id, x.title); }).join("") + "</div>" : "") +
+      (reqs.length ? '<div class="refs"><span>Requirements</span>' + reqs.map(function (x) { return ref(x.id, x.title); }).join("") + "</div>" : "");
+    var kind = kindOf(st, u);
+    return '<section class="card unit' + (read ? " read" : "") + (kind !== "human" ? " need" : "") + '" id="' + esc(anchorOf(id)) + '" data-unit="' + esc(id) + '" data-aidlc-id="' + esc(id) + '" tabindex="-1" aria-labelledby="h-' + esc(id) + '">' +
+      '<div class="uhead"><span class="uid" tabindex="0" data-tip="' + esc("Unit " + id + (u.name ? " · " + u.name : "") + ". The id the AI-DLC documents and unit-points.csv use for this Unit.") + '">' + esc(id) + "</span>" +
+      '<h2 id="h-' + esc(id) + '">' + inline(label) + "</h2>" + stateTag(st, u, cur, src, pick) +
+      '<button type="button" class="dot" id="rd-' + esc(id) + '" data-act="read" data-unit="' + esc(id) + '" aria-pressed="' + read + '" aria-label="' + esc("Read: " + label) + '" data-tip="' + (read ? "Read. Press to mark it unread." : "Unread. Press when you have read this Unit; only you see the mark.") + '"><i></i></button></div>' +
+      '<div class="ubody">' + (u.ctx ? '<div class="ctx">' + md(u.ctx) + "</div>" : "") + refs +
+      '<div class="handrow"><div class="hand" role="group" aria-label="' + esc("Story points for " + label) + '">' + hand + "</div>" + ustat + "</div>" +
+      '<div class="ufoot">' + foot + "</div></div></section>";
   }
 
-  function tally(units) {
-    const mine = units.filter((u) => pickOf(u.id) !== null || (num(u.points) !== null && u.source === "human")).length;
-    el.tally.textContent = units.length ? `${mine} of ${units.length} Units with a developer estimate` : "";
+  /* ---------- the page ---------- */
+  function headerHtml(st, review, units, t) {
+    var done = review.status === "done", scale = scaleOf(review);
+    var crumbs = '<div class="crumbs"><a href="#" data-nav="">All reviews</a><span aria-hidden="true">/</span><span>' + esc(review.intent || "") + "</span>" +
+      '<span class="status' + (done ? " done" : "") + '"><i aria-hidden="true"></i>' + (done ? "Done " + esc(fmt(review.savedAt)) : "Open") + "</span></div>";
+    var facts = [["Units", t.all, "Every Unit of the intent, in the order of its dependency file."],
+      ["Developer estimates", t.human, "Units with a number a developer gave: your picks here, or a human row already in the file."],
+      ["AI suggestion only", t.ai, "Units whose only number came from an assistant. Press it to keep it, or pick another."],
+      ["No estimate", t.none, "Units with no row in unit-points.csv yet."]].map(function (f) {
+      return '<div class="fact" tabindex="0" data-tip="' + esc(f[2]) + '"><span>' + f[0] + '</span><b>' + f[1] + "</b></div>";
+    }).join("");
+    var legend = '<div class="legend"><span class="term" tabindex="0" data-tip="' + esc(TIP.ai) + '">' + mark("ai") + "AI suggestion</span>" +
+      '<span class="term" tabindex="0" data-tip="' + esc(TIP.human) + '">' + mark("human") + "Developer estimate</span>" +
+      '<span class="term" tabindex="0" data-tip="' + esc("Story points measure a Unit’s size relative to the others. This project’s scale is " + scale.join(", ") + "; a Unit bigger than " + Math.max.apply(null, scale) + " is split rather than estimated.") + '">Scale <span class="scale">' + scale.map(function (v) { return "<b>" + v + "</b>"; }).join("") + "</span></span>" +
+      (review.file ? '<span class="file" tabindex="0" data-tip="The file Claude writes your picks into, as human rows, after you send: form is done.">' + esc(review.file) + "</span>" : "") + "</div>";
+    return '<header class="card head">' + crumbs + '<div class="titlerow"><div><h1>' + esc(review.title || review.intent || "Story points") + '</h1><p class="lede">Press a number to give a Unit your estimate. To keep an AI suggestion, press its number: it becomes yours. Picks save as you go; press Done when you are finished.</p></div><div class="facts">' + facts + "</div></div>" + legend + "</header>";
   }
 
-  /* A press on the picked number clears it; any other press picks. */
+  function saveHtml(st) {
+    var s = st.save || {};
+    if (st.readOnly) return '<span class="save readonly" role="status" tabindex="0" data-tip="Your access lets you read this review but not save picks. Ask the owner for Contributor access."><i aria-hidden="true"></i>Read only</span>';
+    if (s.state === "saving") return '<span class="save saving" role="status"><i aria-hidden="true"></i>Saving…</span>';
+    if (s.state === "failed") return '<span class="save failed" role="status"><i aria-hidden="true"></i>Not saved<button type="button" id="retry" data-act="retry">Retry</button></span>';
+    if (s.state === "saved") return '<span class="save saved" role="status"><i aria-hidden="true"></i>Saved ' + esc(s.at ? fmt(s.at).replace(/^.*?, (?=\d)/, "") : "") + "</span>";
+    return '<span class="save" role="status"><i aria-hidden="true"></i>Picks save as you go</span>';
+  }
+
+  function barHtml(st, review, units, t) {
+    var pct = t.all ? Math.round(t.human / t.all * 100) : 0, done = review.status === "done";
+    var filters = [["all", "All", t.all, "Every Unit."], ["need", "Needs your estimate", t.need, "Units without a developer estimate: an AI suggestion only, or nothing."], ["unread", "Unread", t.unread, "Units you haven’t marked read, or whose row changed since."]];
+    var chips = units.filter(function (u) { return passes(st, u); }).map(function (u) {
+      var id = uidOf(u), k = kindOf(st, u), p = pickOf(st, u), v = p !== null ? p : num(u.points);
+      var tip = "Unit " + id + ": " + (u.title || u.name || id) + ". " + (k === "human" ? "Developer estimate " + v + "." : k === "ai" ? "AI suggests " + v + "; no developer estimate yet." : "No estimate yet.");
+      return '<a class="chip' + (isRead(st, u) ? " read" : "") + '" href="#' + esc(anchorOf(id)) + '" data-jump="' + esc(anchorOf(id)) + '" data-tip="' + esc(tip) + '"><span class="cv ' + k + '" aria-hidden="true">' + (v === null ? "–" : v) + '</span><span class="cl">' + esc(u.title || u.name || id) + "</span></a>";
+    }).join("");
+    return '<div class="bar" id="bar"><div class="barrow">' +
+      '<div class="filters" role="group" aria-label="Show">' + filters.map(function (f) { return '<button type="button" class="pill" id="f-' + f[0] + '" data-act="filter" data-val="' + f[0] + '" aria-pressed="' + (st.filter === f[0]) + '" data-tip="' + esc(f[3]) + '">' + f[1] + '<span class="n">' + f[2] + "</span></button>"; }).join("") + "</div>" +
+      '<div class="counts wide">' +
+        '<span class="lc human" tabindex="0" data-tip="' + esc(TIP.human) + '">Developer<b>' + t.human + "</b></span>" +
+        '<span class="lc ai" tabindex="0" data-tip="' + esc(TIP.ai) + '">AI only<b>' + t.ai + "</b></span>" +
+        '<span class="lc none" tabindex="0" data-tip="' + esc(TIP.none) + '">None<b>' + t.none + "</b></span></div>" +
+      '<div class="tools"><span class="progress" tabindex="0" data-tip="Units with a developer estimate, out of every Unit in this review."><span class="num">' + t.human + "/" + t.all + ' estimated</span><span class="meter" aria-hidden="true"><i style="width:' + pct + '%"></i></span></span>' +
+      saveHtml(st) +
+      '<button type="button" class="done' + (done ? " is-done" : "") + '" id="done" data-act="done"' + (st.readOnly || st.finishing ? " disabled" : "") + ' data-tip="' + esc(done ? "Marked done. A later pick reopens the review; press Done again after it." : "Press when you are finished, then tell Claude in chat: form is done.") + '">' + (done ? "Done ✓" : "Done") + "</button></div></div>" +
+      '<nav class="chips" aria-label="Units">' + chips + "</nav></div>";
+  }
+
+  /* The whole page for one review. st: {filter, picks, unitSave, save, read, readOnly, finishing}. */
+  function render(review, units, st) {
+    st = Object.assign({ filter: "all", picks: {}, unitSave: {}, save: {}, read: {}, readOnly: false }, st || {});
+    units = units.slice().sort(function (a, b) { return (a.n || 0) - (b.n || 0); });
+    var byId = {};
+    units.forEach(function (u) { byId[uidOf(u)] = u; });
+    var t = tally(st, units);
+    var shown = units.filter(function (u) { return passes(st, u); });
+    var body = !units.length ? '<div class="card msg"><b>No Units in this review yet.</b><p>Claude adds them as rows; they appear here as soon as they are written.</p></div>'
+      : !shown.length ? '<div class="card msg"><b>' + (st.filter === "need" ? "Every Unit has a developer estimate." : "Nothing unread.") + '</b><p><a href="#" data-act="filter" data-val="all">Show all Units</a></p></div>'
+      : shown.map(function (u) { return unitHtml(st, review, u, byId); }).join("");
+    var done = review.status === "done";
+    var band = '<footer class="band"><b>' + (done ? "Marked done. Tell Claude in chat: form is done." : "When you are finished, press Done, then tell Claude in chat: form is done.") + "</b><span>Claude writes each pick into unit-points.csv as a developer estimate. Units you leave alone keep their row.</span>" +
+      '<span class="end num">' + t.human + "/" + t.all + " estimated</span></footer>";
+    return headerHtml(st, review, units, t) + (units.length ? barHtml(st, review, units, t) : "") + "<main>" + body + band + "</main>";
+  }
+
+  function listHtml(rows) {
+    var head = '<header class="card head"><div class="crumbs"><span>AI-DLC</span></div><h1>Story points</h1><p class="lede">Each intent’s Units with their story points. Pick a number on every Unit you estimate; Claude writes your picks into unit-points.csv as the developers’ estimates.</p></header>';
+    if (!rows.length) return head + '<div class="card msg"><b>No reviews yet.</b><p>Run <code>/story-points:review</code> in Claude Code. Claude puts the intent’s Units here and sends you the link.</p></div>';
+    return head + '<section class="card list"><h2>Reviews</h2>' + rows.map(function (r) {
+      var n = Object.keys(r.picks || {}).filter(function (k) { return r.picks[k]; }).length, done = r.status === "done";
+      return '<a class="lrow" href="#' + esc(r.id) + '"><b>' + esc(r.title || r.id) + "</b><small>" + esc(r.intent || "") + " · " + esc(fmt(r.createdAt)) + (n ? " · " + plural(n, "pick") : "") + '</small><span class="end lc ' + (done ? "human" : "ai") + '">' + (done ? "done" : "open") + "</span></a>";
+    }).join("") + "</section>";
+  }
+
+  return { render: render, listHtml: listHtml, idMap: idMap, anchorOf: anchorOf, stamp: stamp, uidOf: uidOf, pickOf: pickOf, passes: passes, esc: esc };
+})();
+if (typeof module !== "undefined") module.exports = PointsView;
+/* RENDER-END */
+</script>
+<script>
+(function () {
+  "use strict";
+  var app = document.getElementById("app"), toastEl = document.getElementById("toast"), tipEl = document.getElementById("tip");
+  var db = null, uid = null;
+  var view = { id: "", review: null, units: [], loaded: false, unsub: [], st: fresh(), pending: {}, inflight: null };
+
+  function fresh() { return { filter: "all", picks: {}, unitSave: {}, save: {}, read: {}, readOnly: false, finishing: false }; }
+  function toast(text) { toastEl.textContent = text; toastEl.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(function () { toastEl.hidden = true; }, 3200); }
+  function reviewId() { var h = decodeURIComponent(location.hash.replace(/^#/, "")); return /^[a-z0-9._-]+$/i.test(h) && !/^u-/.test(h) ? h : ""; }
+  function barHeight() { var b = document.getElementById("bar"); if (b) document.documentElement.style.setProperty("--bar-h", b.offsetHeight + "px"); }
+  function teardown() {
+    view.unsub.forEach(function (u) { try { u(); } catch (e) { /* already gone */ } });
+    view.unsub = []; view.review = null; view.units = []; view.loaded = false; view.pending = {}; view.inflight = null; view.st = fresh();
+    hideTip();
+  }
+
+  function paint() {
+    if (!view.review || !view.loaded) return;
+    var y = window.scrollY, focusId = document.activeElement && document.activeElement.id;
+    hideTip();
+    app.innerHTML = PointsView.render(view.review, view.units, view.st);
+    AidlcIds.linkify(app, idMap(), { toast: toast });  /* at once, so ids don't show unlinked for a frame */
+    barHeight();
+    window.scrollTo(0, y);
+    if (focusId) { var f = document.getElementById(focusId); if (f) f.focus({ preventScroll: true }); }
+  }
+
+  function idMap() { return view.review ? PointsView.idMap(view.review, view.units) : {}; }
+  AidlcIds.observe(app, idMap, { toast: toast });
+  /* A link to a Unit of this review whose card the filter hides shows all Units, then jumps to it. */
+  app.addEventListener("click", function (e) {
+    var a = e.target.closest && e.target.closest("a.aidlc-id");
+    var u = a && unitById(a.getAttribute("data-aidlc-ref"));
+    if (!u || PointsView.passes(view.st, u)) return;
+    e.preventDefault(); e.stopPropagation();
+    reveal(PointsView.anchorOf(PointsView.uidOf(u)));
+  }, true);
+
+  /* ---------- tooltips: one element, on hover and on keyboard focus ---------- */
+  var tipFor = null;
+  function showTip(el) {
+    var text = el.getAttribute("data-tip");
+    if (!text) return;
+    tipFor = el; tipEl.textContent = text; tipEl.hidden = false; el.setAttribute("aria-describedby", "tip");
+    var r = el.getBoundingClientRect(), w = tipEl.offsetWidth, h = tipEl.offsetHeight;
+    var top = r.top - h - 4; if (top < 8) top = r.bottom + 4;
+    var left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8);
+    tipEl.style.top = top + "px"; tipEl.style.left = left + "px";
+  }
+  function hideTip() { if (tipFor) tipFor.removeAttribute("aria-describedby"); tipFor = null; tipEl.hidden = true; }
+  /* hover waits a moment, so passing over the hand doesn't flash a tip per card; the tip itself can be hovered */
+  var tipTimer = 0;
+  document.addEventListener("mouseover", function (e) {
+    if (tipEl.contains(e.target)) { clearTimeout(tipTimer); return; }
+    var t = e.target.closest && e.target.closest("[data-tip]");
+    clearTimeout(tipTimer);
+    if (t && t !== tipFor) tipTimer = setTimeout(function () { showTip(t); }, 250);
+    else if (!t && tipFor && document.activeElement !== tipFor) tipTimer = setTimeout(hideTip, 150);
+  });
+  document.addEventListener("focusin", function (e) { var t = e.target.closest && e.target.closest("[data-tip]"); if (t) showTip(t); else hideTip(); });
+  document.addEventListener("focusout", function () { hideTip(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") hideTip(); });
+  window.addEventListener("scroll", hideTip, { passive: true });
+
+  /* ---------- read marks: the viewer's own ---------- */
+  function localKey() { return "story-points:reads:" + view.id; }
+  function loadLocalReads() { try { return JSON.parse(localStorage.getItem(localKey()) || "{}") || {}; } catch (e) { return {}; } }
+  function readsDoc() { return db.collection("data/users/" + uid).doc("reads-" + view.id); }
+  function saveReads() {
+    var marks = Object.assign({}, view.st.read);
+    try { localStorage.setItem(localKey(), JSON.stringify(marks)); } catch (e) { /* storage refused: the db copy still holds */ }
+    try { if (db && uid) readsDoc().set({ marks: marks }).catch(function () { /* kept locally */ }); } catch (e) { /* kept locally */ }
+  }
+  function unitById(id) { return view.units.filter(function (u) { return PointsView.uidOf(u) === id; })[0]; }
+
+  /* ---------- picks: saved as they are made ---------- */
   function choose(unit, v) {
-    if (view.readOnly) return;
-    const next = v === null || pickOf(unit) === v ? null : { points: v, at: new Date().toISOString() };
-    view.picks[unit] = next; view.pending[unit] = next;
-    const keep = document.activeElement?.dataset?.v; render();
-    if (keep) document.querySelector(`#u-${CSS.escape(unit)} .pt[data-v="${keep}"]`)?.focus();
-    setStatus("Saving…"); flush();
+    var st = view.st;
+    if (st.readOnly) return;
+    var u = unitById(unit); if (!u) return;
+    var next = v === null || PointsView.pickOf(st, u) === v ? null : { points: v, at: new Date().toISOString() };
+    st.picks[unit] = next; view.pending[unit] = next; st.unitSave[unit] = "saving"; st.save = { state: "saving" };
+    paint(); flush();
   }
-
+  function retry() {
+    var st = view.st;
+    Object.keys(st.unitSave).forEach(function (k) { if (st.unitSave[k] === "failed") { if (!(k in view.pending)) view.pending[k] = st.picks[k] || null; st.unitSave[k] = "saving"; } });
+    st.save = { state: "saving" }; paint(); flush();
+  }
   async function flush() {
     if (view.inflight || !db || !view.id || !Object.keys(view.pending).length) return;
-    const batch = view.pending; view.pending = {}; view.inflight = true;
-    const id = view.id;
+    var id = view.id, st = view.st, batch = view.pending; view.pending = {}; view.inflight = batch;
+    var ok = true;
     try {
-      const patch = { picks: batch };
-      if (view.review?.status === "done") patch.status = "open";
+      var patch = { picks: Object.assign({}, st.picks) };
+      if (view.review && view.review.status === "done") patch.status = "open";
       await db.doc("reviews/" + id).update(patch);
-      if (view.id === id && !Object.keys(view.pending).length) setStatus(`Saved ${fmt(new Date().toISOString())}`, "ok");
+      if (view.id !== id) return;
+      /* the whole picks map went, so a pick that failed earlier is saved now too */
+      Object.keys(batch).concat(Object.keys(st.unitSave).filter(function (k) { return st.unitSave[k] === "failed"; })).forEach(function (k) { if (!(k in view.pending)) st.unitSave[k] = "saved"; });
+      st.save = Object.keys(view.pending).length ? { state: "saving" } : { state: "saved", at: new Date().toISOString() };
     } catch (e) {
-      for (const [u, p] of Object.entries(batch)) if (!(u in view.pending)) view.pending[u] = p;
-      if (e && e.code === "invalid_argument") { view.readOnly = true; view.pending = {}; el.done.disabled = true; render(); setStatus("You can view this review but not save to it. Ask the owner for Contributor access.", "warn"); }
-      else setStatus("Couldn’t save. Check your connection; your next pick retries.", "warn");
-    } finally { view.inflight = false; if (!view.readOnly && Object.keys(view.pending).length) setTimeout(flush, 600); }
+      ok = false;
+      if (view.id !== id) return;
+      Object.keys(batch).forEach(function (k) { if (!(k in view.pending)) view.pending[k] = batch[k]; });
+      if (e && e.code === "invalid_argument") {
+        st.readOnly = true; view.pending = {}; st.unitSave = {};
+        toast("You can read this review but not save picks to it. Ask the owner for Contributor access.");
+      } else {
+        Object.keys(batch).forEach(function (k) { st.unitSave[k] = "failed"; });
+        st.save = { state: "failed" };
+        view.pending = {};  /* the failed picks wait for Retry or the next pick */
+        toast("Couldn’t save your pick. Check your connection, then press Retry.");
+      }
+    } finally {
+      if (view.id === id) { view.inflight = null; paint(); if (ok && Object.keys(view.pending).length) flush(); }
+    }
+  }
+  async function finish() {
+    var st = view.st;
+    if (!db || !view.id || st.readOnly || st.finishing) return;
+    if (Object.keys(st.unitSave).some(function (k) { return st.unitSave[k] === "failed"; })) { toast("Some picks aren’t saved yet. Press Retry first."); return; }
+    st.finishing = true; paint();
+    try {
+      for (var i = 0; i < 100 && (view.inflight || Object.keys(view.pending).length); i++) {
+        if (!view.inflight) await flush(); else await new Promise(function (r) { setTimeout(r, 100); });
+      }
+      if (view.inflight || Object.keys(view.pending).length || st.save.state === "failed") throw new Error("unsaved");
+      await db.doc("reviews/" + view.id).update({ status: "done", savedAt: new Date().toISOString() });
+      toast("Marked done. Now tell Claude in chat: form is done.");
+    } catch (e) { toast("Couldn’t mark the review as done. Try again."); }
+    finally { st.finishing = false; paint(); }
   }
 
-  el.done.addEventListener("click", async () => {
-    if (!db || !view.id || view.readOnly) return;
-    el.done.disabled = true;
-    try {
-      for (let i = 0; i < 100 && (view.inflight || Object.keys(view.pending).length); i++) {
-        if (!view.inflight) await flush(); else await new Promise((r) => setTimeout(r, 100));
-      }
-      if (view.inflight || Object.keys(view.pending).length) throw new Error("unsaved");
-      await db.doc("reviews/" + view.id).update({ status: "done", savedAt: new Date().toISOString() });
-    } catch { setStatus("Couldn’t mark the review as done. Try again.", "warn"); }
-    finally { el.done.disabled = view.readOnly; }
-  });
+  /* ---------- jumps land below the bar ---------- */
+  function reveal(target) {
+    var id = target.replace(/^u-/, ""), u = unitById(id);
+    if (u && !PointsView.passes(view.st, u)) { view.st.filter = "all"; paint(); }
+    var el = document.getElementById(target);
+    if (!el) return;
+    el.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    el.focus({ preventScroll: true });
+    el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+  }
 
-  /* ---------- boot ---------- */
-  function route() { const id = reviewId(); if (id) showReview(id); else showIndex(); }
-  window.addEventListener("hashchange", route);
-  route();
-  (async () => {
-    db = window.claude && typeof window.claude.use === "function" ? await window.claude.use("db") : null;
-    if (!db) { el.lede.textContent = "Sign in to claude.ai to see your story points."; el.list.innerHTML = ""; el.units.innerHTML = ""; el.bar.hidden = true; el.key.hidden = true; return; }
+  /* ---------- events ---------- */
+  app.addEventListener("click", function (e) {
+    var nav = e.target.closest("[data-nav]");
+    if (nav) { e.preventDefault(); history.pushState(null, "", location.pathname + location.search); route(); return; }
+    var jump = e.target.closest("[data-jump]");
+    if (jump) { e.preventDefault(); reveal(jump.dataset.jump); return; }
+    var chip = e.target.closest(".ref");
+    if (chip && !e.target.closest("a")) { var link = chip.querySelector("a.aidlc-id"); if (link) link.click(); return; }
+    var btn = e.target.closest("[data-act]");
+    if (!btn || !view.review) return;
+    var act = btn.dataset.act, unit = btn.dataset.unit, st = view.st;
+    if (act === "pick") choose(unit, Number(btn.dataset.v));
+    else if (act === "clear") choose(unit, null);
+    else if (act === "retry") retry();
+    else if (act === "done") finish();
+    else if (act === "filter") { e.preventDefault(); st.filter = btn.dataset.val; paint(); }
+    else if (act === "read") {
+      var u = unitById(unit); if (!u) return;
+      if (st.read[unit] === PointsView.stamp(u)) delete st.read[unit]; else st.read[unit] = PointsView.stamp(u);
+      saveReads(); paint();
+    }
+  });
+  window.addEventListener("resize", function () { barHeight(); hideTip(); });
+
+  /* ---------- views ---------- */
+  function showList() {
+    teardown(); view.id = "";
+    document.title = "AI-DLC story points";
+    if (!db) return;
+    view.unsub.push(db.collection("reviews").orderBy("createdAt", "desc").limit(100).onSnapshot(function (snap) {
+      app.innerHTML = PointsView.listHtml(snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); }));
+    }, function () { app.innerHTML = '<div class="card msg"><b>Couldn’t load the reviews.</b><p>Reload the page.</p></div>'; }));
+  }
+  function showReview(id) {
+    teardown(); view.id = id;
+    if (!db) return;
+    app.innerHTML = '<div class="card msg"><b>Loading this review…</b></div>';
+    view.st.read = loadLocalReads();
+    if (uid) Promise.resolve().then(function () { return readsDoc().get(); }).then(function (d) {
+      var marks = d && d.exists ? (d.data().marks || {}) : {};
+      Object.keys(marks).forEach(function (k) { if (!view.st.read[k]) view.st.read[k] = marks[k]; });
+      paint();
+    }).catch(function () { /* local marks only */ });
+    var ref = db.doc("reviews/" + id);
+    view.unsub.push(ref.onSnapshot(function (snap) {
+      if (!snap.exists) {
+        view.review = null;
+        app.innerHTML = '<div class="card msg"><b>No review under this link</b><p>Nothing is stored under this id. Check the link Claude sent you.</p><p><a href="#" data-nav="">All reviews</a></p></div>';
+        return;
+      }
+      var r = snap.data(), st = view.st, local = st.picks;
+      view.review = r;
+      /* the stored picks win, except a pick still on its way or waiting for Retry */
+      st.picks = Object.assign({}, r.picks || {});
+      Object.keys(local).forEach(function (k) { if (k in view.pending || (view.inflight && k in view.inflight) || st.unitSave[k] === "failed") st.picks[k] = local[k]; });
+      document.title = (r.title || id) + " · AI-DLC story points";
+      if (!view.loaded) app.innerHTML = '<div class="card msg"><b>Loading the Units…</b></div>';
+      paint();
+    }, function () { app.innerHTML = '<div class="card msg"><b>Couldn’t load this review.</b><p>Reload the page.</p></div>'; }));
+    view.unsub.push(ref.collection("units").orderBy("n").onSnapshot(function (snap) {
+      view.units = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+      view.loaded = true; paint();
+    }, function () { app.innerHTML = '<div class="card msg"><b>Couldn’t load the Units.</b><p>Reload the page.</p></div>'; }));
+  }
+  function route() { var id = reviewId(); if (id) showReview(id); else showList(); }
+  window.addEventListener("hashchange", function () { if (reviewId() || !location.hash) route(); });
+
+  (async function boot() {
+    var use = window.claude && typeof window.claude.use === "function" ? window.claude.use : null;
+    db = use ? await use("db") : null;
+    if (!db) { app.innerHTML = '<div class="card msg"><b>Sign in to claude.ai to see your story points.</b><p>The reviews are stored with the artifact, and only a signed-in viewer can read them.</p></div>'; return; }
+    try { var user = await use("user"); uid = user && typeof user.id === "function" ? await user.id() : null; } catch (e) { uid = null; }
     route();
   })();
 })();

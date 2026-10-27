@@ -23,6 +23,11 @@ Generation plan approval and the unit-end page at the Unit's one gate. Both are 
 `scripts/unit_bundle.py`, and the same order holds with them in place of the `gates` row: the question and the closing
 report wait for the row of the right page, and the link goes in a message of its own. Per-stage gates are unchanged.
 
+The plan approval is also opened by the engine's own ask: when the active directive is an `ask` with `ask_type:
+"plan-approval"` (what `aidlc engine orchestrate next` returns once the plan is written), the gate is open for that Unit
+even though no command of the assistant named it. Any question offering Approve Plan, Approve or Accept as-is while a
+gate is open is the gate's question, whatever its header.
+
 The state lives in ~/.claude/approval-gates/<session>.json (APPROVAL_GATES_DIR overrides the folder) and is
 changed by this hook only. The developer clears it by typing /approval-gates:release.
 
@@ -276,6 +281,41 @@ def directive_unit_gate(project, stage, unit):
         and directive.get("stage", stage) == stage
 
 
+def directive_plan_ask(project):
+    """(stage, unit, written at) when the active directive is the engine's plan-approval ask for a Unit, else None."""
+    _intent, root = intent_root(project)
+    if not root:
+        return None
+    path = os.path.join(root, ".aidlc-engine", "active-directive.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            directive = json.load(f)
+        written = os.path.getmtime(path)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(directive, dict) or directive.get("kind") != "ask" or directive.get("ask_type") != "plan-approval":
+        return None
+    unit = directive.get("unit")
+    if not isinstance(unit, str) or not unit.strip():
+        return None
+    stage = directive.get("stage") if isinstance(directive.get("stage"), str) and directive.get("stage") else UNIT_END_STAGE
+    return stage, unit.strip(), written
+
+
+def sync_pending(state, project):
+    """Open the plan approval the engine is asking, when the state does not have it open yet. True when it opened."""
+    ask = directive_plan_ask(project)
+    if not ask:
+        return False
+    stage, unit, written = ask
+    pending = state["pending"]
+    if pending and pending.get("kind") == "plan" and pending.get("stage") == stage and pending.get("unit") == unit:
+        return False
+    state["pending"] = {"stage": stage, "unit": unit, "opened_at": written, "kind": "plan",
+                        "rhythm": unit_rhythm(project, unit, stage)}
+    return True
+
+
 def page_of(pending):
     """The bundle page a unit-end-rhythm gate needs: the plan page at the plan approval, else the unit-end page."""
     return "plan" if (pending or {}).get("kind") == "plan" else "unit-end"
@@ -389,6 +429,9 @@ def from_tokens(seg):
         elif triple == ["engine", "log", "decision"]:
             calls.append({"kind": "decision", "stage": opts.get("stage"), "checkpoint": opts.get("checkpoint"),
                           "unit": opts.get("unit")})
+        elif triple == ["engine", "log", "answer"]:
+            calls.append({"kind": "answer", "stage": opts.get("stage"), "checkpoint": opts.get("checkpoint"),
+                          "unit": opts.get("unit"), "details": opts.get("details")})
     return calls
 
 
@@ -452,13 +495,24 @@ def is_gate(question):
     return not names_pull_request(str(question.get("question", "")))
 
 
+def gate_questions(state, questions):
+    """The gate's questions among these: an Approval question, or, while a gate is open, any question offering to
+    approve (Approve Plan, Approve, Accept as-is) that names no pull request, whatever its header."""
+    found = []
+    for q in questions:
+        if is_gate(q) or (state["pending"] and labels(q) & GATE_LABELS and not names_pull_request(str(q.get("question", "")))):
+            found.append(q)
+    return found
+
+
 def publish_instruction(stage, unit, page=None):
     if page:
         script = os.path.join(PLUGIN_ROOT, "scripts", "unit_bundle.py")
         return (f"this Unit has the unit-end rhythm, so its {'plan' if page == 'plan' else 'unit-end'} page is one gate bundle: run "
                 f"`python3 \"{script}\" draft --page {page} --unit {unit} --out <a scratch file>`, do what it lists under todo, "
                 f"run `... finalize --bundle <that file> --out <a scratch folder>`, write its writes.json with one ArtifactData "
-                "batch into the AI-DLC unit approvals artifact, and give the developer the link `<artifact url>#<bundle id>` in "
+                "batch into the AI-DLC unit approvals artifact (a `bundles/<id>` row; never a per-stage `gates/` row, never "
+                "the AI-DLC approval gates artifact), and give the developer the link `<artifact url>#<bundle id>` in "
                 "a message of its own before the question (never inside the question)")
     script = os.path.join(PLUGIN_ROOT, "scripts", "gate_bundle.py")
     cmd = f'python3 "{script}" --stage {stage}' + (f" --unit {unit}" if unit else "")
@@ -492,7 +546,7 @@ def target_of(state, project, call_stage=None, call_unit=None):
     return stage, unit, opened
 
 
-def require_published(state, stage, unit, opened):
+def require_published(state, project, stage, unit, opened):
     """The record of this stage's gate page, or a Refusal when it was not published since the gate opened. A row
     recorded by its id alone (the stage was unknown when it was written) counts when its id names this stage. Under the
     unit-end rhythm the page is the Unit's bundle of the page the gate needs."""
@@ -504,6 +558,15 @@ def require_published(state, stage, unit, opened):
             raise Refusal(f"The developer reads the Unit's {'plan' if page == 'plan' else 'unit-end'} page before being asked. "
                           f"Publish it first: {publish_instruction(stage, unit, page)}.")
         return pub
+    if not (pending and pending.get("stage") == stage and (pending.get("unit") or None) == (unit or None)) \
+            and unit_rhythm(project, unit, stage) == "unit-end":
+        # The gate was opened where this session's state did not see it (another session, a subagent, the engine's
+        # own directive): the Unit's claim still says its gate is the unit-end page.
+        pub = state["published"].get(make_key(stage, unit) + "@unit-end")
+        if not pub:
+            raise Refusal("The developer reads the Unit's unit-end page before being asked. "
+                          f"Publish it first: {publish_instruction(stage, unit, 'unit-end')}.")
+        return pub
     pub = state["published"].get(make_key(stage, unit))
     if not pub:
         pub = next((p for p in state["published"].values() if id_matches(p.get("id"), None, stage, unit)), None)
@@ -511,6 +574,31 @@ def require_published(state, stage, unit, opened):
         raise Refusal("The developer reads the stage's documents in the AI-DLC approval gates page before being "
                       f"asked. Publish them first: {publish_instruction(stage, unit)}.")
     return pub
+
+
+def unit_end_flow_for(state, project, doc_id):
+    """(stage, unit) when a `gates/<doc_id>` row is the per-stage page of a gate that a unit-end Unit has as a bundle
+    page (its Code Generation plan approval or unit-end gate), else None."""
+    intent, _root = intent_root(project)
+    pending = state["pending"]
+    candidates = []
+    for cand in ((pending.get("stage"), pending.get("unit")) if pending else None, current_stage(project)):
+        if cand and cand[0] and cand not in candidates:
+            candidates.append(cand)
+    for stage, unit in candidates:
+        if not unit or not id_matches(doc_id, intent, stage, unit):
+            continue
+        in_hand = bool(pending and pending.get("stage") == stage and pending.get("unit") == unit)
+        if (in_hand and pending.get("rhythm") == "unit-end") or unit_rhythm(project, unit, stage) == "unit-end":
+            return stage, unit
+    return None
+
+
+def wrong_flow_message(doc_id, stage, unit):
+    return (f"gates/{doc_id} is the wrong page: {unit} was claimed with the unit-end rhythm, so its {stage} plan approval and "
+            "its unit-end gate are `bundles/<id>` rows in the \"AI-DLC unit approvals\" artifact, built by unit_bundle.py, not "
+            f"`gates/` rows of gate_bundle.py in the \"AI-DLC approval gates\" artifact. Nothing was written. Run the unit-end "
+            f"flow: {publish_instruction(stage, unit, 'plan')} (page `unit-end` at the unit-end gate)")
 
 
 def check_gate_rows(tool_input):
@@ -588,19 +676,51 @@ def link_sent(event, pub):
     return False, counts
 
 
+def link_wait():
+    try:
+        return max(0.0, float(os.environ.get("APPROVAL_GATES_LINK_WAIT", "3")))
+    except ValueError:
+        return 3.0
+
+
+def call_written(event):
+    """True when the transcript already holds this very tool call: the response that makes it is then on disk whole."""
+    call_id, path = event.get("tool_use_id"), event.get("transcript_path")
+    if not call_id or not path:
+        return False
+    try:
+        with open(path, encoding="utf-8") as f:
+            return any(call_id in line for line in f if '"tool_use"' in line)
+    except OSError:
+        return False
+
+
+def wait_for_link(event, pub):
+    """link_sent, tried again for a moment when the link is missing. Claude Code writes the blocks of a response to the
+    transcript as they stream, and the hook of a tool call can run before the text block of the same response (one
+    entry per block, one message id) has reached the file; a link sent in the response that asks the question would be
+    refused for good. It waits for the text to land, and stops waiting once the question's own tool call is on disk."""
+    deadline = time.time() + link_wait()
+    while True:
+        sent, counts = link_sent(event, pub)
+        if sent or time.time() >= deadline or call_written(event):
+            return sent, counts
+        time.sleep(0.2)
+
+
 def guard_question(event, state, project, questions):
     for q in questions:
         stage, unit, opened = target_of(state, project)
         if not stage:
             continue
-        pub = require_published(state, stage, unit, opened)
+        pub = require_published(state, project, stage, unit, opened)
         text = str(q.get("question", ""))
         url = str(pub.get("url", "")).strip()
         if (url and url in text) or re.search(r"claude\.ai/artifact/|#[0-9]{6}-[a-z0-9.-]+-\d{8}T\d{4}\b", text, re.I):
             raise Refusal("The page's link goes to the developer in a message of its own, before the question; the "
                           "question text carries no link. Send the link "
                           f"{link_of(pub)} as a message, then ask the engine's question as it is.")
-        sent, counts = link_sent(event, pub)
+        sent, counts = wait_for_link(event, pub)
         if not sent:
             raise Refusal("The developer gets the page's link before the question, and no message of yours carries "
                           f"it yet. Since {pub.get('id', '')} was published, your transcript holds "
@@ -614,23 +734,36 @@ def guard_report(state, project, call):
     stage, unit, opened = target_of(state, project, call.get("stage") or (current_stage(project) or (None,))[0],
                                     call.get("unit"))
     if stage:
-        require_published(state, stage, unit, opened)
+        require_published(state, project, stage, unit, opened)
 
 
 def pre(event, project):
     tool, ti = event.get("tool_name"), event.get("tool_input") or {}
     if tool == "ArtifactData":
         check_gate_rows(ti)
+        try:
+            state = load(event)
+        except Refusal:
+            return
+        sync_pending(state, project)
+        for _op, collection, doc_id, _data, _url in writes_of(ti):
+            if collection == "gates" and doc_id:
+                wrong = unit_end_flow_for(state, project, doc_id)
+                if wrong:
+                    raise Refusal(wrong_flow_message(doc_id, *wrong))
         return
     if tool == "AskUserQuestion":
-        gates = [q for q in questions_of(ti) if is_gate(q)]
+        state = load(event)
+        sync_pending(state, project)
+        gates = gate_questions(state, questions_of(ti))
         if gates:
-            guard_question(event, load(event), project, gates)
+            guard_question(event, state, project, gates)
         return
     if tool == "Bash":
         closing = [c for c in engine_calls(ti.get("command", "")) if c["kind"] == "report" and c["result"] in CLOSING]
         if closing:
             state = load(event)
+            sync_pending(state, project)
             for call in closing:
                 guard_report(state, project, call)
 
@@ -651,8 +784,17 @@ def guarded_pre(event, project):
 
 # ---------------------------------------------------------------- recording
 
+SAID = []  # what this run tells the assistant, printed once as one hook output
+
+
 def say(event_name, text):
-    print(json.dumps({"hookSpecificOutput": {"hookEventName": event_name, "additionalContext": "approval-gates: " + text}}))
+    SAID.append((event_name, "approval-gates: " + text))
+
+
+def flush():
+    if SAID:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": SAID[0][0],
+                                                 "additionalContext": "\n".join(text for _name, text in SAID)}}))
 
 
 def id_matches(doc_id, intent, stage, unit):
@@ -661,11 +803,28 @@ def id_matches(doc_id, intent, stage, unit):
     return re.fullmatch(start + middle + r"-\d{8}[Tt]\d{4}", doc_id or "") is not None
 
 
+def engine_refused(response):
+    """True when the engine answered the command with an error (`"kind": "error"`), so it opened nothing."""
+    if isinstance(response, dict):
+        text = " ".join(str(response.get(k) or "") for k in ("stdout", "stderr", "text", "output"))
+    else:
+        text = flat(response)
+    return bool(re.search(r'"kind"\s*:\s*"error"', text)) or failed(response)
+
+
 def record_bash(event, project, state, tool_input):
     changed = False
     for call in engine_calls(tool_input.get("command", "")):
         stage = call.get("stage")
         cur = current_stage(project)
+        if call["kind"] == "answer":
+            pending = state["pending"]
+            if call.get("checkpoint") == "plan-approval" and pending and pending.get("kind") == "plan":
+                # Request Changes: the revised plan is a new presentation, the engine's next ask opens it again.
+                # Approve: the plan gate is over; left open, it would stand in for the Unit's later unit-end gate.
+                state["pending"] = None
+                changed = True
+            continue
         if call["kind"] == "decision":
             if call.get("checkpoint") != "plan-approval":
                 continue
@@ -686,6 +845,8 @@ def record_bash(event, project, state, tool_input):
             continue
         unit = call.get("unit") or (cur[1] if cur and cur[0] == stage else None)
         if call["result"] in OPENING:
+            if engine_refused(event.get("tool_response")):
+                continue
             rhythm = unit_rhythm(project, unit, stage)
             state["pending"] = {"stage": stage, "unit": unit, "opened_at": time.time(), "kind": "gate", "rhythm": rhythm}
             if rhythm == "unit-end":
@@ -696,6 +857,8 @@ def record_bash(event, project, state, tool_input):
                                    f"question, publish its documents: {publish_instruction(stage, unit)}.")
             changed = True
         elif call["result"] in CLOSING:
+            if engine_refused(event.get("tool_response")):
+                continue
             pending = state["pending"]
             if pending and pending.get("stage") == stage and (not call.get("unit") or pending.get("unit") == call["unit"]):
                 state["pending"] = None
@@ -717,9 +880,13 @@ def record_artifact(project, state, tool_input, response):
         if collection == "bundles":
             if op != "set":
                 continue
-            changed = record_bundle(state, intent, doc_id, url) or changed
+            changed = record_bundle(state, project, intent, doc_id, url) or changed
             continue
         if op not in ("set", "update") or collection != "gates":
+            continue
+        wrong = unit_end_flow_for(state, project, doc_id)
+        if wrong:
+            say("PostToolUse", wrong_flow_message(doc_id, *wrong).replace("Nothing was written.", "It does not count for the gate."))
             continue
         key = next((make_key(stage, unit) for stage, unit in candidates if id_matches(doc_id, intent, stage, unit)), None)
         if key is None and not candidates and re.fullmatch(r"\d{6}-[a-z0-9-]+-\d{8}[Tt]\d{4}", doc_id or ""):
@@ -745,16 +912,38 @@ def stamp_epoch(stamp):
         return None
 
 
-def record_bundle(state, intent, doc_id, url):
-    """A `bundles` row of the Unit whose unit-end-rhythm gate is open, for the page that gate needs."""
+def claimed_unit(project):
+    """The Unit the checkout's claim names (aidlc/.aidlc-unit-scope.json), or None."""
+    try:
+        with open(os.path.join(project, "aidlc", ".aidlc-unit-scope.json"), encoding="utf-8") as f:
+            unit = json.load(f).get("unit")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return unit.strip() if isinstance(unit, str) and unit.strip() else None
+
+
+def record_bundle(state, project, intent, doc_id, url):
+    """A `bundles` row of the Unit whose unit-end-rhythm gate is open, for the page that gate needs. A unit-end page of
+    the claimed Unit counts with no gate open in the state too: its gate may have been opened where this session's state
+    did not see it, and the report that approves it asks for this page."""
     pending = state["pending"]
     found = BUNDLE_ID.match(doc_id or "")
-    if not found or not pending or pending.get("rhythm") != "unit-end" or not pending.get("unit"):
+    if not found:
         return False
     head, page = found.group("head"), found.group("page")
-    unit = pending["unit"]
-    if page != page_of(pending) or not head.endswith("-" + unit.lower()) or (intent and not head.startswith(intent.lower())):
+    if intent and not head.startswith(intent.lower()):
         return False
+    if pending and pending.get("rhythm") == "unit-end" and pending.get("unit") and page == page_of(pending) \
+            and head.endswith("-" + pending["unit"].lower()):
+        unit = pending["unit"]
+    else:
+        unit = claimed_unit(project)
+        if page != "unit-end" or not unit or not head.endswith("-" + unit.lower()) \
+                or unit_rhythm(project, unit, UNIT_END_STAGE) != "unit-end":
+            return False
+        if pending and pending.get("unit") == unit:
+            state["pending"] = None  # a gate of this Unit still open in the state (its plan) is over: the Unit is built
+        pending = {"stage": UNIT_END_STAGE, "unit": unit}
     built = stamp_epoch(found.group("stamp"))
     opened = pending.get("opened_at")
     if built is None or (isinstance(opened, (int, float)) and built < opened - opened % 60):
@@ -763,7 +952,7 @@ def record_bundle(state, intent, doc_id, url):
         return False
     pub = {"id": doc_id, "url": str(url or "").rstrip("/"), "at": time.time(), "page": page}
     state["published"][make_key(pending["stage"], unit) + "@" + page] = pub
-    say("PostToolUse", f"bundles/{doc_id} is published. Send the developer the link `{link_of(pub)}` in a message of its "
+    say("PostToolUse", f"bundles/{doc_id} is published in the AI-DLC unit approvals artifact. Send the developer the link `{link_of(pub)}` in a message of its "
                        "own, then ask the engine's Approval question with no link in it; the question is refused until "
                        "that message was sent.")
     return True
@@ -771,9 +960,7 @@ def record_bundle(state, intent, doc_id, url):
 
 def record_answers(project, state, tool_input, response):
     answers = answers_of(response)
-    for q in questions_of(tool_input):
-        if not is_gate(q):
-            continue
+    for q in gate_questions(state, questions_of(tool_input)):
         answer = next((a for k, a in answers.items() if norm(k) == norm(q.get("question", ""))), None)
         pending = state["pending"]
         if answer is not None and pending and pending.get("rhythm") == "unit-end":
@@ -809,13 +996,17 @@ def post(event, project):
             state = load(event)
         except Refusal:
             return
+        changed = sync_pending(state, project)
+        if changed:
+            pending = state["pending"]
+            say("PostToolUse", f"the engine asks for the plan approval of {pending['unit']}. Before that question: "
+                               f"{publish_instruction(pending['stage'], pending['unit'], 'plan' if pending['rhythm'] == 'unit-end' else None)}.")
         if tool == "Bash":
-            changed = record_bash(event, project, state, ti)
+            changed = record_bash(event, project, state, ti) or changed
         elif tool == "ArtifactData":
-            changed = record_artifact(project, state, ti, event.get("tool_response"))
+            changed = record_artifact(project, state, ti, event.get("tool_response")) or changed
         else:
             record_answers(project, state, ti, event.get("tool_response"))
-            changed = False
         if changed:
             save(event, state)
 
@@ -843,6 +1034,7 @@ def main():
     try:
         if name == "UserPromptSubmit":
             prompt(event)
+            flush()
             return 0
         project = project_dir(event)
         if not os.path.isdir(os.path.join(project, "aidlc", "spaces")):
@@ -851,6 +1043,7 @@ def main():
             guarded_pre(event, project)
         elif name == "PostToolUse":
             post(event, project)
+            flush()
     except Refusal as why:
         print(f"{why} {RELEASE_HINT}", file=sys.stderr)
         return 2

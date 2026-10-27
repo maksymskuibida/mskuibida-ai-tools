@@ -5,18 +5,45 @@ description: Use at every AI-DLC questions file, before the developer is asked t
 
 # Question forms
 
-Every questions file gets a form, always. The file stays the record and the engine keeps
-reading it; the form is how the developer fills it. The template, `question-form.html` next to
+The file stays the record and the engine keeps reading it; the form is how the developer fills it.
+Whether a questions file gets a form is the developer's **preference** for this project (§ 0); under
+`always`, or when the developer chose the form for that file, it does, every time. The template, `question-form.html` next to
 this file, is the one page; its header comment is the data contract. Never generate, restyle or
 edit a form page per stage.
+
+## 0. The preference, and what the hooks hold you to
+
+The developer's choice is per user and per project, kept by the plugin (`always`, `ask`, `never`). You
+never read or write it; the `question_guard.py` hook tells you the next step after each questions file you write
+(a `Write`/`Edit` of `…/aidlc/spaces/…/<stage>-questions.md` with `[Answer]:` tags):
+
+- **No preference yet** → open the preference dialog: one `AskUserQuestion` with `metadata: {"source":
+  "question-forms:preference"}` and a placeholder question ("Show question forms?", options "Always" and "Ask").
+  The plugin's mod replaces it with the real question (Always show question forms / Ask every time / Never show) and
+  explains above it what a question form is. Do not answer it, add text of your own or ask anything else; follow the
+  line the mod adds. `/question-forms:preference` opens the same dialog later.
+- **`ask`** → for each file, one `AskUserQuestion` with `metadata: {"source": "question-forms:ask:<repo path of the
+  file>"}` and a placeholder question; the answer (open the form, or the developer edits the file) counts for that file.
+- **`always`**, or the form chosen → § 2 to § 4. **`never`**, or the file chosen → the developer edits the file; the
+  plugin stays out of the way.
+
+What the hooks refuse, so you don't run into it: ending the turn until the dialog is answered, or until the file's
+`forms/<id>` row (whose `file` is the questions file) was written by `ArtifactData`, from `data` or a `file_path` and a message of yours carries
+`<artifact url>#<id>`; an `AskUserQuestion` with that link inside it (send the link in a message of its own, **before**
+the ask, and write nothing after an ask); `aidlc engine orchestrate next|continue|report` for a stage whose form was
+opened while its file still has empty `[Answer]:` tags; recording the preference from Bash or writing its files by
+hand. `/question-forms:release` clears the guard for the session. A turn the hook has held three times is let through
+with a note.
 
 ## 1. The artifact (once per developer)
 
 `Artifact` → `action: "list"` → the artifact titled **AI-DLC question forms**. If the
 developer has none, publish `question-form.html` from this skill's directory once:
-`capabilities: {db: {}}`, `icon: "form"`, description "Fill a stage's AI-DLC questions file in
-a form; Claude copies the saved answers word for word into the file." Reuse its URL for every
-form from then on.
+`capabilities: {db: {}, user: {}}`, `icon: "form"`, description "Fill a stage's AI-DLC questions
+file in a form; Claude copies the saved answers word for word into the file." Reuse its URL for
+every form from then on. After a plugin update, republish the page from this file to the same URL
+once, with the same capabilities: the rows stay. (`user` keeps each viewer's "new since you
+looked" marks with their account; without it they stay in that browser.)
 
 ## 2. Open a form (at every questions file)
 
@@ -49,6 +76,47 @@ questions. Nothing is pre-selected (a board's cards are the one exception, § 5)
 press; the engine's own mode question is unchanged, and answers from the form count as the
 developer editing the file.
 
+### What the page does with the rows, and the optional fields that feed it
+
+The page has a sticky bar (filters for unanswered and for new or changed questions, the answered
+count, save state, Done, and a chip per question that jumps to it), tooltips on ids, terms and
+badges, and links. None of it needs extra rows; these optional fields make it better:
+
+- `refs: [{label, tip, target}]` on a question or card — what it refers to: another question
+  (`target: "#Q3"`, a live link), a page (`https://…`), or a source the page does not hold
+  (`path:<repo path>`, or any other text such as `story:US2.1`): that one is still a link, its
+  `tip` is all the developer gets, and a press says the source isn't in the form. `tip` is plain
+  words ("The story about guests filtering dishes by diet"), never just the id again.
+- `terms: {"<word>": "<plain meaning>"}` on the form — words and abbreviations that get a
+  tooltip wherever they appear. The page knows common ones (AC, API, CI, MVP, NFR, PR, SSO, UI …);
+  add the project's own (a Unit name, a domain word).
+- `revNote` on a question — one line on why a follow-up was added or a question changed.
+- `ids` on the form — what every id in the form's text is, from the shared id map (below).
+- `records: "https://github.com/<owner>/<repo>/blob/<branch>/"` on the form, when the repository is
+  on a code host — `refs` with `path:` targets, file paths in `` `code` `` and the questions file
+  then open there. Leave it out for a repository with no web address. Ids don't use it: they keep
+  the shared tooltip.
+
+**Ids: the `ids` map.** Every id in the page's text (`US1.1`, `AC1.1.2`, `FR1.4`, `NFR3`, `BR1.2`,
+`Q4`, `U31`, `C2`, `E7`, `ADR-009`, `R-01` and every kind the project's documents define) is a link
+with a tooltip, found by the shared `aidlc-ids` piece the same way on every plugin's page
+(`shared/aidlc-ids/README.md` in this repository is the contract). Before the batch that opens or
+changes a form:
+
+1. `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/aidlc_ids.py" sync` — keeps the checkout's id map, outside
+   the project; fast when nothing changed.
+2. Write all the text you put into the form (titles, `text`, `ctx`, options, hints, proposals, a
+   board's cards) into one scratch file, and run `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/aidlc_ids.py"
+   refs --text-file <that file> --near <the questions file>`.
+3. Store its output, `{id: {kind, title, text, doc, line}}`, as the form's `ids` in the same batch.
+   When a later change adds text with a new id, run `refs` again and update `ids` with it.
+
+The page links ids to questions and cards it shows by itself (a live jump), and shows an id no
+document defines as not defined; a form opened before `ids` existed still gets every id linked,
+as not defined. A `` `code` `` span that is a file path becomes a file link. In
+`text`, `from`, `plain` and option labels say things in words, not by id: "Guests can't tell
+which dish is vegan", not "AC 3 of US2.1"; put the id in `refs`.
+
 ## 3. Change a form
 
 Adding, changing or removing a question, follow-ups included, is a row write to the same form
@@ -73,33 +141,41 @@ One `ArtifactData` `get` of `forms/<id>`. `answers[qid]` is `{k: [letters], note
 
 ## 5. Board forms (sorting items into boxes)
 
-When the developer has to sort items rather than answer questions — a pull request review, on both
-sides (`pr-review` plugin: `review-pr` for the reviewer, `address-review` for the author, both followed by § 5b; `self-review` for the author's own AI review pass, a Fix now / Dismiss board that gets the form check of § 5b A and is not part of the flow guard) — the form is a board: 2–4 boxes
-side by side on a wide page, stacked on a narrow one, each item a card that starts in the box the
-agent proposes and can be moved by button or drag.
+When the developer has to decide items rather than answer questions — a pull request review, on both
+sides (`pr-review` plugin: `review-pr` for the reviewer, `address-review` for the author, both followed by § 5b; `self-review` for the author's own AI review pass, a Fix now / Dismiss board that gets the form check of § 5b A and is not part of the flow guard) — the form is a board: one list of cards (in sections, when the form has `groups`), each card with one button per box it may use. Nothing is
+chosen for the developer: a card has no answer until the developer presses a button. The agent's
+suggestion (`proposed`) is marked on the card, in bold in its details, never selected. A card with its
+decision folds to one line; the bar filters by Unanswered or by box, "take the suggestion" buttons press the
+proposed box on the undecided cards (never a box that needs a reason or has tone `warn`), and Done stays
+off until every card has its decision. The rest of the card is plain text that can be selected and copied.
 
-- `forms/<id>` adds `view: "board"` and `boxes: [{k, t, hint?, tone?, group?, sink?}]`; `tone` is
-  `ink`, `accent`, `warn` or `muted`. The box labels are data, written by the skill that opens the
-  board.
-- A grouped board adds `groups: [{k, t, hint?}]` and gives each box a `group`, or `sink: true`.
-  Groups stand side by side with their boxes stacked; sink boxes take a full-width row below. A
-  card can move only between the boxes of its proposed box's group, or to a sink box, and the page
-  shows that while dragging. On a wide window the page scrolls until the header is gone and the
-  board fills the screen; then each box scrolls on its own. Cards show their id, title and move
-  buttons; details open per card or all at once from the bar.
-- `forms/<id>/questions/<qid>` per card — `{n, text, ctx?, kind: "card", from?, group?, proposed:
-  {k, why?}, outcomes?: {<box k>: "…"}}`; `group` is needed only when the proposed box is a sink. `text` is a short title a person understands without
+- `forms/<id>` adds `view: "board"` and `boxes: [{k, t, hint?, tone?, note?, group?, sink?}]`; `tone` is
+  `ink`, `accent`, `warn` or `muted` (the colour of the button once chosen). `note: {required?: true,
+  label?}` makes a written reason part of the decision: the note field opens when the box is chosen, the
+  card stays open until it is written, and Done waits for it. The box labels are data, written by the skill
+  that opens the board.
+- `groups: [{k, t, hint?}]` are the sections of the list, in that order; a card is in the section of its
+  `group`. With `group` (or `sink: true`) on the boxes, a card can only choose the boxes of its group, plus sink
+  boxes and boxes with no group — what `pr-review` uses for "this pull request" and "earlier, settled stages".
+- `forms/<id>/questions/<qid>` per card — `{n, text, ctx?, kind: "card", from?, group?, proposed?:
+  {k, why?}, outcomes?: {<box k>: "…"}, severity?, blocking?, plain?, action?, detail?, refs?}`; `group`
+  is needed only when the proposed box is a sink. `text` is a short title a person understands without
   knowing the IDs (not "AC 3 of US2.1", but "Guests can't tell which dish is vegan"); `from` one
-  line on who asked for what; `outcomes` says what happens when the card sits in each box. A
-  card's `ctx` follows the § 2 rule: paragraphs and `- ` bullets with **bold** lead-ins, never
-  one run-on paragraph; `text`, `from`, `outcomes` and `proposed.why` take the inline subset only. On a
-  grouped board the group alone decides where a card can go; on a board without groups,
-  `outcomes` also limits the boxes offered to its keys (plus the proposed box).
+  line on who asked for what; `outcomes` is shown inside each button: what happens when the card is decided
+  that way, and what it costs. `severity` is a short word drawn as a tag, `blocking` a short text ("Blocks
+  approval") that marks a card as holding something up and enables the bar's "<box> all blocking" button.
+  A card's optional `plain` says what it means in plain words (shown in its details), `action` the
+  suggested action (shown in bold in the suggestion), `detail` the `ctx` without those
+  two (shown instead of `ctx` when the card has `plain` or `action`; `ctx` stays complete), and `refs` what it refers to (§ 2;
+  the `review-findings` board uses `#<qid>` for another card, and `doc:`, `path:` or `finding:` for
+  what the form does not hold). A card's `ctx` follows the § 2 rule: paragraphs and `- ` bullets with **bold** lead-ins, never
+  one run-on paragraph; `text`, `from`, `outcomes`, `plain`, `action` and `proposed.why` take the inline subset only. On a board
+  without grouped boxes, `outcomes` also limits the boxes offered to its keys (plus the proposed box).
 - A board is never opened with zero cards: when there is nothing to sort, no board and no follow-up
   form are made and the skill that would open it goes on to its next step.
 - A board has no questions file; the skill that opens it says where its result is recorded.
-  Read-back: `answers[qid].k[0]` is the card's box, `note` the developer's note. On Done every
-  card is written, moved or not.
+  Read-back: `answers[qid].k[0]` is the card's box, `note` the developer's note. Every card has an answer
+  once the form is done: Done stays off until each card is decided.
 
 ### 5b. After a review board is sent: the form check and the summary
 

@@ -1,8 +1,11 @@
 {
+  "modules": [
+    "./register.tsx"
+  ],
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|AskUserQuestion|Write|Edit|MultiEdit",
+        "matcher": "Bash|Write|Edit|MultiEdit",
         "hooks": [
           {
             "type": "command",
@@ -13,7 +16,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash|AskUserQuestion",
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",

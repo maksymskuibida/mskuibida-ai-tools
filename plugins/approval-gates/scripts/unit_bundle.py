@@ -30,7 +30,9 @@ against contract/gate-bundle.schema.json and its rules, and writes into <dir>:
     row.json        the `bundles/<id>` row: {bundle, page, unit, intent, title, createdAt, status}
     writes.json     the `writes` array for one ArtifactData batch
 and keeps a copy in the bundle store (`$APPROVAL_GATES_DIR/bundles/<intent>/<unit>/`, default ~/.claude/approval-gates),
-which the next draft reads. A changed row with no `revNote` is refused: say what changed. It prints
+which the next draft reads. Before validating, it writes the bundle's `ids`: the checkout's id map brought up to date
+(`aidlc_ids.py sync`), then the definition of every id the bundle's text mentions, nearest the Unit's stage folders
+(`aidlc_ids.py refs --near`), so a BR1.1 is this Unit's and a Q1 or R-01 one of its stages'. A changed row with no `revNote` is refused: say what changed. It prints
 {"id", "page", "unit", "revision", "bundle", "writes", "lookFirst", "rows"}.
 
 The script never touches the artifact: the agent makes the ArtifactData call. Standard library only.
@@ -48,6 +50,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import aidlc_ids  # noqa: E402  (the shared copy: the id map of the bundle's `ids`)
 import gate_bundle  # noqa: E402  (same folder: record_root, load_graph, state_field, slugify)
 import validate_bundle  # noqa: E402
 
@@ -437,16 +440,46 @@ def findings(unit, stages, defs, questions, steps_raw):
     return rows
 
 
+FACT_VALUE_MAX = 32  # contract/gate-bundle.schema.json: a header fact's value is a chip, not a sentence
+CHECK_STEP = re.compile(r"^(?P<indent>[ \t]*)[-*]\s+(?:\[[ xX]\]\s+)?\*\*Step\s+(?P<n>\d+)\s*[:.\u2014-]\s*(?P<title>.+?)\*\*\s*(?P<rest>.*)$")
+BULLET = re.compile(r"^(?P<indent>[ \t]*)[-*]\s+(?:\[[ xX]\]\s+)?(?P<text>.+)$")
+
+
 def parse_steps(path):
-    """[{n, title, subs: [text]}] of a code plan's `### Step N: title` headings and their `- [ ]` items."""
+    """[{n, title, subs: [text], text}] of a code plan's steps. Two forms: a `### Step N: title` heading with its bullets
+    (`- [ ] item`) under it, or a checkbox line `- [ ] **Step N: title.**` with the more deeply indented bullets under it
+    as its sub-steps (text after the bold title on the same line is the first sub-step). `text` is the step's source."""
+    body = read(path)
     steps = []
-    for block in re.split(r"(?m)^(?=### Step )", read(path)):
-        head = re.match(r"### Step (\d+)\s*[:.—-]\s*(.+)", block)
+    for block in re.split(r"(?m)^(?=### Step )", body):
+        head = re.match(r"### Step (\d+)\s*[:.\u2014-]\s*(.+)", block)
         if not head:
             continue
         block = re.split(r"(?m)^## ", block, maxsplit=1)[0]
         subs = [plain(s) for s in re.findall(r"(?m)^\s*[-*]\s+(?:\[[ xX]\]\s+)?(.+)$", block)]
-        steps.append({"n": int(head.group(1)), "title": head.group(2).strip(), "subs": subs})
+        steps.append({"n": int(head.group(1)), "title": head.group(2).strip(), "subs": subs, "text": block})
+    if steps:
+        return steps
+    current = None
+    for line in body.splitlines():
+        found = CHECK_STEP.match(line)
+        if found:
+            title = found.group("title").strip().rstrip(".:").strip()
+            current = {"n": int(found.group("n")), "title": title, "subs": [], "text": line + "\n",
+                       "indent": len(found.group("indent").expandtabs(4))}
+            if found.group("rest").strip():
+                current["subs"].append(plain(found.group("rest")))
+            steps.append(current)
+            continue
+        if current is None:
+            continue
+        if re.match(r"^#{1,6} ", line):
+            current = None
+            continue
+        current["text"] += line + "\n"
+        bullet = BULLET.match(line)
+        if bullet and len(bullet.group("indent").expandtabs(4)) > current["indent"]:
+            current["subs"].append(plain(bullet.group("text")))
     return steps
 
 
@@ -462,7 +495,7 @@ def plan_steps(path, unit, defs, questions):
     out = []
     for i, st in enumerate(raw, 1):
         text = " ".join(st["subs"])
-        files = {m for m in FILE_TOKEN.findall(read_step_source(path, st["n"])) if "/" in m or "." in m}
+        files = {m for m in FILE_TOKEN.findall(st["text"]) if "/" in m or "." in m}
         implements = [r for r in make_refs(text, defs, "code-generation", questions, limit=8)]
         out.append({
             "n": i, "title": one_line(st["title"], 120), "layer": layer_of(st["title"]), "files": len(files),
@@ -471,11 +504,6 @@ def plan_steps(path, unit, defs, questions):
             "source": {"path": rel(path, unit.project), "key": "step:" + gate_bundle.slugify(st["title"]), "digest": digest(st["title"], *st["subs"])},
         })
     return out, raw
-
-
-def read_step_source(path, n):
-    found = re.search(r"(?ms)^### Step " + str(n) + r"\b.*?(?=^### |^## |\Z)", read(path))
-    return found.group(0) if found else ""
 
 
 # ---------------------------------------------------------------- unit-end rows
@@ -726,6 +754,9 @@ def draft(args):
     if revision > 1:
         todo.append(f"header.revisions: say in one line what v{revision} changes")
     todo.append("rewrite every title and body the script took from the records in plain words (titles one line)")
+    todo.append("limits finalize enforces: every plan step keeps at least one sub-item (`subs`); every header fact `value` is "
+                f"{FACT_VALUE_MAX} characters or fewer (put detail in the fact's `note`, 80 characters or fewer, not in the value); "
+                "at most 6 facts")
     os.makedirs(os.path.dirname(os.path.abspath(args.out)) or ".", exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(bundle, f, indent=2, ensure_ascii=False)
@@ -814,6 +845,32 @@ def default_facts(bundle):
     head["facts"] = facts
 
 
+def bundle_texts(value, skip=("provenance", "source", "ids")):
+    """Every string the page may show, in order."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key not in skip:
+                yield from bundle_texts(item, skip)
+    elif isinstance(value, list):
+        for item in value:
+            yield from bundle_texts(item, skip)
+    elif isinstance(value, str):
+        yield value
+
+
+def id_map(bundle, project):
+    """{id: definition} of the ids the bundle's text mentions, as the shared aidlc_ids.py defines them, nearest the
+    Unit's stage folders. A failure leaves the map empty and warns: the page still links what it shows itself."""
+    try:
+        unit = Unit(project, (bundle.get("header") or {}).get("unit", ""))
+        near = [unit.stage_folder(s) for s in DESIGN_STAGES + ("code-generation",) if os.path.isdir(unit.stage_folder(s))]
+        aidlc_ids.sync(unit.root)
+        return aidlc_ids.refs(unit.root, "\n".join(bundle_texts(bundle)), near)
+    except (BundleError, gate_bundle.BundleError, OSError, ValueError) as why:
+        print(f"unit_bundle.py: the id map could not be built ({why}); the page links only the ids it shows", file=sys.stderr)
+        return {}
+
+
 def finalize(args):
     bundle = load_json(args.bundle)
     if not isinstance(bundle, dict):
@@ -833,6 +890,10 @@ def finalize(args):
         previous = None
     missing = mark_revisions(bundle, previous)
     default_facts(bundle)
+    bundle.pop("ids", None)
+    ids = id_map(bundle, os.path.abspath(args.project_dir or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()))
+    if ids:
+        bundle["ids"] = ids
     problems = validate_bundle.validate(bundle)
     if missing:
         problems.append(f"say what changed in v{head.get('revision')} (revNote) for: {', '.join(missing)}")

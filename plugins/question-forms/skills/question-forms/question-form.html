@@ -1,22 +1,44 @@
 <title>AI-DLC question forms</title>
+<meta name="claude:viewport-fit-sides" content="cover">
 <!--
   AI-DLC question forms — the one template for every AI-DLC questions file.
 
-  Published ONCE per developer as a private Artifact with the `db` capability
-  (capabilities: {db: {}}, icon "form"); never regenerated per stage. Every questions
+  Published ONCE per developer as a private Artifact with the `db` and `user` capabilities
+  (capabilities: {db: {}, user: {}}, icon "form"); never regenerated per stage. Every questions
   file becomes a form INSIDE this artifact, always, written as rows by the agent with the
   ArtifactData tool (see SKILL.md next to this file). The page renders whatever the rows
   say, live, so a question can be added, changed or removed without republishing anything.
+  Published without `user`, the page still works; "new since you looked" marks then stay in
+  this browser only.
 
   Data contract (the only thing an agent writes):
 
     forms/<id>                       {title, stage, file, status: "open"|"done",
-                                      createdAt (ISO), intro?, savedAt?, answers?}
+                                      createdAt (ISO), intro?, savedAt?, answers?, terms?}
       id: [a-z0-9._-]+ — e.g. 261016-daily-page-mvp-intent-capture
+      terms?: {"NFR": "plain-language meaning", …} — words and abbreviations that get a tooltip
+        wherever they appear in the form's text (whole words, case as written). The page knows a
+        few common ones itself (AC, API, CI, MVP, NFR, PR, SSO, UI, UX …); terms adds or overrides.
+      ids?: {"<id>": {kind, title, text, doc, line}} — what each id the form's text mentions is: the output
+        of the shared `aidlc_ids.py refs` (shared/aidlc-ids/README.md is its contract). The shared AidlcIds
+        script links every id in the page with a tooltip: a live jump when the id is a question or card on
+        this page (each carries data-aidlc-id), dotted when it is defined elsewhere, dashed when no
+        document defines it — a form without ids still gets every id-shaped word linked, as not defined.
+      records?: "https://github.com/<owner>/<repo>/blob/<branch>/" — the repository's web address at
+        the branch. With it, refs' path: targets, file paths in `code` and the questions file are real links
+        (ids keep the shared tooltip and toast).
     forms/<id>/questions/<qid>       {n: 1, text, ctx?, kind: "single"|"multi",
                                       options: [{k: "A", t: "…"}], other?: false,
-                                      proposed?: {k: "A", why: "…"}, hint?}
+                                      proposed?: {k: "A", why: "…"}, hint?, refs?, revNote?}
       qid: the file's question id (Q1, Q2 …). other defaults to true.
+      refs?: [{label, tip, target}] — what the question refers to, shown as links under it.
+        label is short (an id is fine here: "FR-3", "US2.1"); tip says in plain words what it is
+        (the tooltip, and all the reader gets when the target is not on this page).
+        target "#<qid>" — another question or card of this form: a live link that jumps there.
+        target "https://…" — opens in a new tab.
+        anything else ("path:src/app.ts", "story:US2.1", "") — the source isn't in this page: it
+        still looks like a link, shows tip as its tooltip, and a press says so.
+      revNote?: one line on why the question was added or changed (a follow-up), shown above it.
 
     Markdown the page renders (functions md and inline; nothing else):
       ctx (questions and cards) — blocks separated by a blank line. A block whose every line
@@ -24,37 +46,57 @@
         line is not a sub-item); any other block is a paragraph, its single line breaks kept.
         Inside both: `code` and **bold**.
       text, options[].t, proposed.why, proposed.t, hint, from, outcomes, boxes[].t/hint,
-        groups[].t/hint — `code` and **bold** only, no blocks or lists.
-      title, stage, file, intro — plain text.
+        groups[].t/hint, plain, action, revNote — `code` and **bold** only, no blocks or lists.
+      title, stage, file, intro, refs[].label/tip — plain text.
       Not rendered: •, –, numbered or nested lists, headings, links, _italic_; they show as
       literal text. A sentence before a list needs a blank line, or the list stays plain lines.
+      Linked by the page itself: every id in any rendered text (Q5, R-06, FR1.4, US2.1 …) becomes a
+      link with a tooltip (the shared AidlcIds script, from `ids`). A `code` span that is a file path
+      is shown as a file link. Terms get a tooltip.
 
     Text question — no options, only a text field (no Other):
-    forms/<id>/questions/<qid>       {n, text, ctx?, kind: "text", hint?, proposed?: {t: "…"}}
+    forms/<id>/questions/<qid>       {n, text, ctx?, kind: "text", hint?, proposed?: {t: "…"}, refs?}
       proposed.t is a suggested answer the developer can take with one press.
 
-    Board form — cards sorted into boxes instead of questions answered one by one:
+    Board form — a list of cards, each decided by pressing one of its boxes' buttons:
     forms/<id>                       {…, view: "board",
-                                      boxes: [{k: "fix", t: "…", hint?, tone?: "ink"|"accent"|"warn"|"muted"}]}
-      2–4 boxes, side by side when the page is wide enough, stacked when it is not.
-      groups?: [{k, t, hint?}] with boxes[].group, and boxes[].sink: true — a grouped board: the
-      groups side by side, each group's boxes stacked, sink boxes in a full row below. A card can
-      move only within its group or to a sink box; a card proposed into a sink box names its group
-      in `group` (card field), else it may go to any box.
-    forms/<id>/questions/<qid>       {n, text, ctx?, kind: "card", from?, group?, proposed: {k: "<box k>", why?},
-                                      outcomes?: {"<box k>": "what happens when the card sits here"}}
-      text is the card's short title; from is one line on who asked for what. A card starts
-      in its proposed box. On a grouped board the group alone decides where it can go, and
-      outcomes only describes; on a board without groups, outcomes (when present) limits the
-      boxes offered to its keys and the proposed box.
+                                      boxes: [{k: "fix", t: "…", hint?, tone?: "ink"|"accent"|"warn"|"muted",
+                                               note?: {required?: true, label?: "Why does this not apply?"}}],
+                                      groups?: [{k, t, hint?}]}
+      2–4 boxes. Each is a decision button on every card that may use it; `tone` colours it once chosen. Nothing is
+      chosen for the developer: a card has no answer until a button is pressed, and Done stays off until every card has
+      one. note.required: choosing this box needs a written reason (the note field opens, the card stays open until it
+      is written); label is the field's heading. groups: the sections of the list, in this order, each holding the cards
+      whose `group` is its k (a card with no group goes in an unlabelled section). With boxes[].group (and sink: true) a
+      card can only choose the boxes of its group, plus sink boxes and boxes with no group.
+    forms/<id>/questions/<qid>       {n, text, ctx?, kind: "card", from?, group?, proposed?: {k: "<box k>", why?},
+                                      outcomes?: {"<box k>": "what happens when the card sits here"},
+                                      severity?, blocking?, plain?, action?, detail?, refs?}
+      text is the card's short title; from is one line on who asked for what. proposed is the suggestion: it is marked
+      on the card and shown in its details, never selected. outcomes is shown inside each box's button (what happens, and
+      what it costs); on a board without grouped boxes it also limits the boxes offered to its keys and the proposed box.
+      severity?: a short word ("Critical", "Major", "Minor", "Nit", "Confirmed", "Possible", …), drawn as a coloured tag.
+      blocking?: a short text ("Blocks approval"), set when the card holds something up. It marks the card and enables the
+      bar's "<box> all blocking" button, which takes the suggestion on every undecided blocking card.
+      plain?: what the card means in plain words, shown in its details under its title.
+      action?: the suggested action, shown in bold in the suggestion box. refs?: as for questions.
+      detail?: ctx without what plain and action say; shown in place of ctx when the card has plain or action, so the
+        plain words are not said twice. ctx stays complete for older pages.
+      refs targets on a findings board: "#<qid>" another card (live); "doc:<where>", "path:<file>",
+        "finding:<closed id>" are not in the form (a link that says so).
+      The bulk buttons ("take the suggestion on the rest", "<box> all blocking") press the proposed box for undecided
+      cards; they never take a box that needs a reason or has tone "warn".
 
   What the page writes (the only thing an agent reads back, one `get` of forms/<id>):
 
     forms/<id>.answers[qid] = {k: ["A"] | ["A","C"] | ["X"], note: "…", at: ISO}
       text question: {k: [], note: "<the answer>"} · card: {k: ["<box k>"], note}
-      On Done every card is written, moved or not.
+      A card is written when the developer presses a decision (or takes the suggestion): there is no answer for a card
+      still undecided, and Done is off until every card has one (and every box with note.required its note).
     forms/<id>.status       = "done" when the developer presses Done; "open" again
                               after a later edit.   forms/<id>.savedAt = ISO of Done.
+    data/users/<viewer>/seen-<id>  {marks: {<qid>: <signature>}} — the viewer's own "seen" marks
+      (localStorage when the user capability is not served). Never read by the agent.
 
   Tag format when copying into the questions file:  A · A, C · X — each followed by
   " — <note>" when a note was written. A note is required for X, optional otherwise.
@@ -63,528 +105,1045 @@
   Link to a form: <artifact url>#<id>. No hash: the list of forms.
 -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
-/* Layout: one reading column. A form is a numbered list of sections; options are selectable rows,
-   the note sits under them, the proposal apart. A fixed bar carries save state and Done. */
+/* The same visual system as the approval-gates unit page (unit-gate.html): one reading column, a header
+   card with the form's facts, a sticky bar (filters, progress, save state, Done, a chip per question or
+   box), then the questions as cards, or the board. */
 :root {
-  --bg: #f2f4f7; --surface: #ffffff; --fg: #151b26; --muted: #5a6474; --line: #d6dce6;
-  --accent: #b06f0c; --accent-soft: #fbefd9; --ink: #24427a; --ink-soft: #e2e9f6;
-  --ok: #2c7a4f; --warn: #a63a2b; --warn-soft: #fbe6e2;
-  --display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
-  --body: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
-  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --bg: #F5F6F8; --surface: #FFFFFF; --raised: #F8F9FB; --fg: #171A21; --fg-2: #3D4350; --muted: #5A6170;
+  --line: #E4E7EC; --line-soft: #EEF0F3; --control: #D5D9E0; --field: #878E9B; --hover: #F7F8FA;
+  --accent: #2F49C4; --accent-strong: #1E3399; --accent-soft: #EEF1FB; --accent-tint: #F4F6FE;
+  --crit-bg: #FDE4E4; --crit-fg: #9B1C1C; --high-bg: #FDEAD7; --high-fg: #8A3B00;
+  --med-bg: #E3ECFB; --med-fg: #1E4A9A; --low-bg: #EEF0F3; --low-fg: #4A5160;
+  --ok-bg: #E6F4EA; --ok-fg: #1F6B36; --warn-bg: #FFF4DB; --warn-fg: #7A4B00; --warn-dot: #B26B00;
+  --r2-tint: #F8F5FE; --r2-bg: #EDE5FC; --r2-fg: #5B2FA8;
+  --band-bg: #171A21; --band-fg: #FFFFFF; --band-muted: #C9CDD6; --band-line: #171A21; --tip-bg: #171A21; --tip-fg: #FFFFFF; --tip-line: #171A21; --on-accent: #FFFFFF;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --bar-h: 120px;
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
-  --bg: #10141b; --surface: #181e28; --fg: #e5e9f0; --muted: #98a2b3; --line: #2b3442;
-  --accent: #eab062; --accent-soft: #3a2b14; --ink: #8fb0ec; --ink-soft: #1d2a42;
-  --ok: #6cc28f; --warn: #ef8f7c; --warn-soft: #3d221d; color-scheme: dark } }
+  --bg: #111318; --surface: #1A1D24; --raised: #20232B; --fg: #E6E8EE; --fg-2: #C3C8D2; --muted: #9AA1AF;
+  --line: #2A2E38; --line-soft: #22262F; --control: #3A3F4B; --field: #6E7585; --hover: #20242C;
+  --accent: #8FA2FF; --accent-strong: #B5C2FF; --accent-soft: #222B4D; --accent-tint: #1B2035;
+  --crit-bg: #3D1D1D; --crit-fg: #F4A4A4; --high-bg: #3A2614; --high-fg: #F2B27A;
+  --med-bg: #1C2A45; --med-fg: #9DBBF2; --low-bg: #262A33; --low-fg: #AEB4C0;
+  --ok-bg: #183024; --ok-fg: #8FD3A6; --warn-bg: #3A2C12; --warn-fg: #F0C36B; --warn-dot: #F0A93B;
+  --r2-tint: #1E1A2B; --r2-bg: #2E2547; --r2-fg: #C7B1F5;
+  --band-bg: #252A34; --band-fg: #E6E8EE; --band-muted: #C3C8D2; --band-line: #343946; --tip-bg: #2B303B; --tip-fg: #E6E8EE; --tip-line: #3A3F4B; --on-accent: #111318;
+  color-scheme: dark } }
 :root[data-theme="dark"] {
-  --bg: #10141b; --surface: #181e28; --fg: #e5e9f0; --muted: #98a2b3; --line: #2b3442;
-  --accent: #eab062; --accent-soft: #3a2b14; --ink: #8fb0ec; --ink-soft: #1d2a42;
-  --ok: #6cc28f; --warn: #ef8f7c; --warn-soft: #3d221d; color-scheme: dark }
+  --bg: #111318; --surface: #1A1D24; --raised: #20232B; --fg: #E6E8EE; --fg-2: #C3C8D2; --muted: #9AA1AF;
+  --line: #2A2E38; --line-soft: #22262F; --control: #3A3F4B; --field: #6E7585; --hover: #20242C;
+  --accent: #8FA2FF; --accent-strong: #B5C2FF; --accent-soft: #222B4D; --accent-tint: #1B2035;
+  --crit-bg: #3D1D1D; --crit-fg: #F4A4A4; --high-bg: #3A2614; --high-fg: #F2B27A;
+  --med-bg: #1C2A45; --med-fg: #9DBBF2; --low-bg: #262A33; --low-fg: #AEB4C0;
+  --ok-bg: #183024; --ok-fg: #8FD3A6; --warn-bg: #3A2C12; --warn-fg: #F0C36B; --warn-dot: #F0A93B;
+  --r2-tint: #1E1A2B; --r2-bg: #2E2547; --r2-fg: #C7B1F5;
+  --band-bg: #252A34; --band-fg: #E6E8EE; --band-muted: #C3C8D2; --band-line: #343946; --tip-bg: #2B303B; --tip-fg: #E6E8EE; --tip-line: #3A3F4B; --on-accent: #111318;
+  color-scheme: dark }
 
-body { background: var(--bg); color: var(--fg); font: 15px/1.55 var(--body); padding: 0 16px; }
-main { max-width: 760px; margin: 0 auto; padding-block: 36px 140px; display: grid; gap: 36px; }
-header { display: grid; gap: 8px; }
-.eyebrow { font: 500 12px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-.eyebrow a { color: inherit; text-decoration: none; }
-.eyebrow a:hover { text-decoration: underline; }
-h1 { font: 700 clamp(28px, 5vw, 38px)/1.1 var(--display); margin: 0; text-wrap: balance; }
-.lede { color: var(--muted); margin: 0; max-width: 62ch; }
-.meta { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; color: var(--muted); font-size: 14px; min-width: 0; }
-.file { font: 500 12.5px var(--mono); background: var(--ink-soft); color: var(--ink); padding: 4px 8px; border-radius: 4px; max-width: 100%; overflow-wrap: anywhere; }
-.pill { font: 500 12px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; padding: 5px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
-.pill.done { color: var(--ok); border-color: var(--ok); }
-.pill.open { color: var(--accent); border-color: var(--accent); }
+* { box-sizing: border-box; }
+html { overflow-x: hidden; }
+body { background: var(--bg); color: var(--fg); font: 14px/1.5 var(--body); margin: 0; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+[hidden] { display: none !important; }
+a { color: var(--accent); }
+a:hover { color: var(--accent-strong); }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, a:focus-visible, textarea:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mono { font-family: var(--mono); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.num { font-variant-numeric: tabular-nums; }
+.wrap { width: 100%; max-width: 920px; margin: 0 auto; padding-block: 24px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 16px; }
+#app { display: flex; flex-direction: column; gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
 
-#list { display: grid; gap: 10px; }
-.row { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; align-items: center; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; color: inherit; text-decoration: none; }
-.row:hover { border-color: var(--ink); }
-.row b { font: 600 17px/1.3 var(--display); }
-.row small { color: var(--muted); display: block; margin-top: 2px; }
-.row .pill { justify-self: end; }
-.empty { padding: 20px; border: 1px dashed var(--line); border-radius: 8px; color: var(--muted); display: grid; gap: 8px; max-width: 66ch; }
-.empty p { margin: 0; }
+/* header */
+.head { display: flex; flex-direction: column; gap: 14px; padding: 20px 24px; }
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--muted); font-size: 13px; min-width: 0; }
+.crumbs a { color: inherit; text-decoration: none; } .crumbs a:hover { text-decoration: underline; }
+.status { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 2px 10px; border-radius: 13px; background: var(--warn-bg); color: var(--warn-fg); font-weight: 500; }
+.status i { width: 7px; height: 7px; border-radius: 4px; background: var(--warn-dot); }
+.status.done { background: var(--ok-bg); color: var(--ok-fg); } .status.done i { background: var(--ok-fg); }
+.titlerow { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px 32px; }
+.titlerow > div:first-child { flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.25; text-wrap: balance; overflow-wrap: anywhere; }
+.lede { margin: 0; color: var(--fg-2); line-height: 1.55; max-width: 76ch; }
+.facts { display: flex; flex-wrap: wrap; gap: 10px; }
+.fact { display: flex; flex-direction: column; gap: 2px; padding: 8px 14px; border-radius: 8px; background: var(--bg); min-width: 96px; }
+.fact span { font-size: 12px; color: var(--muted); } .fact b { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.source { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border-radius: 8px; background: var(--raised); font-size: 13px; color: var(--fg-2); min-width: 0; }
+.source .ref { white-space: normal; overflow-wrap: anywhere; text-align: left; }
 
-#questions { display: grid; gap: 44px; }
-section.q { display: grid; gap: 14px; scroll-margin-top: 24px; }
-.qhead { display: flex; gap: 12px; align-items: baseline; }
-.qid { font: 500 13px/1 var(--mono); color: var(--ink); background: var(--ink-soft); padding: 5px 8px; border-radius: 4px; flex: none; }
-h2 { font: 600 22px/1.25 var(--display); margin: 0; text-wrap: balance; min-width: 0; }
-.ctx { display: grid; gap: 10px; max-width: 66ch; }
+/* sticky bar */
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 8; display: flex; flex-direction: column; gap: 10px; padding: 10px 14px; background: color-mix(in srgb, var(--surface) 96%, transparent); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 2px 8px rgba(23, 26, 33, .06); backdrop-filter: blur(6px); }
+.barrow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.filters { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.pill { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid var(--control); background: var(--surface); font-weight: 500; }
+.pill b { font-family: var(--mono); font-weight: 500; font-size: 12px; opacity: .8; }
+.pill[aria-pressed="true"] { background: var(--fg); color: var(--surface); border-color: var(--fg); }
+.tools { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.progress { display: inline-flex; align-items: center; gap: 10px; font-size: 13px; color: var(--fg-2); }
+.meter { width: 100px; height: 6px; border-radius: 3px; background: var(--line-soft); overflow: hidden; display: block; }
+.meter i { display: block; height: 6px; background: var(--accent); transition: width .2s; }
+.btn { height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--control); background: var(--surface); }
+.btn:hover, .pill:hover { border-color: var(--accent); }
+.primary { height: 32px; padding: 0 16px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+.primary:disabled { opacity: .55; cursor: default; }
+.primary.is-done { background: var(--ok-fg); border-color: var(--ok-fg); }
+.save { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 2px 10px; border-radius: 13px; font-size: 12px; font-weight: 500; background: var(--line-soft); color: var(--fg-2); white-space: nowrap; }
+.save i { width: 7px; height: 7px; border-radius: 4px; background: var(--muted); flex: none; }
+.save.ok { background: var(--ok-bg); color: var(--ok-fg); } .save.ok i { background: var(--ok-fg); }
+.save.busy { background: var(--accent-soft); color: var(--accent); } .save.busy i { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+.save.fail { background: var(--crit-bg); color: var(--crit-fg); } .save.fail i { background: var(--crit-fg); }
+.save button { border: 0; background: transparent; padding: 0 0 0 4px; font-weight: 600; text-decoration: underline; color: inherit; }
+@keyframes pulse { 50% { opacity: .35; } }
+.barmsg { font-size: 13px; padding: 8px 10px; border-radius: 6px; background: var(--warn-bg); color: var(--warn-fg); display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.barmsg.crit { background: var(--crit-bg); color: var(--crit-fg); }
+.barmsg button { border: 0; background: transparent; padding: 0; font-weight: 600; text-decoration: underline; color: inherit; }
+.chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
+.chip { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border-radius: 16px; border: 1px solid var(--control); background: var(--surface); color: var(--fg); text-decoration: none; font-size: 13px; white-space: nowrap; }
+.chip:hover { border-color: var(--accent); color: var(--fg); }
+.chip .count { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.chip .st { width: 8px; height: 8px; border-radius: 4px; border: 1.5px solid var(--control); flex: none; }
+.chip.ans .st { background: var(--ok-fg); border-color: var(--ok-fg); }
+.chip.need .st { background: var(--crit-fg); border-color: var(--crit-fg); }
+.chip.fresh { border-color: var(--r2-fg); }
+.chip .sw { width: 8px; height: 8px; border-radius: 2px; background: var(--tone); flex: none; }
+.chip.dim { opacity: .45; }
+.tag { display: inline-flex; align-items: center; gap: 5px; height: 22px; font-size: 11px; font-weight: 600; padding: 0 7px; border-radius: 4px; white-space: nowrap; border: 0; letter-spacing: .02em; }
+.tag.open { background: var(--low-bg); color: var(--low-fg); }
+.tag.ans { background: var(--ok-bg); color: var(--ok-fg); }
+.tag.need { background: var(--crit-bg); color: var(--crit-fg); }
+.tag.differs { background: var(--warn-bg); color: var(--warn-fg); }
+.tag.fresh { background: var(--r2-bg); color: var(--r2-fg); }
+button.tag:hover { filter: brightness(.96); }
+
+/* links: a live jump, an external page, or a source that is not on this page */
+.ref { position: relative; display: inline-flex; align-items: center; gap: 4px; min-height: 22px; padding: 0 6px; border-radius: 5px; background: var(--accent-soft); color: var(--accent); font-family: var(--mono); font-size: 12px; text-decoration: none; white-space: nowrap; vertical-align: baseline; }
+.ref:hover { color: var(--accent-strong); filter: brightness(.97); }
+.ref.off { background: transparent; border: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent); }
+.ref.off::after { content: "↗"; font-size: 10px; opacity: .7; }
+.ref.code { font-weight: 500; }
+.term { text-decoration: underline dotted color-mix(in srgb, var(--fg) 45%, transparent); text-underline-offset: 3px; cursor: help; border-radius: 2px; }
+.refs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.refs > span { font-size: 12px; color: var(--muted); }
+#tip { position: fixed; z-index: 30; max-width: min(340px, calc(100vw - 24px)); padding: 8px 10px; border-radius: 6px; background: var(--tip-bg); color: var(--tip-fg); border: 1px solid var(--tip-line); font: 12px/1.45 var(--body); pointer-events: none; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
+#tip b { font-family: var(--mono); font-weight: 500; }
+#toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); max-width: calc(100vw - 32px); background: var(--tip-bg); color: var(--tip-fg); border: 1px solid var(--tip-line); padding: 8px 14px; border-radius: 8px; font-size: 13px; z-index: 31; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
+.flash { animation: flash 1.6s ease-out; }
+@keyframes flash { 0% { box-shadow: 0 0 0 3px var(--accent); background-color: var(--accent-tint); } 100% { box-shadow: 0 0 0 0 transparent; } }
+
+/* the list of forms */
+.list h2 { margin: 0; padding: 16px 16px 8px; font-size: 15px; font-weight: 600; }
+.lbar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+.search { flex: 1 1 220px; height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--field); background: var(--surface); color: var(--fg); font: inherit; }
+.lrow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 10px 16px; border-top: 1px solid var(--line-soft); color: var(--fg); text-decoration: none; }
+.lrow:hover { background: var(--hover); color: var(--fg); }
+.lrow > span:first-child { flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; }
+.lrow b { font-weight: 500; overflow-wrap: anywhere; } .lrow small { color: var(--muted); }
+.msg { padding: 28px 24px; display: flex; flex-direction: column; gap: 6px; }
+.msg p { margin: 0; color: var(--fg-2); max-width: 70ch; }
+.empty { margin: 0; padding: 14px 16px; color: var(--muted); }
+
+/* questions */
+#questions { display: flex; flex-direction: column; gap: 14px; }
+section.q { display: flex; flex-direction: column; gap: 14px; padding: 18px 20px 20px; scroll-margin-top: calc(var(--bar-h) + 16px); }
+section.q.is-ans { border-color: color-mix(in srgb, var(--ok-fg) 28%, var(--line)); }
+section.q.needs-note { border-color: var(--crit-fg); }
+section.q.filtered { display: none; }
+.qhead { display: flex; gap: 12px; align-items: flex-start; }
+.qid { flex: none; font: 500 12px/1 var(--mono); color: var(--fg-2); background: var(--line-soft); padding: 6px 8px; border-radius: 5px; margin-top: 1px; }
+h2 { flex: 1; margin: 0; font-size: 17px; font-weight: 600; line-height: 1.35; text-wrap: balance; min-width: 0; overflow-wrap: anywhere; }
+.qtags { flex: none; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 46%; }
+.revnote { margin: 0; padding: 8px 10px; border-radius: 6px; background: var(--r2-tint); color: var(--r2-fg); font-size: 13px; line-height: 1.5; }
+.qbody { display: flex; flex-direction: column; gap: 14px; padding-left: 46px; }
+.ctx { display: flex; flex-direction: column; gap: 10px; max-width: 72ch; color: var(--fg); line-height: 1.6; }
 .ctx p, .ctx ul { margin: 0; }
-.ctx ul { padding-left: 20px; display: grid; gap: 6px; }
-code { font: 500 13px var(--mono); background: var(--ink-soft); padding: 1px 5px; border-radius: 3px; }
-.hint { color: var(--muted); font-size: 14px; margin: 0; }
-.options { display: grid; gap: 8px; }
-.opt { display: grid; grid-template-columns: 22px 1fr; gap: 12px; padding: 13px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
-.opt > span { min-width: 0; }
-.opt:hover { border-color: var(--ink); }
-.opt:has(input:checked) { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
-.opt input { margin: 3px 0 0; accent-color: var(--ink); width: 16px; height: 16px; }
-.opt input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.optletter { font: 500 13px var(--mono); color: var(--muted); margin-right: 6px; }
-.note { display: grid; gap: 6px; }
-.note label { font-size: 13px; color: var(--muted); display: flex; gap: 8px; align-items: baseline; }
-.note label b { font: 500 11px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
-textarea { width: 100%; box-sizing: border-box; min-height: 56px; font: inherit; color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; resize: vertical; }
-textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-section.q.needs-note textarea { border-color: var(--warn); }
-section.q.needs-note .note label { color: var(--warn); }
-.proposal { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--accent-soft); border-radius: 8px; }
-.proposal p { margin: 0; flex: 1 1 320px; min-width: 0; font-size: 14px; }
-.proposal b { font: 500 12px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--accent); margin-right: 6px; }
-button { font: 600 14px var(--body); border-radius: 6px; cursor: pointer; }
-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.use { background: transparent; color: var(--fg); border: 1px solid var(--accent); padding: 6px 12px; }
+.ctx ul { padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+code { font: 500 12.5px var(--mono); background: var(--line-soft); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+.hint { color: var(--muted); font-size: 13px; margin: 0; }
+.options { display: flex; flex-direction: column; gap: 6px; }
+.opt { display: flex; align-items: flex-start; gap: 12px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--field); border-radius: 8px; cursor: pointer; transition: border-color .12s, background .12s; }
+.opt:hover { border-color: var(--accent); background: var(--hover); }
+.opt:has(input:checked) { border-color: var(--accent); background: var(--accent-tint); box-shadow: inset 0 0 0 1px var(--accent); }
+.opt:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.opt input { margin: 3px 0 0; accent-color: var(--accent); width: 16px; height: 16px; flex: none; }
+.opt input:focus-visible { outline: none; }
+.opt > span { min-width: 0; flex: 1; display: flex; gap: 10px; }
+.optletter { flex: none; font: 500 12px/20px var(--mono); color: var(--muted); min-width: 14px; }
+.opt:has(input:checked) .optletter { color: var(--accent); }
+.opt .ptag { flex: none; align-self: center; }
+.note { display: flex; flex-direction: column; gap: 4px; }
+.note label { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+.note label b { color: var(--fg-2); font-weight: 600; }
+.qsave { margin-left: auto; font-size: 12px; color: var(--muted); min-height: 18px; }
+.qsave.ok { color: var(--ok-fg); } .qsave.fail { color: var(--crit-fg); font-weight: 500; }
+textarea { width: 100%; min-height: 56px; font: inherit; font-size: 14px; color: var(--fg); background: var(--surface); border: 1px solid var(--field); border-radius: 6px; padding: 8px 10px; resize: vertical; }
+textarea:hover { border-color: var(--accent); }
+section.q.needs-note textarea { border-color: var(--crit-fg); }
+section.q.needs-note .note label { color: var(--crit-fg); }
+.proposal { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; padding: 12px 14px; background: var(--accent-tint); border: 1px solid var(--accent-soft); border-radius: 8px; }
+.proposal p { margin: 0; flex: 1 1 320px; min-width: 0; font-size: 13.5px; line-height: 1.55; }
+.proposal .tag { background: var(--accent-soft); color: var(--accent); margin-right: 8px; vertical-align: 1px; }
+.use { height: 32px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--accent); background: var(--surface); color: var(--accent); font-weight: 600; }
+.use:hover { background: var(--accent-soft); }
+.use[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
 
-.bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--line); padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); }
-.barin { max-width: 760px; margin: 0 auto; display: flex; gap: 10px 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
-#status { color: var(--muted); font-size: 14px; min-width: 0; flex: 1 1 240px; }
-#status.ok { color: var(--ok); }
-#status.warn { color: var(--warn); }
-.actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.done { background: var(--ink); color: var(--surface); border: 0; padding: 10px 20px; }
-.done:disabled { opacity: .5; cursor: default; }
-.done.is-done { background: var(--ok); }
-.bar[hidden] { display: none; }
+.band { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 14px 18px; border-radius: 12px; background: var(--band-bg); color: var(--band-fg); border: 1px solid var(--band-line); }
+.band span { color: var(--band-muted); flex: 1 1 260px; } .band b { font-weight: 500; }
+.band .primary.is-done { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-bg); }
 
-/* Board: boxes side by side when the column is wide enough, stacked otherwise. */
-main { container-type: inline-size; }
-body.wide main, body.wide .barin { max-width: 1320px; }
-.board { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
-@container (min-width: 980px) { .board { grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); align-items: stretch; } }
-.box { --tone: var(--ink); background: var(--surface); border: 1px solid var(--line); border-top: 3px solid var(--tone); border-radius: 10px; display: grid; grid-template-rows: auto 1fr; min-width: 0; }
-.box.tone-accent { --tone: var(--accent); }
-.box.tone-warn { --tone: var(--warn); }
-.box.tone-muted { --tone: var(--muted); }
-.box.over { box-shadow: 0 0 0 2px var(--tone); }
-.boxhead { padding: 12px 14px 10px; border-bottom: 1px solid var(--line); display: grid; gap: 4px; }
-.boxhead h3 { font: 600 17px/1.25 var(--display); margin: 0; display: flex; justify-content: flex-start; gap: 10px; align-items: baseline; }
-.boxhead .count { font: 500 12px var(--mono); color: var(--tone); }
-.boxhead p { margin: 0; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cards { display: grid; gap: 10px; padding: 12px; align-content: start; min-height: 72px; }
-.cards:empty { border: 1px dashed var(--line); border-radius: 8px; margin: 12px; padding: 0; }
-.card { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: grid; gap: 8px; min-width: 0; }
-.card[draggable="true"] { cursor: grab; }
-.card.dragging { opacity: .45; }
-.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.chead { display: flex; gap: 10px; align-items: baseline; }
-.chead .qid { font-size: 12px; padding: 3px 6px; }
-.ctitle { font: 600 15px/1.35 var(--body); margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.card p { margin: 0; font-size: 13.5px; }
-.card .from { color: var(--muted); }
-.card .outcome { border-left: 3px solid var(--tone, var(--ink)); padding-left: 8px; }
-.card .outcome:empty, .card .sugg:empty { display: none; }
-.card .sugg { color: var(--muted); font-size: 13px; }
-.card .sugg b { font: 500 11px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--accent); margin-right: 4px; }
-.card.moved .sugg b { color: var(--muted); }
-/* Cards are compact: id, title, expand button and one row of move buttons. Details open per card
-   or all at once from the bar; an open card that is wide enough puts its details in two columns. */
-.card { container-type: inline-size; gap: 10px; padding: 12px 14px; }
-.chead { align-items: center; }
-.ctitle { flex: 1 1 auto; font-size: 14.5px; }
-.cflag { flex: none; font: 500 11px/1 var(--mono); color: var(--muted); }
-.cexp { flex: none; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--muted); }
-.cexp:hover { color: var(--fg); border-color: var(--line); }
+/* Board: one list of cards. A card is open until it has its decision, then folds to one line. */
+.blist { display: flex; flex-direction: column; gap: 14px; }
+.bgroup { display: flex; flex-direction: column; gap: 10px; }
+.bghead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 6px 2px 0; }
+.bghead.plain-head { padding: 0; }
+.bghead h3 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.bghead span { font-size: 13px; color: var(--muted); }
+.bghead .grow-sp { flex: 1; }
+.blink { border: 0; background: none; padding: 4px 0; font-size: 13px; font-weight: 500; color: var(--accent); }
+.blink:hover { color: var(--accent-strong); text-decoration: underline; }
+.bcards { display: flex; flex-direction: column; gap: 10px; }
+.fcard { container-type: inline-size; background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--rail, var(--control)); border-radius: 10px; display: flex; flex-direction: column; min-width: 0; scroll-margin-top: calc(var(--bar-h) + 16px); }
+.fcard.blocking { --rail: var(--crit-fg); }
+.fcard.ans { --rail: var(--ok-fg); }
+.fcard.needs-note { --rail: var(--crit-fg); }
+.fcard.filtered { display: none; }
+.fcard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 8px 12px 8px 4px; cursor: pointer; }
+.cexp { flex: none; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--muted); }
+.cexp:hover { color: var(--fg); border-color: var(--control); }
 .cexp svg { transition: transform .15s; }
-.card.open .cexp svg { transform: rotate(180deg); }
-.cdetail { display: none; }
-.card.open .cdetail { display: block; border-top: 1px solid var(--line); padding-top: 10px; }
-.cin { display: grid; gap: 8px; }
-.cmain, .cside { display: grid; gap: 8px; align-content: start; min-width: 0; }
-.cmain .ctx { font-size: 14px; }
-.addnote { justify-self: start; background: none; border: 0; padding: 0; font: 500 13px var(--body); color: var(--ink); cursor: pointer; }
-.card.noting .addnote { display: none; }
+.fcard.ans:not(.open) .cexp svg { transform: rotate(-90deg); }
+.chead .qid { margin: 0; font-size: 11.5px; padding: 4px 6px; }
+.sev { flex: none; display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 4px; font-size: 11px; font-weight: 600; letter-spacing: .02em; background: var(--low-bg); color: var(--low-fg); }
+.sev.crit { background: var(--crit-bg); color: var(--crit-fg); } .sev.high { background: var(--high-bg); color: var(--high-fg); } .sev.med { background: var(--med-bg); color: var(--med-fg); }
+.ctitle { flex: 1 1 240px; min-width: 0; margin: 0; font-size: 15px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.fcard.ans:not(.open) .chead { flex-wrap: nowrap; }
+.fcard.ans:not(.open) .ctitle { flex-basis: 0; font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fcard.ans:not(.open) .blk { display: none; }
+.blk { flex: none; font-size: 12px; font-weight: 600; color: var(--crit-fg); }
+.rowstate { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+.dpill { flex: none; font-size: 11.5px; font-weight: 600; height: 24px; padding: 0 9px; border-radius: 5px; display: inline-flex; align-items: center; background: var(--accent-soft); color: var(--accent); }
+.dpill.tone-muted { background: var(--low-bg); color: var(--fg-2); } .dpill.tone-warn { background: var(--crit-bg); color: var(--crit-fg); } .dpill.tone-accent { background: var(--r2-bg); color: var(--r2-fg); }
+.diff { font-size: 11.5px; color: var(--warn-fg); background: var(--warn-bg); border-radius: 4px; padding: 2px 7px; white-space: nowrap; }
+.notetag { font-size: 11px; font-weight: 600; height: 22px; padding: 0 7px; border-radius: 4px; background: var(--low-bg); color: var(--fg-2); display: inline-flex; align-items: center; }
+.cbody { display: none; flex-direction: column; gap: 10px; padding: 0 16px 14px 42px; min-width: 0; }
+.fcard.open .cbody { display: flex; }
+.fcard .plain { margin: 0; font-size: 14px; color: var(--fg-2); }
+.fcard .from { margin: 0; color: var(--muted); font-size: 12.5px; }
+.cbody .ctx { font-size: 13.5px; }
+.sugg { background: var(--accent-tint); border-radius: 8px; padding: 9px 12px; display: flex; flex-direction: column; gap: 2px; }
+.sugg small { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); }
+.sugg strong { font-weight: 600; }
+.sugg em { font-style: normal; font-size: 12.5px; color: var(--muted); }
+.decide { display: grid; grid-template-columns: repeat(var(--n, 3), minmax(0, 1fr)); gap: 1px; border: 1px solid var(--control); border-radius: 10px; overflow: hidden; background: var(--control); }
+.dopt { min-height: 44px; border: 0; background: var(--raised); color: var(--fg-2); padding: 8px 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; text-align: center; font-size: 14px; }
+.dopt:hover { background: var(--hover); color: var(--fg); }
+.dopt b { font-weight: 500; }
+.dopt i { font-style: normal; font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); }
+.dopt span { font-size: 12px; color: var(--muted); line-height: 1.35; }
+.dopt.sg:not(.on) { outline: 2px dashed var(--accent); outline-offset: -4px; }
+.dopt.on { font-weight: 600; }
+.dopt.on b { font-weight: 600; }
+.dopt.on i, .dopt.on span { color: inherit; opacity: .85; }
+.dopt.on.tone-ink { background: var(--accent); color: var(--on-accent); }
+.dopt.on.tone-muted { background: var(--fg-2); color: var(--surface); }
+.dopt.on.tone-warn { background: var(--crit-fg); color: var(--surface); }
+.dopt.on.tone-accent { background: var(--r2-fg); color: var(--surface); }
+@container (max-width: 560px) { .decide.has-oc { grid-template-columns: minmax(0, 1fr); } .dopt { align-items: flex-start; text-align: left; } }
+.addnote { justify-self: start; align-self: flex-start; background: none; border: 0; padding: 6px 0; min-height: 32px; font-size: 13px; font-weight: 500; color: var(--accent); }
+.fcard.noting .addnote { display: none; }
 .cnote { display: none; }
-.card.noting .cnote { display: grid; }
-@container (min-width: 560px) { .cin { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 8px 20px; } }
-.allbtn { background: transparent; color: var(--fg); border: 1px solid var(--line); padding: 9px 14px; }
-.allbtn:hover { border-color: var(--ink); }
-.allbtn[hidden] { display: none; }
+.fcard.noting .cnote { display: flex; }
+.fcard.needs-note textarea { border-color: var(--crit-fg); }
+.fcard.needs-note .nlabel, .fcard.needs-note .nhint { color: var(--crit-fg); }
 
-/* Grouped board: one container for the groups, split by a divider, each group a small title; a
-   group's boxes are sections split by a line, each tinted with its own tone. Sink boxes get a row
-   below. */
-.gboard { display: grid; gap: 16px; }
-.grow { display: grid; gap: 0; grid-template-columns: minmax(0, 1fr); align-items: stretch; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface); }
-@container (min-width: 720px) { .grow { grid-template-columns: repeat(var(--g, 2), minmax(0, 1fr)); } .group + .group { border-top: 0; border-left: 1px solid var(--line); } }
-.group { background: var(--surface); display: grid; gap: 0; align-content: start; min-width: 0; grid-template-rows: auto; }
-@container (max-width: 719.98px) { .group + .group { border-top: 1px solid var(--line); } }
-/* Title and hint each keep to one line, so every group's header has the same height and the sections line up. */
-.ghead { display: grid; gap: 2px; padding: 12px 18px 10px; border-bottom: 1px solid var(--line); min-width: 0; }
-.ghead h3 { font: 600 12.5px/1.3 var(--body); margin: 0; color: var(--muted); }
-.ghead h3, .ghead p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ghead p { margin: 0; font-size: 12px; color: var(--muted); }
-.gboxes { display: grid; gap: 0; }
-.group .box { --box-bg: color-mix(in srgb, var(--tone) 6%, var(--surface)); background: var(--box-bg); border: 0; border-radius: 0; }
-.group .box.tone-accent { --box-bg: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
-.group .box.tone-warn { --box-bg: color-mix(in srgb, var(--warn) 11%, var(--surface)); }
-.group .box + .box { border-top: 1px solid var(--line); }
-.group .boxhead { border-bottom: 0; padding: 14px 18px 4px; }
-.group .boxhead p { padding-left: 16px; }
-.group .boxhead h3 > span:first-child::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--tone); margin-right: 8px; vertical-align: 2px; }
-.group .cards { padding: 8px 18px 18px; gap: 10px; }
-.group .card { background: var(--surface); }
-.box.sink { border-top-style: dashed; position: relative; }
-/* The handle on the sink's top edge exists only on a wide window (see the media block below). */
-.sinkgrip { display: none; }
-body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none; }
-.box.sink .cards { padding: 10px 18px 18px; gap: 12px; }
-.box.sink .cards { grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
-  /* one row of cards and a quarter of the next, so it is plain that the box scrolls (set by sizeSinks) */
-  max-height: var(--sink-max, 130px); overflow-y: auto; scrollbar-gutter: stable; }
-.box.sink .cards, body.wide .box .cards {
-  /* scroll shadows: a soft edge appears only where there is more to scroll */
-  background:
-    linear-gradient(var(--box-bg, var(--surface)) 30%, transparent) center top,
-    linear-gradient(transparent, var(--box-bg, var(--surface)) 70%) center bottom,
-    radial-gradient(farthest-side at 50% 0, color-mix(in srgb, var(--fg) 16%, transparent), transparent) center top,
-    radial-gradient(farthest-side at 50% 100%, color-mix(in srgb, var(--fg) 16%, transparent), transparent) center bottom;
-  background-repeat: no-repeat; background-size: 100% 28px, 100% 28px, 100% 10px, 100% 10px;
-  background-attachment: local, local, scroll, scroll; }
-.box.no-drop { opacity: .4; }
-
-/* On a window wide and tall enough, the page scrolls only until the header is gone: the board is
-   exactly as tall as the screen above the bar, so at the end of the page it fills it, and from
-   there each box scrolls on its own. The sink row is one row of cards and a quarter; the groups take the rest.
-   Phones scroll the page as usual. */
-@media (min-width: 760px) and (min-height: 560px) {
-  body.wide main { padding-block: 20px 80px; gap: 16px; }
-  body.wide header { gap: 6px; }
-  body.wide h1 { font-size: clamp(24px, 3vw, 30px); }
-  body.wide #questions { height: calc(100dvh - 100px); min-height: 360px; }
-  body.wide .board { height: 100%; min-height: 0; align-items: stretch; }
-  body.wide .gboard { height: 100%; min-height: 0; grid-template-rows: minmax(0, 1fr) auto; gap: 12px; }
-  body.wide .grow { min-height: 0; height: 100%; align-items: stretch; }
-  body.wide .group { min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
-  body.wide .gboxes { min-height: 0; grid-auto-rows: minmax(0, 1fr); }
-  body.wide .box { min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
-  body.wide .box.sink .boxhead { padding: 12px 18px 8px; }
-  body.wide .sinkgrip { display: block; position: absolute; left: 0; right: 0; top: -9px; height: 16px; cursor: ns-resize; z-index: 1; touch-action: none; }
-  body.wide .sinkgrip::after { content: ""; position: absolute; left: 50%; top: 6px; width: 48px; height: 4px; margin-left: -24px; border-radius: 2px; background: var(--line); transition: background .15s; }
-  body.wide .sinkgrip:hover::after, body.wide .sinkgrip:focus-visible::after, body.resizing .sinkgrip::after { background: var(--muted); }
-  body.wide .sinkgrip:focus-visible { outline: none; }
-  body.wide .boxhead h3 { font-size: 15px; }
-  body.wide .boxhead p { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  body.wide .box .cards { min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
-  body.wide .box .cards:empty { min-height: 48px; }
+/* touch: every control at least 44px tall */
+@media (pointer: coarse) {
+  .pill, .btn, .chip, .primary, .use, .search, .blink { min-height: 44px; }
+  .cexp { width: 44px; height: 44px; }
+  .dopt { min-height: 48px; }
+  button.tag, .save button { min-height: 32px; padding-inline: 10px; }
+  .opt { padding-block: 12px; }
 }
-.moves { display: flex; flex-wrap: wrap; gap: 6px; }
-.move { background: transparent; color: var(--muted); border: 1px solid var(--line); padding: 4px 9px; font: 500 12.5px var(--body); }
-.move:hover { border-color: var(--ink); color: var(--fg); }
-.box.tone-ink .card { --tone: var(--ink); } .box.tone-accent .card { --tone: var(--accent); }
-.box.tone-warn .card { --tone: var(--warn); } .box.tone-muted .card { --tone: var(--muted); }
-@media (prefers-reduced-motion: no-preference) { .opt, .row, .box { transition: border-color .15s, box-shadow .15s; } }
+/* a short window (a phone on its side, or zoomed in): the bar scrolls away instead of covering the page */
+@media (max-height: 520px) { .bar { position: static; } }
+@media (max-width: 767px) {
+  .head { padding: 16px; }
+  section.q { padding: 16px; }
+  .qbody { padding-left: 0; }
+  /* the tags sit under the title, aligned with it, not under the id */
+  .qhead { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 12px; }
+  .qtags { grid-column: 2; max-width: none; justify-content: flex-start; }
+  .qtags:not(:has(.tag)) { display: none; }
+  .tools { margin-left: 0; width: 100%; }
+  .tools .grow-sp { flex: 1; }
+  .meter { width: 64px; }
+  .wide-only { display: none; }
+}
+/* aidlc-ids.css:begin */
+/* Shared: the canonical copy is shared/aidlc-ids/aidlc-ids.css; scripts/sync-shared.py copies it into every page.
+   It uses the page's own tokens: --accent, --muted, --tip-bg (each page defines them). */
+a.aidlc-id { color: var(--accent, currentColor); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; cursor: pointer; white-space: nowrap; font-variant-numeric: tabular-nums; }
+a.aidlc-id:hover, a.aidlc-id:focus-visible { text-decoration-thickness: 2px; }
+a.aidlc-id.aidlc-id-out { text-decoration-style: dotted; }
+a.aidlc-id.aidlc-id-unknown { color: var(--muted, currentColor); text-decoration-style: dashed; }
+a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outline-offset: 2px; border-radius: 3px; }
+[data-aidlc-id] { scroll-margin-top: 96px; }
+@keyframes aidlc-flash { from { box-shadow: 0 0 0 3px var(--accent, #3b82f6); } to { box-shadow: 0 0 0 3px transparent; } }
+.aidlc-flash { animation: aidlc-flash 1.6s ease-out; border-radius: 6px; }
+@media (prefers-reduced-motion: reduce) { .aidlc-flash { animation: none; outline: 2px solid var(--accent, #3b82f6); } }
+/* aidlc-ids.css:end */
 </style>
 
-<main>
-  <header id="head">
-    <span class="eyebrow"><a href="#" id="home">AI-DLC · question forms</a></span>
-    <h1 id="title">Question forms</h1>
-    <p class="lede" id="lede">Connecting to saved answers…</p>
-    <div class="meta" id="meta" hidden></div>
-  </header>
-  <div id="list" hidden></div>
-  <div id="questions" hidden></div>
-</main>
-<div class="bar" id="bar" hidden><div class="barin">
-  <span id="status">Connecting…</span>
-  <div class="actions">
-    <button class="allbtn" id="expandall" type="button" hidden>Expand all</button>
-    <button class="allbtn" id="collapseall" type="button" hidden>Collapse all</button>
-    <button class="done" id="done" type="button" disabled>Mark as done</button>
-  </div>
-</div></div>
+<div class="wrap" id="wrap">
+  <div id="app"><div class="card msg"><b>Connecting…</b><p>The forms appear as soon as the saved answers load.</p></div></div>
+</div>
+<div id="tip" role="tooltip" hidden></div>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+<div id="live" class="sr" aria-live="polite"></div>
 
 <script>
+/* aidlc-ids.js:begin */
+/* The ids an AI-DLC page shows (US1.1, AC1.1.2, FR1.4, NFR3, BR1.2, Q4, U31, C2, ADR-009, R-01, ...), each a link with
+   a tooltip saying what it is. Shared: the canonical copy is shared/aidlc-ids/aidlc-ids.js in mskuibida-ai-tools,
+   copied into every page by scripts/sync-shared.py. Edit it there.
+
+   The page gives it a map of what each id is, `ids` = {"FR1.4": {kind, title, text, doc}}, the output of
+   `aidlc_ids.py refs` written with the page's data, and marks each element that shows an id's own definition with
+   data-aidlc-id="<id>". Then:
+
+     AidlcIds.linkify(root, ids, { toast: fn })   turn every id in root's text into a link; run after each render
+     AidlcIds.observe(root, getIds, { toast: fn }) the same, again whenever root's content changes
+
+   A link whose id is shown in the page jumps there and flashes it. One that is not shown still looks like a link: its
+   tooltip says what it is, and a click shows a toast that it is not in this page. An id no document defines says so.
+   The tooltip is the page's own: the link carries data-tip and aria-label, which every page's tooltip reads. */
+var AidlcIds = (function () {
+  "use strict";
+  var ID = /(^|[^\w-])([A-Z][A-Z]{0,4}-?\d+[a-z]?(?:[.-]\d+[a-z]?)*(?:-[A-Z]{1,4}\d+[a-z]?)?)(?![\w-])/g;
+  var NOT_IDS = /^(UTF-?\d+|SHA-?\d+|ISO-?\d+|RFC-?\d+|HTTP-?\d+|TLS-?\d|H[1-6]|V\d+|X\d+|P\d|ES\d+|ID\d*)$/;
+  var KINDS = { US: "Story", AC: "Acceptance criterion", FR: "Functional requirement", NFR: "Non-functional requirement",
+    BR: "Business rule", Q: "Question", U: "Unit", C: "Contract", E: "External interface", ADR: "Decision record",
+    R: "Review finding", D: "Decision", DR: "Design rule", S: "Screen", M: "Mockup", T: "Task" };
+  var SKIP = "a, button, code, pre, script, style, textarea, input, select, option, [data-aidlc-noids]";
+
+  function prefix(id) { return (/^[A-Z]+/.exec(id) || [""])[0]; }
+  function docName(doc) { return String(doc || "").split("/").pop(); }
+
+  function anchorOf(id) {
+    var css = window.CSS && CSS.escape ? CSS.escape(id) : id.replace(/["\\]/g, "\\$&");
+    return document.querySelector('[data-aidlc-id="' + css + '"]');
+  }
+
+  /** The tooltip of an id: what it is, in plain words, and where it is written. */
+  function tip(id, def) {
+    if (!def) return id + ": not found in this project's documents.";
+    var kind = def.kind || KINDS[prefix(id)] || "";
+    var head = (kind ? kind + " " : "") + id + (def.title ? ": " + def.title : "");
+    var body = def.text && def.text !== def.title ? " " + def.text : "";
+    return head + (/[.!?…]$/.test(head) || !body ? "" : ".") + body + (def.doc ? " (" + docName(def.doc) + ")" : "");
+  }
+
+  /** Whether a word is an id this page knows of, or looks like one of a kind it knows. */
+  function isId(word, ids, prefixes) {
+    if (NOT_IDS.test(word)) return false;
+    return Object.prototype.hasOwnProperty.call(ids, word) || prefixes[prefix(word)] === true;
+  }
+
+  function linkify(root, ids, opts) {
+    if (!root) return;
+    ids = ids || {};
+    opts = opts || {};
+    var prefixes = {};
+    Object.keys(ids).forEach(function (k) { prefixes[prefix(k)] = true; });
+    Object.keys(KINDS).forEach(function (k) { prefixes[k] = true; });
+    // Keys of the page's own map that are not id-shaped (a form's q1, a card's f-3) are linked by their exact text.
+    var own = Object.keys(ids).filter(function (k) { return !/^[A-Z]/.test(k) && /^[\w.-]+$/.test(k); })
+      .sort(function (a, b) { return b.length - a.length; })
+      .map(function (k) { return k.replace(/[.-]/g, "\\$&"); });
+    var OWN = own.length ? new RegExp("(^|[^\\w-])(" + own.join("|") + ")(?![\\w-])", "g") : null;
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (n) {
+        if (!n.nodeValue || !(OWN ? /\d/ : /[A-Z]-?\d/).test(n.nodeValue)) return NodeFilter.FILTER_REJECT;
+        var p = n.parentElement;
+        return p && !p.closest(SKIP) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      }
+    });
+    var nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(function (node) {
+      var text = node.nodeValue, last = 0, frag = null, m;
+      var self = node.parentElement.closest("[data-aidlc-id]");
+      var found = [];
+      [ID, OWN].forEach(function (re) {
+        if (!re) return;
+        re.lastIndex = 0;
+        while ((m = re.exec(text))) found.push({ word: m[2], start: m.index + m[1].length, own: re === OWN });
+      });
+      found.sort(function (a, b) { return a.start - b.start; });
+      for (var i = 0; i < found.length; i++) {
+        var word = found[i].word, start = found[i].start;
+        if (start < last) continue;
+        if (!found[i].own && !isId(word, ids, prefixes)) continue;
+        if (self && self.getAttribute("data-aidlc-id") === word) continue;
+        frag = frag || document.createDocumentFragment();
+        frag.appendChild(document.createTextNode(text.slice(last, start)));
+        var a = document.createElement("a");
+        var def = ids[word];
+        a.className = "aidlc-id" + (def ? "" : " aidlc-id-unknown");
+        a.href = "#" + encodeURIComponent(word);
+        a.textContent = word;
+        a.setAttribute("data-aidlc-ref", word);
+        a.setAttribute("data-tip", tip(word, def));
+        a.setAttribute("aria-label", tip(word, def));
+        frag.appendChild(a);
+        last = start + word.length;
+      }
+      if (frag) {
+        frag.appendChild(document.createTextNode(text.slice(last)));
+        node.parentNode.replaceChild(frag, node);
+      }
+    });
+    markLive(root);
+    bind(root, opts);
+  }
+
+  /** Links whose id is shown in the page get the live look; the rest the out-of-page one. */
+  function markLive(root) {
+    Array.prototype.forEach.call(root.querySelectorAll("a.aidlc-id"), function (a) {
+      a.classList.toggle("aidlc-id-out", !anchorOf(a.getAttribute("data-aidlc-ref")));
+    });
+  }
+
+  function bind(root, opts) {
+    if (root.__aidlcIds) { root.__aidlcIds.opts = opts; return; }
+    root.__aidlcIds = { opts: opts };
+    root.addEventListener("click", function (e) {
+      var a = e.target.closest && e.target.closest("a.aidlc-id");
+      if (!a || !root.contains(a)) return;
+      e.preventDefault();
+      var id = a.getAttribute("data-aidlc-ref"), target = anchorOf(id);
+      var say = root.__aidlcIds.opts.toast || function (t) { window.alert(t); };
+      if (target) {
+        var closed = target.closest("details:not([open])");
+        if (closed) closed.open = true;
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+        target.classList.remove("aidlc-flash");
+        void target.offsetWidth;
+        target.classList.add("aidlc-flash");
+        if (target.tabIndex < 0 && !target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+        target.focus({ preventScroll: true });
+      } else if (a.classList.contains("aidlc-id-unknown")) {
+        say(id + " isn't defined in this project's documents.");
+      } else {
+        say(id + " isn't in this page. What it is: in its tooltip.");
+      }
+    });
+  }
+
+  function observe(root, getIds, opts) {
+    if (!root) return;
+    var busy = false;
+    var run = function () {
+      if (busy) return;
+      busy = true;
+      try { linkify(root, getIds(), opts); } finally { busy = false; }
+    };
+    run();
+    new MutationObserver(function () { if (!busy) window.requestAnimationFrame(run); })
+      .observe(root, { childList: true, subtree: true, characterData: true });
+  }
+
+  return { linkify: linkify, observe: observe, tip: tip, KINDS: KINDS };
+})();
+/* aidlc-ids.js:end */
+</script>
+<script>
 (() => {
+  "use strict";
   const $ = (id) => document.getElementById(id);
-  const el = { title: $("title"), lede: $("lede"), meta: $("meta"), list: $("list"), qs: $("questions"), bar: $("bar"), status: $("status"), done: $("done") };
+  const app = $("app"), tipEl = $("tip"), toastEl = $("toast");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const inline = (s) => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  const md = (s) => String(s ?? "").trim().split(/\n\s*\n/).filter(Boolean).map((b) => {
-    const lines = b.split("\n");
-    if (lines.every((l) => /^\s*-\s+/.test(l))) return "<ul>" + lines.map((l) => "<li>" + inline(l.replace(/^\s*-\s+/, "")) + "</li>").join("") + "</ul>";
-    return "<p>" + lines.map(inline).join("<br>") + "</p>";
-  }).join("");
+  const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const fmt = (iso) => { try { return new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }); } catch { return iso || ""; } };
-  const setStatus = (t, cls) => { el.status.textContent = t; el.status.className = cls || ""; };
+  const clock = (iso) => { try { return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
   const formId = () => { const h = decodeURIComponent(location.hash.replace(/^#/, "")); return /^[a-z0-9._-]+$/i.test(h) ? h : ""; };
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + "s")}`;
+  const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  let db = null;
-  const view = { id: "", unsub: [], form: null, mode: "", expanded: new Set(), closing: false, boxesKey: "", loaded: false, rendered: new Map(), drag: null, questions: new Map(), answers: {}, touched: {}, pending: {}, inflight: false, timer: null, confirmDone: false };
+  /* The page's own glossary; a form's `terms` adds to it or overrides it. */
+  const TERMS = {
+    AC: "Acceptance criteria: the checks that say a story is done.",
+    ADR: "Architecture decision record: a short note of one design decision and why.",
+    API: "Application programming interface: how one program talks to another.",
+    CI: "Continuous integration: the checks that run on every push.",
+    E2E: "End-to-end test: drives the whole app the way a person would.",
+    MVP: "Minimum viable product: the smallest version worth shipping.",
+    NFR: "Non-functional requirement: how well the system must work (speed, security, uptime), not what it does.",
+    PR: "Pull request: a proposed change, reviewed before it is merged.",
+    SLA: "Service level agreement: the availability promised to users.",
+    SLO: "Service level objective: the reliability target the team aims for.",
+    SSO: "Single sign-on: one company login for many apps.",
+    UI: "User interface: what people see and press.",
+    UX: "User experience: how using it feels, end to end.",
+    "AI-DLC": "AI-driven development life cycle: the staged way this project is planned, designed and built with an agent.",
+  };
 
-  function teardown() { view.unsub.forEach((u) => { try { u(); } catch {} }); view.unsub = []; view.questions = new Map(); view.rendered = new Map(); view.expanded = new Set(); view.mode = ""; view.boxesKey = ""; view.loaded = false; view.drag = null; view.answers = {}; view.touched = {}; view.pending = {}; view.confirmDone = false; el.qs.innerHTML = ""; document.body.classList.remove("wide"); }
+  let db = null, uid = null;
+  const view = {
+    id: "", unsub: [], form: null, mode: "", boxesKey: "", loaded: false, rendered: new Map(), drag: null,
+    questions: new Map(), answers: {}, touched: {}, pending: {}, qstat: {}, inflight: false, timer: null, retry: 0, retryTimer: null,
+    save: { state: "idle", at: "", msg: "" }, closing: false, confirmDone: false, open: new Set(), shut: new Set(), noting: new Set(), filter: "all",
+    marks: {}, marksReady: false, baselined: false, notice: null, tokens: null,
+  };
 
-  /* ---------- index ---------- */
+  /* ---------- tooltips: hover and keyboard focus; a tap on touch ---------- */
+  let tipFor = null;
+  function showTip(node) {
+    const text = node.getAttribute("data-tip"); if (!text) return;
+    tipFor = node; tipEl.textContent = text; tipEl.style.left = "0px"; tipEl.style.top = "0px"; tipEl.hidden = false;
+    node.setAttribute("aria-describedby", "tip");
+    const r = node.getBoundingClientRect(), t = tipEl.getBoundingClientRect();
+    let x = Math.min(Math.max(12, r.left), window.innerWidth - t.width - 12);
+    let y = r.top - t.height - 8; if (y < 12) y = r.bottom + 8;
+    tipEl.style.left = x + "px"; tipEl.style.top = y + "px";
+  }
+  function hideTip() { if (tipFor) tipFor.removeAttribute("aria-describedby"); tipFor = null; tipEl.hidden = true; }
+  document.addEventListener("mouseover", (e) => { if (tipFor && !tipFor.isConnected) hideTip(); const n = e.target.closest?.("[data-tip]"); if (n && n !== tipFor) showTip(n); else if (!n && tipFor && !tipFor.matches(":focus")) hideTip(); });
+  document.addEventListener("focusin", (e) => { const n = e.target.closest?.("[data-tip]"); if (n) showTip(n); else hideTip(); });
+  document.addEventListener("focusout", () => setTimeout(() => { if (tipFor && !tipFor.matches(":focus") && !tipFor.matches(":hover")) hideTip(); }, 0));
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideTip(); });
+  window.addEventListener("scroll", hideTip, { passive: true });
+  /* Repainting a bar keeps keyboard focus on the same control. */
+  function keepFocus(root, paint) {
+    const a = document.activeElement, inside = root && a && root.contains(a);
+    const key = inside ? ["data-filter", "data-act", "data-f", "data-jump"].map((n) => a.getAttribute(n) && `[${n}="${CSS.escape(a.getAttribute(n))}"]`).find(Boolean) : "";
+    paint();
+    if (key) root.querySelector(key)?.focus();
+  }
+  function toast(text) { toastEl.textContent = text; toastEl.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => { toastEl.hidden = true; }, 3200); }
+
+  /* ---------- text: the Markdown subset, with tooltips on terms ----------
+     Ids (FR1.4, US2.1, Q3, R-05, …) are not matched here: the shared AidlcIds script links every id in the page,
+     the same way on every plugin's page, from the form's `ids` map and the questions and cards on the page. */
+  function tokens() {
+    if (view.tokens) return view.tokens;
+    const terms = Object.assign({}, TERMS, (view.form && typeof view.form.terms === "object" && view.form.terms) || {});
+    const words = Object.keys(terms).filter(Boolean).sort((a, b) => b.length - a.length).map((w) => reEsc(esc(w)));
+    const re = words.length ? new RegExp(`(?<![\\w-])(${words.join("|")})(?![\\w-])`, "g") : null;
+    view.tokens = { re, terms, ids: null };
+    return view.tokens;
+  }
+  const qLabel = (q) => q ? (q.text || "").replace(/[`*]/g, "") : "";
+  /* What AidlcIds links from: the form's `ids` (aidlc_ids.py refs), and every question or card shown here. */
+  function idMap() {
+    const t = tokens(); if (t.ids) return t.ids;
+    const own = (view.form && view.form.ids && typeof view.form.ids === "object") ? view.form.ids : {};
+    const map = Object.assign({}, own);
+    qsAll().forEach((q) => { map[q.id] = Object.assign({}, own[q.id] || {}, { kind: q.kind === "card" ? "Card" : "Question", title: qLabel(q), text: "", doc: "" }); });
+    t.ids = map; return map;
+  }
+  function linkify(html, self) {
+    const t = tokens(); if (!t.re) return html;
+    /* only text between tags: never inside an attribute or a tag name */
+    return html.replace(/(<[^>]+>)|([^<]+)/g, (m, tag, text) => tag ? tag : text.replace(t.re, (w) => {
+      const raw = w.replace(/&amp;/g, "&");
+      const tip = t.terms[raw]; return tip ? `<span class="term" tabindex="0" data-tip="${esc(raw + ": " + tip)}">${w}</span>` : w;
+    }));
+  }
+  const PATH = /^(?:[\w.@~-]+\/)+[\w.@~-]+\/?$|^[\w-]+\.(?:md|mdx|ts|tsx|js|jsx|mjs|py|swift|kt|go|rs|rb|java|yml|yaml|json|toml|html|css|scss|sh|sql|csv|txt)$/;
+  function code(t) {
+    const url = PATH.test(t) && t.includes("/") ? recordsUrl(t) : "";
+    if (url) return `<a class="ref code" href="${esc(url)}" target="_blank" rel="noopener" data-tip="${esc(`A file in the repository: ${t}. Opens on the code host.`)}">${esc(t)}</a>`;
+    if (PATH.test(t) && !/^https?:/.test(t)) return `<a class="ref code off" href="#" data-off="1" data-path="${esc(t)}" data-tip="${esc(`A file in the repository: ${t}. It isn't part of this page.`)}">${esc(t)}</a>`;
+    return `<code>${esc(t)}</code>`;
+  }
+  function inline(s, self) {
+    const codes = [];
+    let h = String(s ?? "").replace(/`([^`]+)`/g, (m, c) => { codes.push(c); return `\u0000${codes.length - 1}\u0000`; });
+    h = esc(h).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    h = linkify(h, self);
+    return h.replace(/\u0000(\d+)\u0000/g, (m, i) => code(codes[+i]));
+  }
+  const md = (s, self) => String(s ?? "").trim().split(/\n\s*\n/).filter(Boolean).map((b) => {
+    const lines = b.split("\n");
+    if (lines.every((l) => /^\s*-\s+/.test(l))) return "<ul>" + lines.map((l) => "<li>" + inline(l.replace(/^\s*-\s+/, ""), self) + "</li>").join("") + "</ul>";
+    return "<p>" + lines.map((l) => inline(l, self)).join("<br>") + "</p>";
+  }).join("");
+  /* refs: [{label, tip, target}] — a live jump when the target is on this page, else a link that says it isn't */
+  function refHtml(r) {
+    const label = String(r.label || r.target || "").trim(), target = String(r.target || "").trim();
+    let tip = String(r.tip || "").trim();
+    if (!label) return "";
+    const local = target.replace(/^#/, "");
+    if (target.charAt(0) === "#" && view.questions.has(local)) {
+      const q = view.questions.get(local);
+      return `<a class="ref" href="#" data-jump="q-${esc(local)}" data-tip="${esc((tip ? tip + " " : "") + `(${q.kind === "card" ? "card" : "question"} ${local}: ${qLabel(q)}) Press to go there.`)}">${esc(label)}</a>`;
+    }
+    if (/^https?:\/\//i.test(target)) return `<a class="ref" href="${esc(target)}" target="_blank" rel="noopener" data-tip="${esc((tip || target) + " Opens in a new tab.")}">${esc(label)}</a>`;
+    const path = target.indexOf("path:") === 0 ? target.slice(5) : "";
+    const url = path && recordsUrl(path);
+    if (url) return `<a class="ref" href="${esc(url)}" target="_blank" rel="noopener" data-tip="${esc((tip || `A file in the repository: ${path}.`) + " Opens on the code host.")}">${esc(label)}</a>`;
+    if (!tip) tip = path ? `A file in the repository: ${path}.` : label;
+    return `<a class="ref off" href="#" data-off="1"${path ? ` data-path="${esc(path)}"` : ""} data-tip="${esc(tip + " Not part of this page.")}">${esc(label)}</a>`;
+  }
+  /* forms/<id>.records: the repository's web address at the branch (https://github.com/o/r/blob/main/); with it a
+     repo path becomes a real link. */
+  function recordsUrl(path) {
+    const base = view.form && view.form.records;
+    if (!base || !/^https:\/\//i.test(base)) return "";
+    return base.replace(/\/?$/, "/") + String(path).replace(/^\/+/, "").split("#")[0].split("/").map(encodeURIComponent).join("/") + (String(path).includes("#") ? "#" + encodeURIComponent(String(path).split("#")[1]) : "");
+  }
+  const refsHtml = (q, lead) => Array.isArray(q.refs) && q.refs.length ? `<div class="refs"><span>${esc(lead)}</span>${q.refs.map(refHtml).join("")}</div>` : "";
+
+  function teardown() {
+    if (Object.keys(view.pending).length) flush();
+    view.unsub.forEach((u) => { try { u(); } catch {} }); view.unsub = [];
+    clearTimeout(view.timer); clearTimeout(view.retryTimer);
+    Object.assign(view, { questions: new Map(), rendered: new Map(), open: new Set(), shut: new Set(), noting: new Set(), mode: "", boxesKey: "", loaded: false, drag: null, answers: {}, touched: {}, pending: {}, qstat: {}, confirmDone: false, filter: "all", marks: {}, marksReady: false, baselined: false, notice: null, tokens: null, retry: 0, save: { state: "idle", at: "", msg: "" } });
+    hideTip();
+  }
+
+  /* ---------- the list of forms ---------- */
+  const listState = { filter: "open", q: "", rows: [] };
   function showIndex() {
-    teardown(); view.id = ""; view.form = null;
-    el.title.textContent = "Question forms";
-    el.lede.textContent = "Every stage's questions file, as a form. Pick one; nothing is pre-selected, and Claude copies what you save word for word into the file.";
-    el.meta.hidden = true; el.qs.hidden = true; el.bar.hidden = true; el.list.hidden = false;
-    el.list.innerHTML = '<div class="empty"><p>Loading forms…</p></div>';
+    teardown(); view.id = ""; view.form = null; document.title = "AI-DLC question forms";
+    app.innerHTML = `<header class="card head"><div class="crumbs"><span>AI-DLC</span><span aria-hidden="true">/</span><span>Question forms</span></div>
+      <div class="titlerow"><div><h1>Question forms</h1><p class="lede">Every stage’s questions file, as a form. Pick one; nothing is pre-selected, and Claude copies what you save word for word into the file.</p></div><div class="facts" id="lfacts"></div></div></header>
+      <div class="bar" id="bar"><div class="lbar"><div class="filters" role="group" aria-label="Show forms" id="lfilters"></div><input class="search" id="lsearch" type="search" placeholder="Find a form by title, stage or file" aria-label="Find a form"></div></div>
+      <main id="lbody"><div class="card msg"><b>Loading forms…</b></div></main>`;
+    barHeight();
+    $("lsearch").addEventListener("input", (e) => { listState.q = e.target.value.trim().toLowerCase(); paintIndex(); });
+    $("lbody").addEventListener("click", (e) => { const b = e.target.closest("[data-f]"); if (b) { listState.filter = b.dataset.f; paintIndex(); } });
+    $("lfilters").addEventListener("click", (e) => { const b = e.target.closest("[data-f]"); if (b) { listState.filter = b.dataset.f; paintIndex(); } });
     if (!db) return;
-    const u = db.collection("forms").orderBy("createdAt", "desc").limit(100).onSnapshot((snap) => {
-      if (snap.empty) { el.list.innerHTML = '<div class="empty"><p><b>No forms yet.</b></p><p>Claude creates one here for every questions file a stage writes and gives you its link, which ends in <code>#</code> and the form’s id.</p></div>'; return; }
-      el.list.innerHTML = snap.docs.map((d) => { const f = d.data(); const n = Object.keys(f.answers || {}).length; return `<a class="row" href="#${esc(d.id)}"><span><b>${esc(f.title || d.id)}</b><small>${esc(f.stage || "")}${f.stage ? " · " : ""}${fmt(f.createdAt)}${n ? ` · ${n} answered` : ""}</small></span><span class="pill ${f.status === "done" ? "done" : "open"}">${f.status === "done" ? "done" : "open"}</span></a>`; }).join("");
-    }, () => { el.list.innerHTML = '<div class="empty"><p>Couldn’t load the forms. Reload the page.</p></div>'; });
+    const u = db.collection("forms").orderBy("createdAt", "desc").limit(200).onSnapshot((snap) => {
+      listState.rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })); paintIndex();
+    }, () => { $("lbody").innerHTML = '<div class="card msg"><b>Couldn’t load the forms.</b><p>Reload the page.</p></div>'; });
     view.unsub.push(u);
+  }
+  function paintIndex() {
+    const rows = listState.rows, open = rows.filter((r) => r.status !== "done").length;
+    if (!$("lbody")) return;
+    $("lfacts").innerHTML = `<div class="fact"><span>Open</span><b>${open}</b></div><div class="fact"><span>Done</span><b>${rows.length - open}</b></div>`;
+    keepFocus($("lfilters"), () => { $("lfilters").innerHTML = [["open", "Open", open], ["done", "Done", rows.length - open], ["all", "All", rows.length]].map(([k, t, n]) => `<button type="button" class="pill" data-f="${k}" aria-pressed="${listState.filter === k}">${t}<b>${n}</b></button>`).join(""); });
+    if (!rows.length) { $("lbody").innerHTML = '<div class="card msg"><b>No forms yet.</b><p>Claude creates one here for every questions file a stage writes and gives you its link, which ends in # and the form’s id.</p></div>'; return; }
+    const shown = rows.filter((r) => (listState.filter === "all" || (listState.filter === "done") === (r.status === "done")) &&
+      (!listState.q || [r.title, r.stage, r.file, r.id].join(" ").toLowerCase().includes(listState.q)));
+    $("lbody").innerHTML = `<section class="card list">${shown.length ? shown.map((f) => {
+      const n = Object.keys(f.answers || {}).length, done = f.status === "done";
+      return `<a class="lrow" href="#${esc(f.id)}"><span><b>${esc(f.title || f.id)}</b><small>${esc(f.stage || "")}${f.stage ? " · " : ""}${esc(fmt(f.createdAt))}${n ? ` · ${n} answered` : ""}${f.view === "board" ? " · board" : ""}</small></span><span class="tag ${done ? "ans" : "open"}">${done ? "Done" : "Open"}</span></a>`;
+    }).join("") : `<p class="empty">${listState.q ? "No form matches your search." : (listState.filter === "open" ? "Every form is done." : "Nothing here.")} ${listState.filter !== "all" ? `<button type="button" class="btn" data-f="all">Show all forms</button>` : ""}</p>`}</section>`;
   }
 
   /* ---------- one form ---------- */
   function showForm(id) {
     teardown(); view.id = id;
-    el.list.hidden = true; el.qs.hidden = false; el.bar.hidden = false; el.meta.hidden = false;
-    el.title.textContent = id; el.lede.textContent = ""; el.meta.innerHTML = ""; el.qs.innerHTML = '<p class="hint">Loading questions…</p>';
-    setStatus("Connecting…"); el.done.disabled = true;
+    app.innerHTML = `<header class="card head" id="head"><div class="crumbs"><a href="#" data-home="1">All forms</a></div><div class="titlerow"><div><h1 id="title">Loading…</h1></div></div></header>
+      <div class="bar" id="bar"></div><main id="questions"><div class="card msg"><b>Loading questions…</b></div></main><footer class="band" id="band" hidden></footer>`;
+    barHeight();
     if (!db) return;
     const ref = db.doc("forms/" + id);
+    loadMarks(id);
     view.unsub.push(ref.onSnapshot((snap) => {
-      if (!snap.exists) { view.form = null; el.title.textContent = "No such form"; el.lede.textContent = "Nothing is stored under this id. Check the link Claude gave you, or go back to the list."; el.qs.innerHTML = ""; el.bar.hidden = true; return; }
-      const f = snap.data(); view.form = f;
-      el.title.textContent = f.title || id;
-      el.lede.textContent = f.intro || (f.view === "board"
-        ? "Each card starts in the box Claude suggests. Move it with its buttons or by dragging; Done saves where every card sits."
-        : "Nothing is pre-selected. Pick an option or write your own; a note is optional unless you choose Other. Answers save as you go.");
-      el.meta.innerHTML = `${f.stage ? `<span>${esc(f.stage)}</span>` : ""}${f.file ? `<span class="file">${esc(f.file)}</span>` : ""}<span class="pill ${f.status === "done" ? "done" : "open"}">${f.status === "done" ? "done" : "open"}</span>`;
+      if (!snap.exists) { view.form = null; app.innerHTML = `<div class="card msg"><b>No such form</b><p>Nothing is stored under this id. Check the link Claude gave you, or go back to <a href="#" data-home="1">all forms</a>.</p></div>`; return; }
+      const f = snap.data(), old = view.form || {}, textChanged = JSON.stringify([old.terms || null, old.ids || null]) !== JSON.stringify([f.terms || null, f.ids || null]);
+      view.form = f; if (textChanged) { view.tokens = null; view.rendered = new Map(); }
+      document.title = (f.title || id) + " · AI-DLC question forms";
       layout();
+      /* a new `ids` map: draw the questions again, so their id links carry the new tooltips */
+      if (textChanged && view.loaded) sync();
       const remote = f.answers || {};
       for (const [qid, a] of Object.entries(remote)) { if (!view.pending[qid] && !(view.touched[qid] && Date.now() - view.touched[qid] < 2000)) { view.answers[qid] = a; paintAnswer(qid); } }
-      el.done.disabled = false; el.done.classList.toggle("is-done", f.status === "done");
-      el.done.textContent = f.status === "done" ? "Done ✓ — press to re-mark" : "Mark as done";
-      if (!view.inflight && !Object.keys(view.pending).length) setStatus(f.status === "done" ? `Done ${fmt(f.savedAt)}. Tell Claude in chat that the form is done.` : (Object.keys(remote).length ? `Saved ${fmt(latest(remote))}` : "No answers yet."), f.status === "done" ? "ok" : "");
-      updateCount();
-    }, () => setStatus("Couldn’t load the form. Reload the page.", "warn")));
+      if (!view.inflight && !Object.keys(view.pending).length && view.save.state !== "fail") view.save = { state: Object.keys(remote).length ? "ok" : "idle", at: latest(remote), msg: "" };
+      paintHead(); paintBar();
+    }, () => setSave("fail", "Couldn’t load the form. Reload the page.")));
     view.unsub.push(ref.collection("questions").orderBy("n").onSnapshot((snap) => {
       const next = new Map(); snap.docs.forEach((d) => next.set(d.id, { id: d.id, ...d.data() }));
-      view.questions = next; view.loaded = true; sync();
-    }, () => setStatus("Couldn’t load the questions. Reload the page.", "warn")));
+      const idsChanged = [...next.keys()].join("|") !== [...view.questions.keys()].join("|");
+      view.questions = next; view.loaded = true;
+      if (idsChanged) { view.tokens = null; view.rendered = new Map(); } else if (view.tokens) view.tokens.ids = null;
+      baseline(); sync();
+    }, () => setSave("fail", "Couldn’t load the questions. Reload the page.")));
   }
   const latest = (answers) => Object.values(answers).map((a) => a.at || "").sort().pop() || "";
   const isBoard = () => view.mode === "board";
   const ordered = () => [...view.questions.values()].sort((a, b) => (a.n ?? 0) - (b.n ?? 0));
+  function barHeight() { const b = $("bar"); if (b) document.documentElement.style.setProperty("--bar-h", b.offsetHeight + "px"); }
+  window.addEventListener("resize", barHeight);
+
+  function paintHead() {
+    const f = view.form, head = $("head"); if (!f || !head) return;
+    const done = f.status === "done", n = view.questions.size, a = [...view.questions.keys()].filter(answered).length;
+    const lede = f.intro || (f.view === "board"
+      ? "Claude’s suggestion is marked on each card, but nothing is chosen for you. Press a decision on every card; it folds away once you do. Done saves your decisions."
+      : "Nothing is pre-selected. Pick an option or write your own; a note is optional unless you choose Other. Answers save as you go.");
+    const facts = isBoard()
+      ? `<div class="fact"><span>Cards</span><b>${n}</b></div><div class="fact"><span>Answered</span><b>${a}</b></div><div class="fact"><span>With a note</span><b>${notedCount()}</b></div>`
+      : `<div class="fact"><span>Questions</span><b>${n}</b></div><div class="fact"><span>Answered</span><b>${a}</b></div><div class="fact"><span>Open</span><b>${n - a}</b></div>`;
+    const file = f.file ? `<div class="source"><span>Questions file</span>${refHtml({ label: f.file, target: "path:" + f.file, tip: `The file Claude copies your answers into: ${f.file}.` })}</div>` : "";
+    head.innerHTML = `<div class="crumbs"><a href="#" data-home="1">All forms</a>${f.stage ? `<span aria-hidden="true">/</span><span>${esc(f.stage)}</span>` : ""}
+        <span class="status${done ? " done" : ""}" tabindex="0" data-tip="${esc(done ? `You pressed Done ${fmt(f.savedAt)}. Claude reads the answers when you say so in chat. A later change reopens the form.` : "Still open: Claude reads the answers after you press Done and say so in chat.")}"><i aria-hidden="true"></i>${done ? "Done" : "Open"}</span></div>
+      <div class="titlerow"><div><h1 id="title">${esc(f.title || view.id)}</h1><p class="lede">${linkify(esc(lede))}</p></div><div class="facts">${facts}</div></div>${file}`;
+  }
 
   /* The form row decides the layout: a list of questions, or a board of boxes. */
   function layout() {
     const mode = view.form && view.form.view === "board" ? "board" : "list";
     const key = mode === "board" ? JSON.stringify([view.form.boxes || [], view.form.groups || []]) : "";
     if (mode === view.mode && key === view.boxesKey) return;
-    view.mode = mode; view.boxesKey = key; view.rendered = new Map();
-    document.body.classList.toggle("wide", mode === "board");
-    $("expandall").hidden = $("collapseall").hidden = mode !== "board";
-    el.qs.innerHTML = "";
-    if (mode === "board") el.qs.appendChild(renderBoard(view.form.boxes || []));
+    view.mode = mode; view.boxesKey = key; view.rendered = new Map(); view.tokens = null;
+    const qs = $("questions"); qs.innerHTML = "";
+    if (mode === "board") qs.appendChild(renderBoard());
     sync();
   }
   function sync() {
-    if (!view.mode) return;
-    if (!view.loaded) { if (!isBoard()) el.qs.innerHTML = '<p class="hint">Loading questions…</p>'; return; }
+    const qsEl = $("questions"); if (!view.mode || !qsEl) return;
+    if (!view.loaded) return;
     const qs = ordered();
     if (!isBoard()) {
-      if (!qs.length) { el.qs.innerHTML = '<p class="hint">No questions yet. Claude adds them as rows; they appear here as soon as they are written.</p>'; view.rendered = new Map(); updateCount(); return; }
-      el.qs.querySelectorAll(":scope > .hint").forEach((n) => n.remove());
+      if (!qs.length) { qsEl.innerHTML = '<div class="card msg"><b>No questions yet.</b><p>Claude adds them as rows; they appear here as soon as they are written.</p></div>'; view.rendered = new Map(); paintAll(); return; }
+      qsEl.querySelectorAll(":scope > .msg").forEach((n) => n.remove());
     }
     const seen = new Set();
     qs.forEach((q, i) => {
       seen.add(q.id); const sig = JSON.stringify(q);
       let node = document.getElementById("q-" + q.id);
       if (!node || view.rendered.get(q.id) !== sig) {
+        const focusId = document.activeElement && node && node.contains(document.activeElement) ? document.activeElement.id : "";
         const fresh = isBoard() ? renderCard(q) : renderQuestion(q);
-        if (node) node.replaceWith(fresh); else (isBoard() ? el.qs.querySelector("[data-cards]") || el.qs : el.qs).appendChild(fresh);
+        if (node) node.replaceWith(fresh); else if (isBoard()) placeCard(fresh, q); else qsEl.appendChild(fresh);
         node = fresh; view.rendered.set(q.id, sig); paintAnswer(q.id);
+        if (focusId) document.getElementById(focusId)?.focus();
       }
-      if (!isBoard()) { const want = el.qs.children[i]; if (want !== node) el.qs.insertBefore(node, want || null); }
+      if (!isBoard()) { const want = qsEl.children[i]; if (want !== node) qsEl.insertBefore(node, want || null); }
     });
-    el.qs.querySelectorAll("[data-qid]").forEach((n) => { if (!seen.has(n.dataset.qid)) { view.rendered.delete(n.dataset.qid); n.remove(); } });
-    paintCounts(); updateCount();
+    qsEl.querySelectorAll("[data-qid]").forEach((n) => { if (!seen.has(n.dataset.qid)) { view.rendered.delete(n.dataset.qid); n.remove(); } });
+    paintAll();
+  }
+  function paintAll() { qsAll().forEach((q) => paintFresh(q.id)); applyFilter(); paintHead(); paintBar(); }
+  const qsAll = () => [...view.questions.values()];
+
+  /* ---------- "new since you looked": the viewer's own marks ---------- */
+  const qsig = (q) => { const s = JSON.stringify([q.text, q.ctx, q.kind, q.options, q.proposed, q.hint, q.outcomes]); let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
+  const marksKey = (id) => "qf:seen:" + id;
+  function loadMarks(id) {
+    try { view.marks = JSON.parse(localStorage.getItem(marksKey(id)) || "{}") || {}; } catch { view.marks = {}; }
+    if (!(db && uid)) { view.marksReady = true; baseline(); return; }
+    Promise.resolve().then(() => marksDoc(id).get()).then((d) => {
+      if (view.id !== id) return;
+      Object.assign(view.marks, (d && d.exists && d.data().marks) || {});
+    }).catch(() => {}).finally(() => { if (view.id === id) { view.marksReady = true; baseline(); paintAll(); } });
+  }
+  const marksDoc = (id) => db.collection("data/users/" + uid).doc("seen-" + id);
+  function saveMarks() {
+    const id = view.id, marks = Object.assign({}, view.marks);
+    try { localStorage.setItem(marksKey(id), JSON.stringify(marks)); } catch {}
+    try { if (db && uid) marksDoc(id).set({ marks }).catch(() => {}); } catch {}
+  }
+  /* The first visit is the baseline: nothing is "new" to someone who has never seen the form. */
+  function baseline() {
+    if (view.baselined || !view.marksReady || !view.loaded || !view.questions.size) return;
+    view.baselined = true;
+    if (!Object.keys(view.marks).length) { qsAll().forEach((q) => { view.marks[q.id] = qsig(q); }); saveMarks(); }
+  }
+  function freshness(qid) { const q = view.questions.get(qid); if (!q || !view.baselined) return ""; const m = view.marks[qid]; return !m ? "new" : (m !== qsig(q) ? "changed" : ""); }
+  function markSeen(ids) { let any = false; ids.forEach((qid) => { const q = view.questions.get(qid); if (q && view.marks[qid] !== qsig(q)) { view.marks[qid] = qsig(q); any = true; } }); if (any) { saveMarks(); ids.forEach(paintFresh); paintBar(); applyFilter(); } }
+  function paintFresh(qid) {
+    const node = document.getElementById("q-" + qid); if (!node) return;
+    const slot = node.querySelector(".qfresh"); if (!slot) return;
+    const f = freshness(qid);
+    node.classList.toggle("is-fresh", !!f);
+    slot.innerHTML = f ? `<button type="button" class="tag fresh" data-seen="${esc(qid)}" data-tip="${esc(f === "new" ? "Added since you last looked at this form. Press to mark it seen." : "Changed since you last looked at this form. Press to mark it seen.")}">${f === "new" ? "New" : "Changed"}</button>` : "";
   }
 
-  /* ---------- board ---------- */
+  /* ---------- the sticky bar: filters, progress, save state, Done, and a chip per question or box ---------- */
+  function counts() {
+    const qs = qsAll();
+    return { total: qs.length, ans: qs.filter((q) => answered(q.id)).length, need: missingNotes().length, fresh: qs.filter((q) => freshness(q.id)).length };
+  }
+  function saveHtml() {
+    const s = view.save, f = view.form || {};
+    if (s.state === "saving") return `<span class="save busy"><i></i>Saving…</span>`;
+    if (s.state === "dirty") return `<span class="save busy"><i></i>Unsaved changes</span>`;
+    if (s.state === "fail") return `<span class="save fail" data-tip="${esc(s.msg)}" tabindex="0"><i></i>Not saved${s.readonly ? "" : '<button type="button" data-act="retry">Retry</button>'}</span>`;
+    if (f.status === "done") return `<span class="save ok"><i></i>Done ${esc(clock(f.savedAt))}</span>`;
+    if (s.state === "ok") return `<span class="save ok"><i></i>Saved${s.at ? " " + esc(clock(s.at)) : ""}</span>`;
+    return `<span class="save"><i></i>Nothing saved yet</span>`;
+  }
+  function doneLabel() { return view.form && view.form.status === "done" ? "Done ✓" : "Done"; }
+  function paintBar() {
+    const bar = $("bar"); if (!bar || !view.form || !view.mode) return;
+    keepFocus(bar, () => paintBarInner(bar));
+  }
+  function paintBarInner(bar) {
+    const c = counts(), multi = c.total > 1;
+    const pct = c.total ? Math.round(c.ans / c.total * 100) : 0;
+    const f = view.filter;
+    let filters, progress, chips;
+    if (isBoard()) {
+      filters = [["all", "All", c.total], ["open", "Unanswered", c.total - c.ans]].concat(boxes().map((b) => ["box:" + b.k, stripMd(b.t), qsAll().filter((q) => boxOf(q.id) === b.k).length])).concat(c.fresh ? [["fresh", "New or changed", c.fresh]] : []);
+      progress = `<span class="progress"><span class="num">Answered ${c.ans}/${c.total}</span><span class="meter" aria-hidden="true"><i style="width:${pct}%"></i></span></span>`;
+      chips = "";
+    } else {
+      filters = [["all", "All", c.total], ["open", "Unanswered", c.total - c.ans]].concat(c.fresh ? [["fresh", "New or changed", c.fresh]] : []);
+      progress = `<span class="progress"><span class="num">Answered ${c.ans}/${c.total}</span><span class="meter" aria-hidden="true"><i style="width:${pct}%"></i></span></span>`;
+      chips = ordered().filter(passes).map((q) => {
+        const st = (view.answers[q.id]?.k || []).includes("X") && !(view.answers[q.id]?.note || "").trim() ? "need" : (answered(q.id) ? "ans" : "");
+        const fr = freshness(q.id), state = st === "need" ? "needs your own words for Other" : (st ? "answered " + answerText(q.id) : "not answered yet");
+        return `<a class="chip ${st}${fr ? " fresh" : ""}${!passes(q) ? " dim" : ""}" href="#" data-jump="q-${esc(q.id)}" data-tip="${esc(`${q.id}: ${qLabel(q)} — ${state}${fr ? ` (${fr} since you looked)` : ""}.`)}"><span class="st" aria-hidden="true"></span>${esc(q.id)}</a>`;
+      }).join("");
+    }
+    const notice = view.notice ? `<div class="barmsg${view.notice.crit ? " crit" : ""}"><span>${view.notice.html}</span>${view.notice.jump ? `<button type="button" data-jump="q-${esc(view.notice.jump)}">Go to the first one</button>` : ""}</div>` : "";
+    const showNext = !isBoard() && c.ans < c.total;
+    const blocking = isBoard() ? blockingLeft() : [];
+    const left = isBoard() ? ordered().map((q) => q.id).filter((id) => !complete(id)) : [];
+    const lack = left.filter((id) => !boxOf(id)), why = left.filter(reasonMissing);
+    const standing = isBoard() && left.length && !view.notice
+      ? `<div class="barmsg"><span>${[lack.length ? `${plural(lack.length, "card")} still need a decision (${idList(lack)}).` : "", why.length ? `${idList(why)}: write the reason.` : ""].filter(Boolean).join(" ")}</span><button type="button" data-jump="q-${esc(left[0])}">Go to the first one</button></div>` : "";
+    bar.innerHTML = `<div class="barrow">
+        ${multi ? `<div class="filters" role="group" aria-label="Show">${filters.map(([k, t, n]) => `<button type="button" class="pill" data-filter="${k}" aria-pressed="${f === k}">${t}<b>${n}</b></button>`).join("")}</div>` : ""}
+        <div class="tools">${progress}
+          ${showNext ? `<button type="button" class="btn" data-act="next" data-tip="Go to the next question you have not answered.">Next unanswered</button>` : ""}
+          ${isBoard() && blocking.length ? `<button type="button" class="btn" data-act="blocking">${esc(blockingLabel(blocking))} · ${blocking.length}</button>` : ""}
+          ${isBoard() ? `<button type="button" class="btn wide-only" data-act="expand">Expand all</button><button type="button" class="btn wide-only" data-act="collapse">Collapse all</button>` : ""}
+          ${c.fresh ? `<button type="button" class="btn wide-only" data-act="allseen">Mark all seen</button>` : ""}
+          <span class="grow-sp"></span>${saveHtml()}
+          <button type="button" class="primary${view.form.status === "done" ? " is-done" : ""}" data-act="done" ${view.closing || left.length ? "disabled" : ""} data-tip="${esc(doneTip(c))}">${doneLabel()}</button></div></div>
+      ${notice || standing}${multi && !isBoard() ? `<nav class="chips" aria-label="Questions">${chips}</nav>` : ""}`;
+    paintSections(); barHeight(); paintBand(c);
+  }
+  function notify(n) { view.notice = n; if (n) $("live").textContent = n.html.replace(/<[^>]+>/g, ""); paintBar(); }
+  function doneTip(c) {
+    if (view.form && view.form.status === "done") return "Already done. Press again after a change to mark it done again.";
+    if (isBoard()) return c.ans < c.total ? `${c.total - c.ans} cards still need a decision.` : "Saves your decisions and marks the form done. Then tell Claude in chat.";
+    return c.ans < c.total ? `${c.total - c.ans} still unanswered; Done asks you to confirm. Then tell Claude in chat.` : "Every question is answered. Mark the form done, then tell Claude in chat.";
+  }
+  function paintBand(c) {
+    const band = $("band"); if (!band || !view.form) return;
+    const done = view.form.status === "done";
+    band.hidden = false;
+    band.innerHTML = done
+      ? `<b>Done ${esc(fmt(view.form.savedAt))}.</b><span>Tell Claude in chat that the form is done. A later change reopens the form, and you press Done again.</span><button type="button" class="primary is-done" data-act="done">Done ✓</button>`
+      : `<b>${`${c.ans} of ${c.total} answered.`}</b><span>${isBoard() ? "Done saves your decisions." : "Unanswered questions stay open questions for Claude."} Press Done, then tell Claude in chat that the form is done.</span><button type="button" class="primary" data-act="done" ${view.closing || (isBoard() && c.ans < c.total) ? "disabled" : ""}>Done</button>`;
+  }
+  const stripMd = (s) => String(s ?? "").replace(/[`*]/g, "");
+  const blockingLabel = (list) => { const ks = [...new Set(list.map((q) => q.proposed.k))]; return ks.length === 1 ? `${stripMd(boxLabel(ks[0]))} all blocking` : "Take the suggestion on blocking"; };
+  function answerText(qid) { const a = view.answers[qid]; if (!a) return ""; const q = view.questions.get(qid); return q?.kind === "text" ? "in your words" : (a.k || []).join(", "); }
+
+  /* ---------- filters ---------- */
+  function passes(q) {
+    const f = view.filter, a = view.answers[q.id];
+    if (f === "all") return true;
+    if (f === "open") return isBoard() ? !complete(q.id) : !answered(q.id) || ((a?.k || []).includes("X") && !(a?.note || "").trim());
+    if (f === "fresh") return !!freshness(q.id);
+    if (f.startsWith("box:")) return boxOf(q.id) === f.slice(4);
+    return true;
+  }
+  function applyFilter() {
+    qsAll().forEach((q) => document.getElementById("q-" + q.id)?.classList.toggle("filtered", !passes(q)));
+    const qsEl = $("questions"); if (!qsEl) return;
+    let empty = qsEl.querySelector(":scope > .filter-empty");
+    const none = view.filter !== "all" && view.questions.size && !qsAll().some(passes);
+    if (none) { if (!empty) { empty = document.createElement("div"); empty.className = "card msg filter-empty"; qsEl.appendChild(empty); } empty.innerHTML = `<b>${view.filter === "open" ? (isBoard() ? "Nothing left to answer." : "Every question is answered.") : "Nothing here for this filter."}</b><p>${view.filter === "open" && isBoard() ? "Every card has a decision, and every reason is written. Press Done, or look at them again. " : ""}<button type="button" class="btn" data-filter="all">${isBoard() ? "Show all cards" : "Show all questions"}</button></p>`; }
+    else if (empty) empty.remove();
+    paintSections();
+  }
+
+  /* ---------- board: one list of cards, each decided with one press ----------
+     Nothing is picked for the developer: a card is undecided until a decision button is pressed. The suggestion
+     (proposed) is marked on the card and in its details, never selected. A card with a decision folds to one line. */
   const boxes = () => (view.form && view.form.boxes) || [];
-  const boxLabel = (k) => boxes().find((b) => b.k === k)?.t || k;
   const boxDef = (k) => boxes().find((b) => b.k === k);
+  const boxLabel = (k) => boxDef(k)?.t || k;
   const grouped = () => boxes().some((b) => b.group || b.sink);
-  /* With groups, a card stays in its group (its own `group`, else its proposed box's) or goes to a
-     sink box (Don't do). A card with no group at all may go anywhere. */
+  /* With grouped boxes, a card goes to the boxes of its group (its own `group`, else its proposed box's), to a sink box,
+     or to a box that has no group. A card with no group at all may go anywhere. Without them, `outcomes` limits the
+     boxes to its keys (plus the proposed box). */
   const cardGroup = (q) => q.group || boxDef(q.proposed?.k)?.group || "";
   const allowed = (q, k) => {
     const box = boxDef(k); if (!q || !box) return false;
-    if (grouped() && !box.sink && cardGroup(q) && box.group !== cardGroup(q)) return false;
-    if (grouped()) return true;
+    if (grouped()) return !!box.sink || !box.group || !cardGroup(q) || box.group === cardGroup(q);
     return !q.outcomes || Object.prototype.hasOwnProperty.call(q.outcomes, k) || q.proposed?.k === k;
   };
-  function boxOf(qid) {
-    const q = view.questions.get(qid); const a = view.answers[qid]?.k?.[0];
-    if (a && boxes().some((b) => b.k === a)) return a;
-    if (q?.proposed?.k && boxes().some((b) => b.k === q.proposed.k)) return q.proposed.k;
-    return boxes()[0]?.k || "";
+  const boxOf = (qid) => { const a = view.answers[qid]?.k?.[0]; return a && boxDef(a) ? a : ""; };
+  const noteOf = (qid) => view.answers[qid]?.note || "";
+  /* boxes[].note = {required?: true, label?: "Why does this not apply?"} */
+  const noteRule = (k) => { const n = boxDef(k)?.note; return n && typeof n === "object" ? n : {}; };
+  const reasonMissing = (qid) => { const k = boxOf(qid); return !!k && !!noteRule(k).required && !noteOf(qid).trim(); };
+  const complete = (qid) => !!boxOf(qid) && !reasonMissing(qid);
+  const notedCount = () => qsAll().filter((q) => noteOf(q.id).trim()).length;
+  /* A card is open until it has its decision; the developer can open or fold any card by hand. */
+  const isOpen = (qid) => view.open.has(qid) || (!view.shut.has(qid) && !complete(qid));
+  const SEV = (s) => { const w = String(s || "").toLowerCase(); return /critical|confirmed|must/.test(w) ? "crit" : /major|high/.test(w) ? "high" : /minor|medium|suggest/.test(w) ? "med" : "low"; };
+  const CHEV = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  function renderBoard() {
+    const b = document.createElement("div"); b.className = "blist"; b.id = "blist"; return b;
   }
-  const boxHtml = (x) => `<section class="box tone-${esc(x.tone || "ink")}${x.sink ? " sink" : ""}" data-box="${esc(x.k)}" aria-labelledby="box-${esc(x.k)}">
-      ${x.sink ? `<div class="sinkgrip" role="separator" aria-orientation="horizontal" tabindex="0" aria-label="Drag to resize ${esc(x.t)}"></div>` : ""}
-      <div class="boxhead"><h3 id="box-${esc(x.k)}"><span>${inline(x.t)}</span><span class="count" data-count="${esc(x.k)}">0</span></h3>${x.hint ? `<p>${inline(x.hint)}</p>` : ""}</div>
-      <div class="cards" data-cards="${esc(x.k)}"></div></section>`;
-  function renderBoard(list) {
-    const b = document.createElement("div");
-    if (grouped()) {
-      /* Groups side by side, each group's boxes stacked; sink boxes take a full row below. */
-      const defs = (view.form && view.form.groups) || [];
-      const keys = [...new Set(list.filter((x) => !x.sink).map((x) => x.group || ""))];
-      const groups = keys.map((k) => ({ k, t: "", hint: "", ...(defs.find((g) => g.k === k) || {}) }));
-      b.className = "gboard";
-      b.innerHTML = `<div class="grow" style="--g:${Math.max(1, groups.length)}">${groups.map((g) => `<section class="group" data-group="${esc(g.k)}">
-          ${g.t || g.hint ? `<div class="ghead">${g.t ? `<h3>${inline(g.t)}</h3>` : ""}${g.hint ? `<p>${inline(g.hint)}</p>` : ""}</div>` : ""}
-          <div class="gboxes">${list.filter((x) => !x.sink && (x.group || "") === g.k).map(boxHtml).join("")}</div></section>`).join("")}</div>
-        ${list.filter((x) => x.sink).map(boxHtml).join("")}`;
-    } else {
-      b.className = "board"; b.style.setProperty("--n", String(Math.max(1, list.length)));
-      b.innerHTML = list.map(boxHtml).join("");
-    }
-    bindSinkGrips(b);
-    b.querySelectorAll(".box").forEach((box) => {
-      box.addEventListener("dragover", (e) => { if (!view.drag || !allowed(view.questions.get(view.drag), box.dataset.box)) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; box.classList.add("over"); });
-      box.addEventListener("dragleave", (e) => { if (!box.contains(e.relatedTarget)) box.classList.remove("over"); });
-      box.addEventListener("drop", (e) => { e.preventDefault(); box.classList.remove("over"); if (view.drag) place(view.drag, box.dataset.box, false); });
-    });
-    return b;
+  /* Sections are the form's `groups`, made when the first card of a group arrives. */
+  function listFor(q) {
+    const g = cardGroup(q) || "";
+    const have = [...document.querySelectorAll("[data-cards]")].find((n) => n.dataset.cards === g);
+    if (have) return have;
+    const defs = (view.form && view.form.groups) || [];
+    const def = defs.find((x) => x.k === g) || {}, order = defs.findIndex((x) => x.k === g);
+    const sec = document.createElement("section"); sec.className = "bgroup"; sec.dataset.group = g; sec.dataset.order = String(order < 0 ? 999 : order);
+    sec.innerHTML = `${def.t ? `<div class="bghead"><h3>${inline(def.t)}</h3><span class="bgcount" data-bgcount="${esc(g)}"></span>${def.hint ? `<span class="bghint">${inline(def.hint)}</span>` : ""}<span class="grow-sp"></span><button type="button" class="blink" data-act="take" data-group="${esc(g)}" hidden></button></div>` : `<div class="bghead plain-head"><button type="button" class="blink" data-act="take" data-group="${esc(g)}" hidden></button></div>`}<div class="bcards" data-cards="${esc(g)}"></div>`;
+    const root = $("blist") || $("questions");
+    const after = [...root.querySelectorAll(":scope > .bgroup")].find((s) => +s.dataset.order > +sec.dataset.order);
+    root.insertBefore(sec, after || null);
+    return sec.querySelector("[data-cards]");
   }
-  function renderCard(q) {
-    const c = document.createElement("article"); c.className = "card"; c.id = "q-" + q.id; c.dataset.qid = q.id; c.draggable = true; c.tabIndex = -1;
-    c.innerHTML = `<div class="chead"><span class="qid">${esc(q.id)}</span><h4 class="ctitle">${inline(q.text)}</h4>
-        <span class="cflag" aria-hidden="true"></span>
-        <button type="button" class="cexp" aria-expanded="false" aria-label="Show details of ${esc(q.id)}"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
-      <div class="moves" role="group" aria-label="Move this card"></div>
-      <div class="cdetail"><div class="cin"><div class="cmain">
-        ${q.from ? `<p class="from">${inline(q.from)}</p>` : ""}
-        ${q.ctx ? `<div class="ctx">${md(q.ctx)}</div>` : ""}
-        <button type="button" class="addnote">Add a note</button>
-        <div class="note cnote"><label for="${esc(q.id)}-note"><b>Note</b><span>Optional — a condition, a reason, what to change.</span></label>
-          <textarea id="${esc(q.id)}-note" rows="2"></textarea></div>
-      </div><div class="cside">
-        <p class="outcome"></p>
-        <p class="sugg"></p>
-      </div></div></div>`;
-    if (view.expanded.has(q.id)) setOpen(c, true);
-    c.querySelector(".cexp").addEventListener("click", () => setOpen(c, !c.classList.contains("open")));
-    c.querySelector(".addnote").addEventListener("click", () => { c.classList.add("noting"); c.querySelector("textarea").focus(); });
-    c.addEventListener("dragstart", (e) => { view.drag = q.id; c.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", q.id); } catch {}
-      el.qs.querySelectorAll(".box").forEach((b) => b.classList.toggle("no-drop", b.dataset.box !== boxOf(q.id) && !allowed(q, b.dataset.box))); });
-    c.addEventListener("dragend", () => { view.drag = null; c.classList.remove("dragging"); el.qs.querySelectorAll(".box.over, .box.no-drop").forEach((b) => b.classList.remove("over", "no-drop")); });
-    const ta = c.querySelector("textarea");
-    ta.addEventListener("focus", () => { c.draggable = false; });
-    ta.addEventListener("blur", () => { c.draggable = true; });
-    ta.addEventListener("input", () => collect(q.id));
-    c.querySelector(".moves").addEventListener("click", (e) => { const to = e.target.closest(".move")?.dataset.to; if (to) place(q.id, to, true); });
-    return c;
-  }
-  function setOpen(card, open) {
-    card.classList.toggle("open", open);
-    card.querySelector(".cexp")?.setAttribute("aria-expanded", String(open));
-    if (open) view.expanded.add(card.dataset.qid); else view.expanded.delete(card.dataset.qid);
-  }
-  function setAllOpen(open) { el.qs.querySelectorAll(".card").forEach((c) => setOpen(c, open)); }
-  function paintCard(qid) {
-    const node = document.getElementById("q-" + qid); const q = view.questions.get(qid); if (!node || !q) return;
-    const k = boxOf(qid);
-    const list = [...el.qs.querySelectorAll("[data-cards]")].find((n) => n.dataset.cards === k);
-    if (list && node.parentElement !== list) {
-      const after = [...list.children].find((n) => (view.questions.get(n.dataset.qid)?.n ?? 0) > (q.n ?? 0));
-      list.insertBefore(node, after || null);
-    }
-    node.querySelector(".outcome").innerHTML = q.outcomes && q.outcomes[k] ? inline(q.outcomes[k]) : "";
-    const pk = q.proposed?.k; const why = q.proposed?.why ? " — " + inline(q.proposed.why) : "";
-    node.querySelector(".sugg").innerHTML = pk ? (pk === k ? `<b>Suggested here</b>${why}` : `<b>Suggested</b>${inline(boxLabel(pk))}${why}`) : "";
-    node.classList.toggle("moved", !!pk && pk !== k);
-    node.querySelector(".moves").innerHTML = boxes().filter((b) => b.k !== k && allowed(q, b.k)).map((b) => `<button type="button" class="move" data-to="${esc(b.k)}">→ ${inline(b.t)}</button>`).join("");
-    const ta = node.querySelector("textarea"); const note = view.answers[qid]?.note || "";
-    if (document.activeElement !== ta) ta.value = note;
-    node.classList.toggle("noting", !!note.trim() || node.classList.contains("noting"));
-    node.querySelector(".cflag").textContent = [pk && pk !== k ? "moved" : "", note.trim() ? "note" : ""].filter(Boolean).join(" · ");
-    paintCounts();
-  }
-  function place(qid, k, keepFocus) {
-    const q = view.questions.get(qid); if (!allowed(q, k)) return;
-    record(qid, [k], document.getElementById(qid + "-note")?.value ?? (view.answers[qid]?.note || ""));
-    paintCard(qid);
-    if (keepFocus) document.getElementById("q-" + qid)?.focus({ preventScroll: false });
-  }
-  /* The sink row shows one row of cards and a quarter by default. On a wide window its top edge
-     can be dragged; the chosen height is kept in this browser only. */
-  const WIDE = window.matchMedia("(min-width: 760px) and (min-height: 560px)");
-  const SINK_KEY = "qf-sink-height";
-  const readSinkHeight = () => { try { return parseInt(localStorage.getItem(SINK_KEY) || "", 10) || 0; } catch { return 0; } };
-  const saveSinkHeight = (px) => { try { localStorage.setItem(SINK_KEY, String(px)); } catch {} };
-  function sizeSinks() {
-    el.qs.querySelectorAll(".box.sink .cards").forEach((list) => {
-      const chosen = WIDE.matches ? readSinkHeight() : 0;
-      if (chosen) { list.style.setProperty("--sink-max", `${chosen}px`); return; }
-      const card = [...list.children].find((c) => !c.classList.contains("open")) || list.firstElementChild;
-      const h = card ? card.offsetHeight : 76;
-      const gap = parseFloat(getComputedStyle(list).rowGap) || 10;
-      list.style.setProperty("--sink-max", `${Math.round(h + gap + h / 4)}px`);
-    });
-  }
-  function bindSinkGrips(root) {
-    root.querySelectorAll(".sinkgrip").forEach((grip) => {
-      const list = grip.parentElement.querySelector(".cards");
-      const board = () => el.qs.getBoundingClientRect().height;
-      const clamp = (px) => Math.max(60, Math.min(Math.round(px), Math.round(board() - 220)));
-      const set = (px) => { const v = clamp(px); list.style.setProperty("--sink-max", `${v}px`); saveSinkHeight(v); };
-      let startY = 0, startH = 0;
-      grip.addEventListener("pointerdown", (e) => {
-        if (!WIDE.matches) return;
-        startY = e.clientY; startH = list.clientHeight - (parseFloat(getComputedStyle(list).paddingTop) || 0) - (parseFloat(getComputedStyle(list).paddingBottom) || 0);
-        grip.setPointerCapture(e.pointerId); document.body.classList.add("resizing"); e.preventDefault();
-      });
-      grip.addEventListener("pointermove", (e) => { if (grip.hasPointerCapture(e.pointerId)) set(startH + (startY - e.clientY)); });
-      const stop = (e) => { if (grip.hasPointerCapture(e.pointerId)) grip.releasePointerCapture(e.pointerId); document.body.classList.remove("resizing"); };
-      grip.addEventListener("pointerup", stop); grip.addEventListener("pointercancel", stop);
-      grip.addEventListener("keydown", (e) => {
-        if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
-        e.preventDefault();
-        const cur = parseFloat(getComputedStyle(list).maxHeight) || 120;
-        set(cur + (e.key === "ArrowUp" ? 24 : -24));
-      });
-      grip.addEventListener("dblclick", () => { try { localStorage.removeItem(SINK_KEY); } catch {} sizeSinks(); });
-    });
-  }
-  WIDE.addEventListener?.("change", () => sizeSinks());
-  function paintCounts() {
-    if (!isBoard()) return;
-    requestAnimationFrame(sizeSinks);
-    el.qs.querySelectorAll("[data-count]").forEach((c) => { const list = [...el.qs.querySelectorAll("[data-cards]")].find((n) => n.dataset.cards === c.dataset.count); c.textContent = String(list ? list.children.length : 0); });
+  function placeCard(node, q) {
+    const list = listFor(q);
+    const after = [...list.children].find((n) => (view.questions.get(n.dataset.qid)?.n ?? 0) > (q.n ?? 0));
+    list.insertBefore(node, after || null);
   }
 
-  /* ---------- list ---------- */
+  function renderCard(q) {
+    const c = document.createElement("article"); c.className = "fcard"; c.id = "q-" + q.id; c.dataset.qid = q.id; c.dataset.aidlcId = q.id; c.tabIndex = -1;
+    c.setAttribute("aria-labelledby", "ct-" + q.id);
+    const body = q.detail && (q.plain || q.action) ? q.detail : q.ctx;
+    c.innerHTML = `<div class="chead"><button type="button" class="cexp" aria-expanded="false" aria-controls="cd-${esc(q.id)}" aria-label="Details of ${esc(qLabel(q))}">${CHEV}</button>
+        ${q.severity ? `<span class="sev ${SEV(q.severity)}">${inline(q.severity)}</span>` : ""}<span class="qid" tabindex="0" data-tip="${esc(`Card ${q.id}. Use it when you mention this card in chat.`)}">${esc(q.id)}</span>
+        <h4 class="ctitle" id="ct-${esc(q.id)}">${inline(q.text, q.id)}</h4>
+        ${q.blocking ? `<span class="blk">${inline(String(q.blocking))}</span>` : ""}<span class="qfresh"></span><span class="rowstate"></span></div>
+      <div class="cbody" id="cd-${esc(q.id)}">
+        ${q.plain ? `<p class="plain">${inline(q.plain, q.id)}</p>` : ""}
+        ${q.from ? `<p class="from">${inline(q.from, q.id)}</p>` : ""}
+        ${body ? `<div class="ctx">${md(body, q.id)}</div>` : ""}
+        ${refsHtml(q, "Refers to")}
+        <div class="sugg" hidden></div>
+        <div class="decide" role="group" aria-label="Decision for ${esc(qLabel(q))}"></div>
+        <button type="button" class="addnote">+ Add a note</button>
+        <div class="note cnote"><label for="${esc(q.id)}-note"><b class="nlabel">Note</b><span class="nhint"></span><span class="qsave" id="${esc(q.id)}-save" aria-live="polite"></span></label>
+          <textarea id="${esc(q.id)}-note" rows="2"></textarea></div>
+      </div>`;
+    const head = c.querySelector(".chead");
+    head.addEventListener("click", (e) => { if (e.target.closest("a, .qid, [data-tip]:not(.cexp)")) return; setOpen(q.id, !isOpen(q.id)); });
+    c.querySelector(".decide").addEventListener("click", (e) => { const to = e.target.closest(".dopt")?.dataset.to; if (to) choose(q.id, to); });
+    c.querySelector(".addnote").addEventListener("click", () => { view.noting.add(q.id); paintCard(q.id); document.getElementById(q.id + "-note")?.focus(); });
+    const ta = c.querySelector("textarea");
+    /* Writing a note keeps the card open; it folds when the developer leaves the field with the card complete. */
+    ta.addEventListener("input", () => { if (!view.shut.has(q.id)) view.open.add(q.id); collect(q.id); });
+    ta.addEventListener("blur", (e) => { if (complete(q.id) && !c.contains(e.relatedTarget)) { view.open.delete(q.id); view.shut.delete(q.id); paintCard(q.id); applyFilter(); paintBar(); } });
+    return c;
+  }
+  function setOpen(qid, open) {
+    view.open.delete(qid); view.shut.delete(qid); (open ? view.open : view.shut).add(qid);
+    paintCard(qid);
+  }
+  function setAllOpen(open) {
+    const ids = qsAll().map((q) => q.id);
+    view.open = new Set(open ? ids : []); view.shut = new Set(open ? [] : ids);
+    ids.forEach(paintCard);
+  }
+  function paintCard(qid) {
+    const node = document.getElementById("q-" + qid), q = view.questions.get(qid); if (!node || !q) return;
+    const k = boxOf(qid), pk = q.proposed?.k, open = isOpen(qid), note = noteOf(qid), rule = k ? noteRule(k) : {};
+    node.classList.toggle("open", open); node.classList.toggle("ans", complete(qid)); node.classList.toggle("blocking", !!q.blocking);
+    node.classList.toggle("needs-note", reasonMissing(qid));
+    node.querySelector(".cexp").setAttribute("aria-expanded", String(open));
+    const sg = node.querySelector(".sugg");
+    if (pk && boxDef(pk)) {
+      sg.hidden = false;
+      sg.innerHTML = `<small>Suggested · ${inline(boxLabel(pk))}</small>${q.action ? `<strong>${inline(q.action, qid)}</strong>` : ""}${q.proposed.why ? `<em>${inline(q.proposed.why, qid)}</em>` : ""}`;
+    } else sg.hidden = true;
+    const opts = boxes().filter((b) => allowed(q, b.k));
+    const dec = node.querySelector(".decide");
+    dec.classList.toggle("has-oc", opts.some((b) => q.outcomes && q.outcomes[b.k]));
+    dec.style.setProperty("--n", String(Math.max(1, opts.length)));
+    dec.innerHTML = opts.map((b) => { const oc = q.outcomes && q.outcomes[b.k];
+      return `<button type="button" class="dopt tone-${esc(b.tone || "ink")}${b.k === k ? " on" : ""}${b.k === pk ? " sg" : ""}" data-to="${esc(b.k)}" aria-pressed="${b.k === k}"><b>${inline(b.t)}</b>${b.k === pk ? `<i>suggested</i>` : ""}${oc ? `<span>${inline(oc, qid)}</span>` : ""}</button>`; }).join("");
+    const showNote = view.noting.has(qid) || !!note.trim() || !!rule.required;
+    node.classList.toggle("noting", showNote);
+    node.querySelector(".nlabel").textContent = rule.label || "Note";
+    node.querySelector(".nhint").textContent = rule.required ? "Required." : "Optional — a condition, a reason, what to change.";
+    const ta = node.querySelector("textarea");
+    ta.placeholder = rule.required ? "One or two sentences. Claude reads this back as written." : "";
+    if (document.activeElement !== ta) ta.value = note;
+    node.querySelector(".rowstate").innerHTML = !k ? "" :
+      (reasonMissing(qid) ? `<span class="tag need" tabindex="0" data-tip="${esc(`${stripMd(boxLabel(k))} needs a reason in the note.`)}">needs a reason</span>` : "") +
+      (note.trim() ? `<span class="notetag" tabindex="0" data-tip="${esc("Your note: " + note.trim())}">note</span>` : "") +
+      (pk && pk !== k && boxDef(pk) ? `<span class="diff" tabindex="0" data-tip="${esc(`Claude suggested ${stripMd(boxLabel(pk))}; you chose ${stripMd(boxLabel(k))}.`)}">not the suggestion</span>` : "") +
+      `<span class="dpill tone-${esc(boxDef(k)?.tone || "ink")}">${inline(boxLabel(k))}</span>`;
+    paintQsave(qid);
+  }
+  function choose(qid, k) {
+    const q = view.questions.get(qid); if (!allowed(q, k)) return;
+    record(qid, [k], document.getElementById(qid + "-note")?.value ?? noteOf(qid));
+    view.open.delete(qid); view.shut.delete(qid);
+    paintCard(qid); applyFilter(); paintHead(); paintBar();
+    $("live").textContent = `${q.id}: ${stripMd(boxLabel(k))}`;
+    const n = document.getElementById("q-" + qid);
+    if (reasonMissing(qid)) document.getElementById(qid + "-note")?.focus();
+    else n?.focus({ preventScroll: true });
+  }
+  /* Taking the suggestion is a press too: it records the card's proposed box. A box that needs a reason, or that
+     costs something (tone warn), is never taken in bulk. */
+  const bulkOk = (q) => { const pk = q.proposed?.k; return !boxOf(q.id) && !!pk && allowed(q, pk) && !noteRule(pk).required && boxDef(pk)?.tone !== "warn"; };
+  function take(list) {
+    let n = 0;
+    list.filter(bulkOk).forEach((q) => { record(q.id, [q.proposed.k], noteOf(q.id)); view.open.delete(q.id); view.shut.delete(q.id); n++; });
+    qsAll().forEach((q) => paintCard(q.id)); applyFilter(); paintHead(); paintBar();
+    toast(n ? `Took the suggestion on ${plural(n, "card")}.` : "No card had a suggestion to take.");
+  }
+  const blockingLeft = () => qsAll().filter((q) => q.blocking && bulkOk(q));
+  /* Counts, the bulk button and visibility of each section, after the filter ran. */
+  function paintSections() {
+    if (!isBoard()) return;
+    document.querySelectorAll(".bgroup").forEach((sec) => {
+      const g = sec.dataset.group, cards = qsAll().filter((q) => (cardGroup(q) || "") === g);
+      const shown = [...sec.querySelectorAll(".fcard:not(.filtered)")].length;
+      sec.hidden = !shown;
+      const cnt = sec.querySelector("[data-bgcount]"); if (cnt) cnt.textContent = String(cards.length);
+      const btn = sec.querySelector('[data-act="take"]'), n = cards.filter(bulkOk).length;
+      const show = !!btn && n > 0 && !cards.some((q) => q.blocking);
+      if (btn) { btn.hidden = !show; btn.textContent = show ? `Take the suggestion on ${n === cards.length ? "all" : "the rest"} · ${n}` : ""; }
+    });
+  }
+
+  /* ---------- question list ---------- */
+  function qShell(q, body) {
+    const s = document.createElement("section"); s.className = "card q"; s.id = "q-" + q.id; s.dataset.qid = q.id; s.dataset.aidlcId = q.id;
+    s.setAttribute("aria-labelledby", "qt-" + q.id);
+    s.innerHTML = `<div class="qhead"><span class="qid" tabindex="0" data-tip="${esc(`Question ${q.id} in the questions file. Use it when you mention this question in chat.`)}">${esc(q.id)}</span><h2 id="qt-${esc(q.id)}">${inline(q.text, q.id)}</h2>
+        <span class="qtags"><span class="qfresh"></span><span class="qstate"></span></span></div>
+      ${q.revNote ? `<p class="revnote">${inline(q.revNote, q.id)}</p>` : ""}
+      <div class="qbody">${q.ctx ? `<div class="ctx">${md(q.ctx, q.id)}</div>` : ""}${body}${refsHtml(q, "Refers to")}</div>`;
+    return s;
+  }
   function renderQuestion(q) {
     if (q.kind === "text") return renderText(q);
-    const s = document.createElement("section"); s.className = "q"; s.id = "q-" + q.id; s.dataset.qid = q.id;
     const multi = q.kind === "multi"; const type = multi ? "checkbox" : "radio";
-    const opts = (q.options || []).map((o) => `<label class="opt"><input type="${type}" name="${esc(q.id)}" value="${esc(o.k)}" id="${esc(q.id)}-${esc(o.k)}"><span><span class="optletter">${esc(o.k)}.</span>${inline(o.t)}</span></label>`).join("");
-    const other = q.other === false ? "" : `<label class="opt"><input type="${type}" name="${esc(q.id)}" value="X" id="${esc(q.id)}-X"><span><span class="optletter">X.</span>Other (please specify)</span></label>`;
-    const proposal = q.proposed && q.proposed.k ? `<div class="proposal"><p><b>Proposed</b>${esc(q.proposed.k)}. ${inline(q.proposed.why || "")}</p><button class="use" type="button" data-k="${esc(q.proposed.k)}">Choose ${esc(q.proposed.k)}</button></div>` : "";
-    s.innerHTML = `<div class="qhead"><span class="qid">${esc(q.id)}</span><h2>${inline(q.text)}</h2></div>
-      ${q.ctx ? `<div class="ctx">${md(q.ctx)}</div>` : ""}
-      ${q.hint || multi ? `<p class="hint">${inline(q.hint || "Select all that apply.")}</p>` : ""}
-      <div class="options">${opts}${other}</div>
-      <div class="note"><label for="${esc(q.id)}-note"><b>Note</b><span id="${esc(q.id)}-notelabel">Optional — a small change to an option, a condition, a reason. Required for Other.</span></label>
+    const pk = q.proposed && q.proposed.k;
+    const opts = (q.options || []).map((o) => `<label class="opt"><input type="${type}" name="${esc(q.id)}" value="${esc(o.k)}" id="${esc(q.id)}-${esc(o.k)}"><span><span class="optletter">${esc(o.k)}</span><span>${inline(o.t, q.id)}</span></span>${o.k === pk ? `<span class="tag ptag" style="background:var(--accent-soft);color:var(--accent)" data-tip="Claude’s proposal. It is chosen only if you press it.">proposed</span>` : ""}</label>`).join("");
+    const other = q.other === false ? "" : `<label class="opt"><input type="${type}" name="${esc(q.id)}" value="X" id="${esc(q.id)}-X"><span><span class="optletter">X</span><span>Other — your own answer, in the note below</span></span></label>`;
+    const proposal = pk ? `<div class="proposal"><p><span class="tag" tabindex="0" data-tip="Claude’s suggestion. Nothing is chosen until you press it.">Proposed ${esc(pk)}</span>${inline(q.proposed.why || "", q.id)}</p><button class="use" type="button" data-k="${esc(pk)}">Choose ${esc(pk)}</button></div>` : "";
+    const s = qShell(q, `${q.hint || multi ? `<p class="hint">${inline(q.hint || "Select all that apply.", q.id)}</p>` : ""}
+      <div class="options" role="${multi ? "group" : "radiogroup"}" aria-labelledby="qt-${esc(q.id)}">${opts}${other}</div>
+      <div class="note"><label for="${esc(q.id)}-note"><b>Note</b><span id="${esc(q.id)}-notelabel">Optional — a small change to an option, a condition, a reason. Required for Other.</span><span class="qsave" id="${esc(q.id)}-save" aria-live="polite"></span></label>
         <textarea id="${esc(q.id)}-note" rows="2"></textarea></div>
-      ${proposal}`;
-    s.querySelectorAll("input").forEach((i) => i.addEventListener("change", () => { if (!multi) { /* radio */ } collect(q.id); }));
+      ${proposal}`);
+    s.querySelectorAll("input").forEach((i) => i.addEventListener("change", () => collect(q.id)));
     s.querySelector("textarea").addEventListener("input", () => collect(q.id));
     s.querySelector(".use")?.addEventListener("click", (e) => { const inp = document.getElementById(q.id + "-" + e.currentTarget.dataset.k); if (inp) { if (!multi) s.querySelectorAll("input").forEach((i) => (i.checked = false)); inp.checked = true; collect(q.id); inp.focus(); } });
     return s;
   }
   function renderText(q) {
-    const s = document.createElement("section"); s.className = "q"; s.id = "q-" + q.id; s.dataset.qid = q.id;
-    const proposal = q.proposed && q.proposed.t ? `<div class="proposal"><p><b>Proposed</b>${inline(q.proposed.t)}</p><button class="use" type="button">Use this text</button></div>` : "";
-    s.innerHTML = `<div class="qhead"><span class="qid">${esc(q.id)}</span><h2>${inline(q.text)}</h2></div>
-      ${q.ctx ? `<div class="ctx">${md(q.ctx)}</div>` : ""}
-      ${q.hint ? `<p class="hint">${inline(q.hint)}</p>` : ""}
-      <div class="note"><label for="${esc(q.id)}-note"><b>Answer</b><span>In your own words.</span></label>
+    const proposal = q.proposed && q.proposed.t ? `<div class="proposal"><p><span class="tag" tabindex="0" data-tip="Claude’s suggested answer. It is used only if you press it.">Proposed</span>${inline(q.proposed.t, q.id)}</p><button class="use" type="button">Use this text</button></div>` : "";
+    const s = qShell(q, `${q.hint ? `<p class="hint">${inline(q.hint, q.id)}</p>` : ""}
+      <div class="note"><label for="${esc(q.id)}-note"><b>Answer</b><span>In your own words.</span><span class="qsave" id="${esc(q.id)}-save" aria-live="polite"></span></label>
         <textarea id="${esc(q.id)}-note" rows="3"></textarea></div>
-      ${proposal}`;
+      ${proposal}`);
     const ta = s.querySelector("textarea");
     ta.addEventListener("input", () => collect(q.id));
     s.querySelector(".use")?.addEventListener("click", () => { ta.value = q.proposed.t; collect(q.id); ta.focus(); });
@@ -597,89 +1156,181 @@ body.resizing, body.resizing * { cursor: ns-resize !important; user-select: none
     const a = view.answers[qid] || { k: [], note: "" };
     node.querySelectorAll("input").forEach((i) => (i.checked = (a.k || []).includes(i.value)));
     const ta = node.querySelector("textarea"); if (document.activeElement !== ta) ta.value = a.note || "";
-    flagNote(qid);
+    flagNote(qid); paintState(qid); paintQsave(qid);
   }
+  function paintState(qid) {
+    const node = document.getElementById("q-" + qid), q = view.questions.get(qid); if (!node || !q || isBoard()) return;
+    const a = view.answers[qid], need = needsNote(qid), ok = answered(qid);
+    const pk = q.proposed?.k, differs = ok && pk && q.kind !== "text" && !(a.k || []).includes(pk);
+    node.classList.toggle("is-ans", ok && !need);
+    node.querySelector(".qstate").innerHTML =
+      (differs ? `<span class="tag differs" tabindex="0" data-tip="${esc(`Your answer differs from Claude’s proposal (${pk}). That is fine; a note on why helps.`)}">not the proposal</span>` : "") +
+      (need ? `<span class="tag need" tabindex="0" data-tip="You chose Other: write your own answer in the note.">needs your words</span>`
+        : ok ? `<span class="tag ans" tabindex="0" data-tip="${esc(q.kind === "text" ? "Answered in your words." : `Answered ${(a.k || []).join(", ")}${(a.note || "").trim() ? ", with a note" : ""}.`)}">${q.kind === "text" ? "answered" : "answered " + esc((a.k || []).join(", "))}</span>`
+        : `<span class="tag open" tabindex="0" data-tip="Not answered yet. Left open, it stays an open question for Claude.">open</span>`);
+  }
+  function paintQsave(qid) {
+    const s = document.getElementById(qid + "-save"); if (!s) return;
+    const st = view.qstat[qid] || "";
+    s.className = "qsave" + (st === "Saved" ? " ok" : st === "Not saved" ? " fail" : "");
+    s.textContent = st;
+  }
+  const needsNote = (qid) => { const a = view.answers[qid]; return !!a && (a.k || []).includes("X") && !(a.note || "").trim(); };
   function flagNote(qid) {
     const node = document.getElementById("q-" + qid); if (!node || view.questions.get(qid)?.kind === "text") return;
-    const a = view.answers[qid]; const needs = !!a && (a.k || []).includes("X") && !(a.note || "").trim();
-    node.classList.toggle("needs-note", needs);
+    const a = view.answers[qid];
+    node.classList.toggle("needs-note", needsNote(qid));
     const lbl = document.getElementById(qid + "-notelabel"); if (lbl) lbl.textContent = (a && (a.k || []).includes("X")) ? "Your own words — required for Other." : "Optional — a small change to an option, a condition, a reason. Required for Other.";
   }
   function collect(qid) {
     const node = document.getElementById("q-" + qid); if (!node) return;
     const note = node.querySelector("textarea").value;
-    const k = isBoard() ? [boxOf(qid)] : [...node.querySelectorAll("input:checked")].map((i) => i.value);
+    const k = isBoard() ? (boxOf(qid) ? [boxOf(qid)] : []) : [...node.querySelectorAll("input:checked")].map((i) => i.value);
     record(qid, k, note);
   }
+
+  /* ---------- saving: debounced, with a visible state and retries that back off ---------- */
+  const LIVE = { saving: "Saving…", ok: "Saved", fail: "Not saved" };
+  function setSave(state, msg) {
+    const before = view.save.state;
+    view.save = { state, at: state === "ok" ? new Date().toISOString() : view.save.at, msg: msg || "", readonly: view.save.readonly };
+    if (state !== before && LIVE[state]) $("live").textContent = state === "fail" ? (msg || LIVE.fail) : LIVE[state];
+    paintBar();
+  }
+  function setQ(ids, text) { ids.forEach((qid) => { view.qstat[qid] = text; paintQsave(qid); }); }
   function record(qid, k, note) {
     view.answers[qid] = { k, note, at: new Date().toISOString() }; view.touched[qid] = Date.now(); view.pending[qid] = view.answers[qid];
-    view.confirmDone = false; flagNote(qid); updateCount(); setStatus("Unsaved changes…");
+    view.confirmDone = false; view.notice = null;
+    if (!isBoard()) { flagNote(qid); paintState(qid); }
+    markSeen([qid]); setQ([qid], "Unsaved"); setSave("dirty");
+    if (!isBoard()) { applyFilter(); paintHead(); }
     clearTimeout(view.timer); view.timer = setTimeout(flush, 450);
   }
   async function flush() {
     if (view.inflight || !db || !view.id || !Object.keys(view.pending).length) return;
-    const batch = view.pending; view.pending = {}; view.inflight = true; setStatus("Saving…");
-    const id = view.id;
+    const batch = view.pending; view.pending = {}; view.inflight = true; clearTimeout(view.retryTimer);
+    const id = view.id, ids = Object.keys(batch);
+    setQ(ids, "Saving…"); setSave("saving");
+    let failed = false;
     try {
       const patch = { answers: {} }; for (const [qid, a] of Object.entries(batch)) patch.answers[qid] = { k: a.k, note: a.note, at: a.at };
       /* An edit after Done reopens the form; a save that Done itself is waiting for never does. */
       if (view.form && view.form.status === "done" && !view.closing) patch.status = "open";
       await db.doc("forms/" + id).update(patch);
-      if (view.id === id && !Object.keys(view.pending).length) setStatus(`Saved ${fmt(new Date().toISOString())}`, "ok");
+      if (view.id === id) { view.retry = 0; setQ(ids.filter((q) => !view.pending[q]), "Saved"); if (!Object.keys(view.pending).length) setSave("ok"); }
     } catch (e) {
-      Object.assign(view.pending, batch);
-      setStatus(e && e.code === "invalid_argument" ? "You can view this form but not save to it. Ask the owner for Contributor access." : "Couldn’t save. Check your connection; it retries when you change something.", "warn");
-    } finally { view.inflight = false; if (Object.keys(view.pending).length) setTimeout(flush, 800); }
+      failed = true;
+      if (view.id !== id) return;
+      for (const [qid, a] of Object.entries(batch)) if (!view.pending[qid]) view.pending[qid] = a;
+      setQ(ids, "Not saved");
+      const readonly = e && e.code === "invalid_argument";
+      view.save.readonly = readonly;
+      setSave("fail", readonly ? "You can view this form but not save to it. Ask the owner for Contributor access." : "Couldn’t save. Check your connection; it tries again by itself, or press Retry.");
+      toast(readonly ? "You can view this form but not save to it." : "Couldn’t save your answer. It is kept here and sent again.");
+      if (!readonly) { view.retry = Math.min(view.retry + 1, 5); view.retryTimer = setTimeout(flush, 1000 * 2 ** view.retry); }
+    } finally {
+      view.inflight = false;
+      if (view.id === id && !failed && Object.keys(view.pending).length) flush();
+    }
   }
   function answered(qid) {
     const q = view.questions.get(qid); const a = view.answers[qid];
-    if (q?.kind === "card") return true;
+    if (q?.kind === "card") return complete(qid);
     if (q?.kind === "text") return !!(a?.note || "").trim();
     return !!(a?.k || []).length;
   }
-  function updateCount() {
-    const n = [...view.questions.keys()].filter(answered).length;
-    el.done.title = `${n} of ${view.questions.size} answered`;
-  }
-  function unanswered() { return [...view.questions.keys()].filter((qid) => !answered(qid)); }
-  function missingNotes() { return [...view.questions.keys()].filter((qid) => (view.answers[qid]?.k || []).includes("X") && !(view.answers[qid]?.note || "").trim()); }
+  function unanswered() { return ordered().map((q) => q.id).filter((qid) => !answered(qid)); }
+  function missingNotes() { return ordered().map((q) => q.id).filter(needsNote); }
+  const idList = (ids) => (ids.length > 4 ? ids.slice(0, 4) : ids).map(esc).join(", ") + (ids.length > 4 ? ` and ${ids.length - 4} more` : "");
 
-  el.done.addEventListener("click", async () => {
-    if (!db || !view.id) return;
-    const miss = missingNotes();
-    if (miss.length) { setStatus(`${miss.join(", ")}: write your own words for Other, or pick an option.`, "warn"); document.getElementById("q-" + miss[0])?.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
-    const open = unanswered();
-    if (open.length && !view.confirmDone) { view.confirmDone = true; setStatus(`${open.length} unanswered (${open.join(", ")}) — they stay open questions for Claude. Press Done again to confirm.`, "warn"); return; }
+  async function done() {
+    if (!db || !view.id || view.closing) return;
     if (isBoard()) {
-      /* A card left where it started is an answer too: write every card's box. */
-      const now = new Date().toISOString();
-      for (const qid of view.questions.keys()) {
-        const k = boxOf(qid);
-        if (view.answers[qid]?.k?.[0] !== k) { view.answers[qid] = { k: [k], note: view.answers[qid]?.note || "", at: now }; view.pending[qid] = view.answers[qid]; }
-      }
+      const left = ordered().map((q) => q.id).filter((id) => !complete(id));
+      if (left.length) { notify({ crit: true, html: `${plural(left.length, "card")} need an answer (${idList(left)}): press a decision, and write the reason where one is asked for.`, jump: left[0] }); reveal("q-" + left[0]); return; }
     }
-    el.done.disabled = true; clearTimeout(view.timer); view.closing = true;
+    const miss = missingNotes();
+    if (miss.length) { notify({ crit: true, html: `${idList(miss)}: you chose Other — write your own words in the note, or pick an option.`, jump: miss[0] }); reveal("q-" + miss[0]); return; }
+    const open = unanswered();
+    if (open.length && !view.confirmDone) { view.confirmDone = true; notify({ html: `${plural(open.length, "question")} unanswered (${idList(open)}). They stay open questions for Claude. Press Done again to confirm.`, jump: open[0] }); return; }
+    clearTimeout(view.timer); clearTimeout(view.retryTimer); view.closing = true; view.notice = null; paintBar();
     try {
       /* Wait until every answer is saved: an autosave may be in flight, and more may be pending. */
       for (let i = 0; i < 100 && (view.inflight || Object.keys(view.pending).length); i++) {
         if (!view.inflight) await flush(); else await new Promise((r) => setTimeout(r, 100));
+        if (view.save.state === "fail") break;
       }
       if (view.inflight || Object.keys(view.pending).length) throw new Error("unsaved");
       await db.doc("forms/" + view.id).update({ status: "done", savedAt: new Date().toISOString() }); view.confirmDone = false;
-    } catch { setStatus("Couldn’t mark the form as done. Try again.", "warn"); }
-    finally { view.closing = false; el.done.disabled = false; }
-  });
+      toast("Marked as done. Tell Claude in chat that the form is done.");
+    } catch {
+      notify({ crit: true, html: "Couldn’t mark the form as done: some answers are not saved. Check your connection and press Done again." });
+    } finally { view.closing = false; paintBar(); }
+  }
 
-  $("expandall").addEventListener("click", () => setAllOpen(true));
-  $("collapseall").addEventListener("click", () => setAllOpen(false));
+  /* ---------- jumps land below the bar and flash ---------- */
+  function reveal(targetId) {
+    const node = document.getElementById(targetId); if (!node) return;
+    if (node.classList.contains("filtered")) { view.filter = "all"; applyFilter(); paintBar(); }
+    if (node.classList.contains("fcard") && !node.classList.contains("open")) setOpen(node.dataset.qid, true);
+    node.scrollIntoView({ block: node.classList.contains("fcard") ? "center" : "start", behavior: reduced() ? "auto" : "smooth" });
+    node.classList.remove("flash"); void node.offsetWidth; node.classList.add("flash");
+    if (!node.hasAttribute("tabindex")) node.setAttribute("tabindex", "-1");
+    node.focus({ preventScroll: true });
+  }
+
+  /* ---------- events ---------- */
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("[data-tip]")) hideTip();
+    const home = e.target.closest("[data-home]");
+    if (home) { e.preventDefault(); history.pushState(null, "", location.pathname + location.search); route(); return; }
+    const jump = e.target.closest("[data-jump]");
+    if (jump) { e.preventDefault(); hideTip(); reveal(jump.dataset.jump); return; }
+    const off = e.target.closest("[data-off]");
+    if (off) {
+      e.preventDefault(); showTip(off);
+      const p = off.dataset.path;
+      if (p && navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(p).then(() => toast("That file isn’t in this document — its path is in the tooltip, and now on your clipboard."), () => toast("That source isn’t in this document — read the tooltip."));
+      else toast("That source isn’t in this document — read the tooltip.");
+      return;
+    }
+    const seen = e.target.closest("[data-seen]");
+    if (seen) { markSeen([seen.dataset.seen]); return; }
+    const fl = e.target.closest("[data-filter]");
+    if (fl) { view.filter = view.filter === fl.dataset.filter && fl.dataset.filter !== "all" ? "all" : fl.dataset.filter; applyFilter(); paintBar(); return; }
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (!act) {
+      const t = e.target.closest(".term[data-tip], .tag[data-tip], .qid[data-tip], a.aidlc-id[data-tip]");
+      if (t) showTip(t);
+      return;
+    }
+    if (act === "done") done();
+    else if (act === "retry") { view.retry = 0; flush(); }
+    else if (act === "next") { const open = unanswered(); const cur = ordered().findIndex((q) => { const n = document.getElementById("q-" + q.id); return n && n.getBoundingClientRect().top > (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--bar-h")) || 120) + 24; }); const after = ordered().slice(Math.max(0, cur)).map((q) => q.id).find((q) => open.includes(q)) || open[0]; if (after) reveal("q-" + after); }
+    else if (act === "blocking") take(blockingLeft());
+    else if (act === "take") { const g = e.target.closest("[data-group]").dataset.group; take(qsAll().filter((q) => (cardGroup(q) || "") === g)); }
+    else if (act === "expand") setAllOpen(true);
+    else if (act === "collapse") setAllOpen(false);
+    else if (act === "allseen") markSeen(qsAll().map((q) => q.id));
+  });
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest && e.target.closest("a.aidlc-id"); if (!a) return;
+    const id = a.getAttribute("data-aidlc-ref"), node = id && document.getElementById("q-" + id);
+    if (!node) return;
+    if (node.classList.contains("filtered")) { view.filter = "all"; applyFilter(); paintBar(); }
+    if (node.classList.contains("fcard") && !node.classList.contains("open")) setOpen(node.dataset.qid, true);
+  }, true);
+  window.addEventListener("beforeunload", (e) => { if (Object.keys(view.pending).length || view.inflight) { flush(); e.preventDefault(); e.returnValue = ""; } });
 
   /* ---------- boot ---------- */
   function route() { const id = formId(); if (id) showForm(id); else showIndex(); }
+  AidlcIds.observe(app, idMap, { toast });
   window.addEventListener("hashchange", route);
-  route();
   (async () => {
-    db = window.claude && typeof window.claude.use === "function" ? await window.claude.use("db") : null;
-    if (!db) { el.lede.textContent = "Sign in to claude.ai to see your forms."; el.list.innerHTML = ""; el.qs.innerHTML = ""; el.bar.hidden = true; return; }
+    const use = window.claude && typeof window.claude.use === "function" ? window.claude.use : null;
+    db = use ? await use("db").catch(() => null) : null;
+    if (!db) { app.innerHTML = '<div class="card msg"><b>Sign in to claude.ai to see your forms.</b><p>The forms are stored with the artifact, and only a signed-in viewer can read them.</p></div>'; return; }
+    try { const user = await use("user"); uid = user && typeof user.id === "function" ? await user.id() : null; } catch { uid = null; }
     route();
   })();
 })();
