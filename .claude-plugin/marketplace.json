@@ -63,7 +63,7 @@
     {
       "name": "aidlc-session-titles",
       "source": "./plugins/aidlc-session-titles",
-      "description": "For AI-DLC projects: keeps every session that runs the workflow titled by what it is on — `<unit> — <stage>` only in a Unit's checkout that really works on the Unit (a Haiku agent judges), else `<phase> — <stage>`; a session opened from a Unit's branch for other work keeps its title. Read from the project's state, never from the agent. Set at each prompt and, in the desktop app, renamed mid-turn when the stage or Unit moves on.",
+      "description": "For AI-DLC projects: keeps every session that runs the workflow titled by what it is on — `<unit> — <stage>` only in a Unit's checkout that really works on the Unit (a Haiku agent judges), else `<phase> — <stage>` (just `Construction` for other Construction stages outside a Unit checkout); a session opened from a Unit's branch for other work keeps its title. Read from the project's state, never from the agent. Set at each prompt and, in the desktop app, renamed mid-turn when the stage or Unit moves on.",
       "version": "0.2.0"
     },
     {

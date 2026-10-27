@@ -6,7 +6,8 @@ title of every session that runs an AI-DLC workflow in step with what it is on:
 | The session is on | Title | Example |
 |---|---|---|
 | a per-Unit stage, in a checkout that has claimed a Unit, in a session that works on that Unit | `<unit> — <stage>` | `u4-day-navigation — Functional Design` |
-| anything else in the workflow — including Build and Test, CI Pipeline, and a per-Unit stage outside a Unit's checkout | `<phase> — <stage>` | `Construction — Functional Design` |
+| Build and Test, CI Pipeline, and any stage outside Construction | `<phase> — <stage>` | `Construction — Build and Test` |
+| any other Construction stage outside a Unit's checkout (e.g. Functional Design) | just `Construction` | `Construction` |
 | a session in a Unit's checkout that is not working on the Unit | its title is left as it is | |
 
 The title is read from the project, never from the agent's memory:

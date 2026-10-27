@@ -4,7 +4,8 @@
 The title, separated by an em dash:
 
   - in a Unit's checkout, on a per-Unit stage:  `<unit> — <stage>`    e.g. `u4-day-navigation — Functional Design`
-  - any other AI-DLC work:                     `<phase> — <stage>`   e.g. `Construction — Functional Design`
+  - Build and Test, CI Pipeline, other phases:  `<phase> — <stage>`   e.g. `Construction — Build and Test`
+  - a Construction stage outside a Unit's checkout (e.g. Functional Design): just `Construction`
 
 What the session is on is read from the project, never from the assistant: the intent this session is bound to
 (aidlc/.aidlc-sessions/<session>.binding.json), else the space's active-intent cursor, else its one live intent; the
@@ -54,6 +55,9 @@ SEPARATOR = " — "
 RENAME_TOOL = "mcp__ccd_session_mgmt__set_session_title"
 # The stages that run once per Unit; on any other the title names the phase.
 PER_UNIT_STAGES = ("functional-design", "nfr-requirements", "nfr-design", "infrastructure-design", "code-generation")
+# Construction stages that keep their name in the title outside a Unit's checkout; every other Construction stage is
+# titled just `Construction` there.
+NAMED_CONSTRUCTION_STAGES = ("build-and-test", "ci-pipeline")
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 UNIT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 SPACE_NAME = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -444,15 +448,18 @@ def expected_title(event, state, project):
         return None
     name, phase = stage_graph(project).get(stage, ("", ""))
     stage_name = name or titled(stage)
-    if stage in PER_UNIT_STAGES:
-        unit = claimed_unit(project, space, intent_uuid(project, space, intent))
-        if unit:
-            session = is_unit_session(event, state, project, unit, stage)
-            if session is None or session is False:
-                return None
-            return unit + SEPARATOR + stage_name
+    unit = claimed_unit(project, space, intent_uuid(project, space, intent))
+    if unit and stage in PER_UNIT_STAGES:
+        session = is_unit_session(event, state, project, unit, stage)
+        if session is None or session is False:
+            return None
+        return unit + SEPARATOR + stage_name
     phase = phase or phase_in_state(text, stage)
-    return (titled(phase) + SEPARATOR + stage_name) if phase else None
+    if not phase:
+        return None
+    if phase.lower() == "construction" and not unit and stage not in NAMED_CONSTRUCTION_STAGES:
+        return titled(phase)  # not in a Unit's checkout: the phase alone
+    return titled(phase) + SEPARATOR + stage_name
 
 
 def title_for(event, state):

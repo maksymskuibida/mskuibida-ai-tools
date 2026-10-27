@@ -165,11 +165,11 @@ class TitleTests(Base):
 
     def test_per_unit_stage_outside_a_unit_checkout_names_the_phase(self):
         self.set_state("units-generation", unit_stage="functional-design", active_unit="u5-live-updates")
-        self.assertEqual(self.title(), "Construction — Functional Design")
+        self.assertEqual(self.title(), "Construction")
 
     def test_per_unit_stage_without_a_claim_names_the_phase(self):
         self.set_state("functional-design")
-        self.assertEqual(self.title(), "Construction — Functional Design")
+        self.assertEqual(self.title(), "Construction")
 
     def test_claim_wins_over_the_shared_active_unit(self):
         self.set_state("units-generation", unit_stage="functional-design", active_unit="u5-live-updates")
@@ -179,7 +179,7 @@ class TitleTests(Base):
     def test_claim_of_another_intent_is_ignored(self):
         self.set_state("functional-design")
         self.claim("u2-blocks", uuid="ffffffff-0000-0000-0000-000000000000")
-        self.assertEqual(self.title(), "Construction — Functional Design")
+        self.assertEqual(self.title(), "Construction")
 
     def test_construction_stage_not_per_unit_names_the_phase(self):
         self.set_state("build-and-test")
@@ -194,7 +194,7 @@ class TitleTests(Base):
 
     def test_directive_unit_alone_does_not_name_the_unit(self):
         self.set_directive("functional-design", unit="u3-notes")
-        self.assertEqual(self.title(), "Construction — Functional Design")
+        self.assertEqual(self.title(), "Construction")
 
     def test_older_directive_is_ignored(self):
         self.set_directive("functional-design", unit="u3-notes", newer=False)
@@ -202,7 +202,9 @@ class TitleTests(Base):
 
     def test_stage_missing_from_the_graph_uses_the_state_heading(self):
         self.set_state("code-review-sweep")
-        self.assertEqual(self.title(), "Construction — Code Review Sweep")
+        self.assertEqual(self.title(), "Construction")
+        self.claim("u2-blocks")
+        self.assertEqual(self.title_of(self.prompt("next")), "Construction — Code Review Sweep")
 
     def test_lone_intent_without_a_cursor(self):
         os.remove(os.path.join(self.intents, "active-intent"))
