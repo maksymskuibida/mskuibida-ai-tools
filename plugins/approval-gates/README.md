@@ -37,7 +37,7 @@ design stages with their reviewer rounds and no approval between them. You stop 
   - what changed after the plan was approved, or "the design stays as approved";
   - what isn't verified yet;
   - what was built, in plain words, with a small map of how the pieces connect;
-  - the approved design, folded.
+  - the approved design.
 
 Each page is one **gate bundle**: a JSON file whose contract is [`contract/README.md`](contract/README.md) and
 [`contract/gate-bundle.schema.json`](contract/gate-bundle.schema.json). `unit_bundle.py draft` fills every row it can
@@ -49,7 +49,8 @@ validates the bundle.
 The page lives in a second private artifact, **AI-DLC unit approvals** (`unit-gate.html`, with the `db` and `user`
 capabilities):
 
-- Every section starts open, with its rows folded to one line.
+- Everything starts open: every section and every row (the Summary view folds rows to one line). Pressing a
+  row's read dot marks it read and folds it; marking it unread opens it again. Mark all read folds every row.
 - A sticky bar holds Summary/Full, the filters (All, Look first, Unread, High and critical), Expand all and Collapse
   all, your read progress, and a chip per section.
 - Revisions v2, v3 and so on each have their own colour, down to the sub-step, with one filter per revision.
@@ -83,7 +84,8 @@ A page per gate, newest first in a list grouped by intent. A gate looks and work
 - Then the blocks: the agent's summary, the review (verdict, open-finding count, a findings table whose rows open to
   the finding, where and required action), then every document, each with its sections collapsible and an Add a
   note button for a note to Claude. A note says whether it is saving, saved or not saved; a failed save is sent again
-  when you type, or with Retry in the bar. JSON, questions and review copies start collapsed. A document longer than a
+  when you type, or with Retry in the bar. Everything starts open; pressing a block's read dot marks
+  it read and folds it (unread opens it again), and a block already read starts folded. A document longer than a
   database row is split at its headings and joined back on the page.
 
 Each document kind has its own view, with a Text switch back to the document as written:
