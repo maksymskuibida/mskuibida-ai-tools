@@ -226,6 +226,28 @@ class TestUnitEndPage(UnitCase):
         self.assertEqual(self.state_of()["pending"]["rhythm"], "unit-end")
 
 
+class TestStopNetUnitEnd(UnitCase):
+    def test_the_plan_page_link_alone_is_caught_once(self):
+        self.open_plan()
+        self.write_bundle(self.plan_id)
+        self.assertIn("ONE response", self.plan_question()[2])
+        self.said(f"**Read:** {URL}#{self.plan_id}")
+        code, out, err = self.stop()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(json.loads(out)["decision"], "block")
+        self.assertIn("link is already sent", json.loads(out)["reason"])
+        self.assertEqual(self.stop()[1], "")
+
+    def test_the_plan_question_asked_then_stop_passes(self):
+        self.open_plan()
+        self.write_bundle(self.plan_id)
+        self.said(f"**Read:** {URL}#{self.plan_id}")
+        q = gate_question("Approve the code plan for u2-pickup-slots?", labels=("Approve Plan", "Request Changes"))
+        self.assertEqual(self.pre("AskUserQuestion", q)[0], 0)
+        self.post("AskUserQuestion", q, {"answers": {"Approve the code plan for u2-pickup-slots?": "Approve Plan"}})
+        self.assertEqual(self.stop()[1], "")
+
+
 class TestUnitEndGateTheStateDidNotSee(UnitCase):
     """The u12-local-git session: the plan was approved, the Unit was built and its unit-end gate came without a
     `report --result awaiting-approval` this session's state saw. The unit-end bundle was written and the developer

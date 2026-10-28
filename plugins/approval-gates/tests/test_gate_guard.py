@@ -76,6 +76,9 @@ class Case(unittest.TestCase):
         return self.run_hook({"hook_event_name": "PostToolUse", "tool_name": tool, "tool_input": tool_input,
                               "tool_response": response if response is not None else {}}, **kw)
 
+    def stop(self, active=False, **kw):
+        return self.run_hook({"hook_event_name": "Stop", "stop_hook_active": active}, **kw)
+
     def prompt(self, text, **kw):
         return self.run_hook({"hook_event_name": "UserPromptSubmit", "prompt": text}, **kw)
 
@@ -764,7 +767,7 @@ class TestHooksJson(unittest.TestCase):
             self.hooks = json.load(f)["hooks"]
 
     def test_events_and_matchers(self):
-        self.assertEqual(set(self.hooks), {"PreToolUse", "PostToolUse", "UserPromptSubmit"})
+        self.assertEqual(set(self.hooks), {"PreToolUse", "PostToolUse", "UserPromptSubmit", "Stop"})
         self.assertEqual(self.hooks["PreToolUse"][0]["matcher"], "AskUserQuestion|Bash|ArtifactData")
         self.assertEqual(self.hooks["PostToolUse"][0]["matcher"], "Bash|ArtifactData|AskUserQuestion")
         self.assertNotIn("matcher", self.hooks["UserPromptSubmit"][0])
@@ -808,6 +811,91 @@ class TestHooksJson(unittest.TestCase):
         done = subprocess.run([sh, "-c", command], capture_output=True, text=True, env=env)
         self.assertEqual(done.returncode, 2)
         self.assertIn("python3 is not installed", done.stderr)
+
+
+class TestStopNet(Case):
+    Q = "User Stories complete. How would you like to proceed?"
+
+    def blocked(self, out):
+        self.assertTrue(out.strip(), "the stop was not blocked")
+        done = json.loads(out)
+        self.assertEqual(done["decision"], "block")
+        return done["reason"]
+
+    def test_the_failed_sequence_is_caught_once(self):
+        self.open_gate()
+        gate_id = self.publish(link=False)
+        self.assertIn("ONE response", self.context(self.last_publish))
+        self.assertIn("never end the turn on the link alone", self.context(self.last_publish))
+        code, _out, err = self.ask(self.Q)                    # a bare ask: refused
+        self.assertEqual(code, 2)
+        self.assertIn("ONE response", err)
+        self.assertIn("never end the turn on the link alone", err)
+        self.said(f"**Read:** {URL}#{gate_id}")               # the link alone, then the turn ends
+        code, out, err = self.stop()
+        self.assertEqual((code, err), (0, ""))
+        reason = self.blocked(out)
+        self.assertIn("ask the engine's Approval question now with AskUserQuestion", reason)
+        self.assertIn("link is already sent", reason)
+        code, out, err = self.stop()                           # the second stop passes
+        self.assertEqual((code, out, err), (0, "", ""))
+
+    def test_a_stop_with_no_link_sent_asks_for_both_in_one_response(self):
+        self.open_gate()
+        gate_id = self.publish(link=False)
+        reason = self.blocked(self.stop()[1])
+        self.assertIn(f"**Read:** {URL}#{gate_id}", reason)
+        self.assertIn("ONE response", reason)
+
+    def test_stop_hook_active_never_blocks(self):
+        self.open_gate()
+        self.publish()
+        self.assertEqual(self.stop(active=True)[1], "")
+        self.blocked(self.stop()[1])                           # and it left the once-only mark alone
+
+    def test_link_and_question_in_one_response_then_stop_passes(self):
+        self.open_gate()
+        self.publish()
+        self.assertEqual(self.ask(self.Q)[0], 0)
+        self.post("AskUserQuestion", gate_question(self.Q), {"answers": {self.Q: "Approve"}})
+        self.assertEqual(self.stop()[1:], ("", ""))
+
+    def test_a_question_that_failed_does_not_count_as_asked(self):
+        self.open_gate()
+        self.publish()
+        self.post("AskUserQuestion", gate_question(self.Q), {"error": "boom"})
+        self.blocked(self.stop()[1])
+
+    def test_nothing_pending_nothing_published_released(self):
+        self.assertEqual(self.stop()[1:], ("", ""))
+        self.open_gate()
+        self.assertEqual(self.stop()[1:], ("", ""))            # no page yet: the PreToolUse guard owns that
+        self.publish()
+        self.prompt("/approval-gates:release")
+        self.assertEqual(self.stop()[1:], ("", ""))
+
+    def test_an_answered_gate_is_not_nagged(self):
+        self.open_gate()
+        self.publish()
+        self.post("Bash", {"command": report("approved")}, {"stdout": "ok"})
+        self.assertEqual(self.stop()[1:], ("", ""))
+
+    def test_a_fresh_page_is_blocked_again_once(self):
+        self.open_gate()
+        self.publish()
+        self.blocked(self.stop()[1])
+        self.post("Bash", {"command": report("rejected", extra=' --user-input "Request Changes" --reason "fix"')})
+        self.open_gate(result="revised")
+        self.publish(f"{INTENT}-user-stories-20260102T1000")
+        self.blocked(self.stop()[1])
+        self.assertEqual(self.stop()[1], "")
+
+    def test_hooks_json_registers_the_stop_entry(self):
+        with open(os.path.join(PLUGIN, "hooks", "hooks.json"), encoding="utf-8") as f:
+            command = json.load(f)["hooks"]["Stop"][0]["hooks"][0]["command"]
+        self.assertIn("gate_guard.py", command)
+        self.assertIn("aidlc/spaces", command)
+        self.assertIn("python3", command)
 
 
 if __name__ == "__main__":
