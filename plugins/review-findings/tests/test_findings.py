@@ -138,8 +138,8 @@ class Summary(unittest.TestCase):
              "title": "One."}]}
         line = findings.summary(doc).splitlines()[2]
         self.assertTrue(line.endswith("…"))
-        self.assertEqual(findings.first_sentence("One. Two.", 140), "One.")
-        self.assertEqual(findings.first_sentence("See requirements.md for more. Two.", 140), "See requirements.md for more.")
+        self.assertEqual(findings.split_title("One. Two.")[0], "One.")
+        self.assertEqual(findings.split_title("See requirements.md for more. Two.")[0], "See requirements.md for more.")
 
     def test_code_review_label(self):
         self.assertTrue(findings.summary(report()).startswith("**Review findings — code review:** 3 open, 1 blocking"))
@@ -468,6 +468,108 @@ class Board(unittest.TestCase):
         self.assertEqual(findings.form_id({"source": "code-review"}, project, self.NOW), "code-review-20260105t1007")
         for fid in (self.fid, findings.form_id({"source": "code-review"}, "", self.NOW)):
             self.assertRegex(fid, r"^[a-z0-9._-]+$")
+
+SCREENSHOT = ("The port's `stateChanged` carries `PullRequestState`, which has only `open, closed, merged, draft`. The spec "
+              "maps it one to one to a `TimelineState` of `open, closed, merged, draft, readyForReview` and shows copy "
+              "lines for \"reopened\" and \"ready for review\". A reopened event and a ready-for-review event both "
+              "arrive as `.open` and cannot be told apart.")
+
+
+def one_finding(text, **extra):
+    return {"source": "aidlc", "stage_name": "Design", "findings": [
+        {"id": "R-02", "severity": "Major", "where": "spec.md", "finding": text, "action": "Fix the port.",
+         "status": "New", "blocking": True, **extra}]}
+
+
+class Titles(unittest.TestCase):
+    def balanced(self, text):
+        self.assertEqual(text.count("`") % 2, 0, text)
+
+    def test_the_screenshot_finding_is_cut_at_a_boundary_outside_the_code(self):
+        title, rest = findings.split_title(SCREENSHOT)
+        self.assertEqual(title, "The port's `stateChanged` carries `PullRequestState`, which has only `open, closed, merged, draft`.")
+        self.assertTrue(rest.startswith("The spec maps it one to one"))
+        self.balanced(title)
+        self.balanced(rest)
+        item = findings.readable(one_finding(SCREENSHOT))[0]
+        self.assertEqual((item["title"], item["rest"]), (title, rest))
+
+    def test_a_short_first_sentence_is_the_title(self):
+        title, rest = findings.split_title("Names clash. " + SCREENSHOT)
+        self.assertEqual((title, rest[:20]), ("Names clash.", "The port's `stateCha"))
+
+    def test_a_long_code_span_near_the_cut_moves_the_cut(self):
+        span = "`" + "very_long_function_name_" * 3 + "`"
+        text = f"The handler for {span} ignores the failure of the second call and then retries"
+        title, rest = findings.split_title(text)
+        self.assertEqual(title, f"The handler for {span}…")  # past the span: it ends within the limit
+        self.assertEqual(rest, text)  # a word cut shows the whole finding as the body
+        text = f"The handler of the retry loop for {span} ignores the failure and retries"
+        title, rest = findings.split_title(text)
+        self.balanced(title)
+        self.balanced(rest)
+        self.assertTrue(len(title) <= findings.TITLE_LIMIT + 1)
+
+    def test_a_clause_boundary_beats_a_word_cut(self):
+        title, rest = findings.split_title("When the cart expires before the order is confirmed, the stock stays reserved "
+                                           "for the whole session and nobody can buy it")
+        self.assertEqual(title, "When the cart expires before the order is confirmed")
+        self.assertTrue(rest.startswith("the stock stays"))
+
+    def test_no_good_cut_shows_the_whole_text(self):
+        text = "`" + "a" * 120 + "` is far too long and then more words follow"
+        title, rest = findings.split_title(text)
+        self.assertEqual((rest, title.count("`")), (text, 0))
+        self.assertTrue(title.endswith("…") and len(title) <= findings.TITLE_LIMIT)
+        title, rest = findings.split_title("word " * 40)
+        self.assertEqual(rest, ("word " * 40).strip())
+        self.assertTrue(title.endswith("…") and not rest.startswith("…"))
+
+    def test_a_model_title_is_used_and_the_body_is_the_whole_finding(self):
+        doc = one_finding(SCREENSHOT, short="The port cannot tell a reopened PR from a ready one")
+        item = findings.readable(doc)[0]
+        self.assertEqual(item["title"], "The port cannot tell a reopened PR from a ready one")
+        self.assertEqual(item["rest"], item["what"])
+        self.assertIn("**The port cannot tell a reopened PR from a ready one**", findings.summary(doc))
+        card = findings.card(item, doc["findings"][0], False)
+        self.assertEqual((card["text"], card["plain"]), (item["title"], SCREENSHOT))
+
+    def test_refused_titles_say_what_to_fix(self):
+        doc = one_finding("Something is wrong.")
+        for bad, word in (("x" * 101, "too long: 101 > 100"), ("The `port is wrong", "unbalanced backtick"),
+                          ("  ", "empty"), ("A cut title…", "ellipsis")):
+            done, refused = findings.titles(doc, {"R-02": bad})
+            self.assertEqual(done, [])
+            self.assertIn(word, refused["R-02"])
+        self.assertEqual(findings.needs_title(doc), ["R-02"])
+        self.assertIn("not an open finding", findings.titles(doc, {"R-09": "A title"})[1]["R-09"])
+        done, refused = findings.titles(doc, {"R-02": "A good title with `code`"})
+        self.assertEqual((done, refused, findings.needs_title(doc)), (["R-02"], {}, []))
+        self.assertEqual(doc["findings"][0]["title"], "A good title with `code`")
+
+    def test_without_a_title_the_fallback_is_used_everywhere(self):
+        doc = one_finding(SCREENSHOT, title="The port's `stateChanged` carries `PullRequestState`, which has only `open, closed, merge…")
+        item = findings.readable(doc)[0]
+        self.balanced(item["title"])
+        self.assertFalse(item["rest"].startswith("d, draft"))
+        self.assertEqual(findings.needs_title(doc), ["R-02"])
+        for text in findings.dialog_lines(doc) + [findings.dialog_markdown(doc), findings.summary(doc)]:
+            self.assertNotIn("merge…", text)
+
+    def test_the_cli_stores_valid_titles_and_refuses_the_rest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "f.json")
+            doc = one_finding("A finding.")
+            doc["findings"].append(dict(doc["findings"][0], id="R-03"))
+            findings.dump(path, doc)
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = findings.main(["titles", "--findings", path, "--set", json.dumps({"R-02": "Fine", "R-03": "a`b"})])
+            self.assertEqual(code, 1)
+            self.assertEqual(json.loads(out.getvalue())["set"], ["R-02"])
+            self.assertIn("R-03: unbalanced backtick", err.getvalue())
+            self.assertEqual(findings.needs_title(findings.load_findings(path)), ["R-03"])
+
 
 
 class Cli(unittest.TestCase):

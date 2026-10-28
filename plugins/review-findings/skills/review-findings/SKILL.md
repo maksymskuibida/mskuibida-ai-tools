@@ -36,7 +36,20 @@ When there are open findings, the hook's `review-findings:` message arrives righ
 brief or the report. It holds the summary block and the path of a saved findings file (the
 `--findings` argument of the commands below).
 
-## 2. The summary and the question
+## 2. Titles, the summary and the question
+
+**Write the titles first.** Every finding gets a short title the summary, the dialog and the board cards all show; the
+hook message lists the findings that have none. A title is a whole phrase of at most 70 characters (100 at the
+most), plain words, balanced backticks, no trailing "…". With more than a few findings, hand the batch to a Haiku
+subagent (`model: "haiku"`) with the finding texts; for one or two, write them yourself. Record them:
+
+```
+FINDINGS titles --findings <file> --set '{"R-01": "The port cannot tell a reopened PR from a ready one", "R-02": "…"}'
+```
+
+A title that is empty, too long or has an unbalanced backtick is refused with what to fix (the others are
+stored): write the refused ones again, up to twice, then leave them: the plugin then cuts a title from the finding
+at a sentence or clause end, never inside a code span. The card body is the whole finding when a title exists.
 
 Print the summary block from the hook message in chat (or render it again with `FINDINGS summary
 --findings <file>`), as the text of a message of its own, before the question. The hook refuses the
