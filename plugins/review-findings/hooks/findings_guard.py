@@ -636,7 +636,8 @@ def guard(event, tool, ti, command, pend):
                     "Show the developer the summary of the findings in a message of its own before the question: run "
                     f"`python3 {os.path.join(SCRIPTS, 'findings.py')} summary --findings {pend.get('file') or '<the saved findings file>'}` "
                     "and send its output as the text of your message (every finding with its **Suggested:** action), "
-                    "then ask. Thinking is not output and a tool result is not a message.")
+                    + ("after writing the missing titles with `findings.py titles` (see the saved findings), " if missing_titles(pend) else "")
+                    + "then ask. Thinking is not output and a tool result is not a message.")
             if not all(is_triage(q) for q in qs):
                 raise Refusal(
                     f"{total} review finding(s) are open and the developer has not been asked what to do with them. "
@@ -791,6 +792,26 @@ def adopt(event, state, doc):
     return pend
 
 
+def missing_titles(pend):
+    """The ids of the saved findings that have no short title yet; none when the file cannot be read."""
+    try:
+        return F.needs_title(F.load_findings(pend.get("file"))) if pend.get("file") else []
+    except (OSError, ValueError):
+        return []
+
+
+def title_note(event, doc):
+    """A sentence telling the agent to write the card titles first, when some findings have none yet."""
+    missing = F.needs_title(doc)
+    if not missing:
+        return ""
+    return (f" Before the summary and the board, write a short title for {', '.join(missing)}: `python3 "
+            f"{os.path.join(SCRIPTS, 'findings.py')} titles --findings {findings_path(event)} --set '{{\"<id>\": \"<title>\"}}'` "
+            f"(at most {F.TITLE_TARGET} characters, {F.TITLE_LIMIT} at the most, a whole phrase, balanced backticks, no \"…\"; "
+            "a Haiku subagent can write them when there are many; a refused title says what to fix: write it again), "
+            "then print the summary again with `summary`.")
+
+
 def instruction(event, doc, pend):
     total, blocking = pend["open"], pend["blocking"]
     options = "Fix, Open in form" if blocking else "Fix, Accept, Open in form"
@@ -802,7 +823,7 @@ def instruction(event, doc, pend):
         "else comes before that question: the hook refuses every other question, the approval gate and the "
         f"approved/rejected report (code review: edits and commits) until it is answered. The findings are saved in "
         f"{findings_path(event)} (`python3 {os.path.join(SCRIPTS, 'findings.py')} question|summary|board "
-        f"--findings <that file>`).\n\n" + F.summary(doc))
+        f"--findings <that file>`).{title_note(event, doc)}\n\n" + F.summary(doc))
 
 
 def on_report(event, state, ti):

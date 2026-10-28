@@ -9,7 +9,7 @@ Sources
 A findings document is JSON:
   {"source": "aidlc" | "code-review", "stage": "<slug>", "stage_name": "Domain Design", "artifact": "<path>",
    "reviewer"?, "findings": [{"id", "severity", "where", "finding", "action", "status", "blocking", "title",
-                              "scenario"?, "category"?, "suggested"?}]}
+                              "scenario"?, "category"?, "suggested"?, "short"?}]}
 `findings` holds the OPEN findings only (AI-DLC: Status New or Unresolved; code review: all of them).
 Blocking is severity Critical or Major (AI-DLC), or verdict CONFIRMED (code review).
 
@@ -22,6 +22,9 @@ Blocking is severity Critical or Major (AI-DLC), or verdict CONFIRMED (code revi
                             guard recorded for the session (or the given chat answer, or a done form's document)
   suggest --findings FILE --set JSON
                             record a model's suggested action ({"<id>": "…"}) on findings that have no required action
+  titles --findings FILE --set JSON
+                            record a model's short title per finding ({"<id>": "…"}); a title that is empty, over
+                            the limit or has an unbalanced backtick is refused with what to fix
   question --findings FILE  the triage AskUserQuestion input (header Findings), as JSON
   board --findings FILE [--id ID] [--title T] [--project-dir D] --out DIR
                             forms.json, cards/<qid>.json and writes.json for one ArtifactData batch that
@@ -44,7 +47,8 @@ FINDING_ID = re.compile(r"^[A-Za-z]+-\d+$")
 QUOTE = re.compile(r"^>\s*([A-Za-z]+-\d+)\s+(Finding|Where|Required action):\s*(.*)$")
 FIELD_NAMES = {"finding": "finding", "where": "where", "required action": "action"}
 SUMMARY_LIMIT = 140
-TITLE_LIMIT = 90
+TITLE_TARGET = 70  # a card title aims at this many characters ...
+TITLE_LIMIT = 100  # ... and never exceeds this many
 
 TRIAGE_HEADER = "Findings"
 FIX_LABEL, ACCEPT_LABEL, FORM_LABEL = "Fix", "Accept", "Open in form"
@@ -62,11 +66,83 @@ def clip(text, limit):
     return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
 
 
-def first_sentence(text, limit):
-    """The first sentence of a text on one line, cut to `limit` characters (with a final ellipsis when cut)."""
+SPAN = re.compile(r"`[^`]+`|\*\*[^*]+\*\*|\[[^\]]*\]\([^)]*\)")
+
+
+def spans(text):
+    """The (start, end) of every inline-code span, bold span and link in a text: a cut never falls inside one."""
+    return [m.span() for m in SPAN.finditer(text)]
+
+
+def whole_phrase(text):
+    """True when a text has no unbalanced backtick."""
+    return text.count("`") % 2 == 0
+
+
+def boundaries(text, covered):
+    """The cut points of a one-line text outside every span, as (position, kind), kind sentence | clause | word:
+    the title is text[:position]; what follows starts at a word."""
+    out = []
+    for i, ch in enumerate(text):
+        if i == 0 or any(a < i < b for a, b in covered):
+            continue
+        before = text[i - 1]
+        if ch == " ":
+            if before in ".!?" and re.match(r"[A-Z0-9`\"'(*\[]", text[i + 1:i + 2]):
+                out.append((i - 1, "sentence", i))
+            elif before in ",;:":
+                out.append((i - 1, "clause", i))
+            elif text[i:i + 3] == " — " or text[i:i + 3] == " – ":
+                out.append((i, "clause", i + 3))
+            else:
+                out.append((i, "word", i))
+    return out
+
+
+def split_title(text, target=TITLE_TARGET, limit=TITLE_LIMIT):
+    """(title, rest) of a finding without a model's title. The title is a whole phrase: a sentence when one ends within
+    `limit`, else up to the last clause or word boundary within `target` (the first one past it within `limit`).
+    It is never cut inside a code span, bold span or link, so its backticks balance, and the rest starts at a word.
+    With no good cut (a long span first, or no space) the title is the first words without backticks, ending in
+    "…", and `rest` is the whole text. A single sentence that fits `limit` is its own title and has no rest."""
     text = one_line(text)
-    found = re.search(r"(?<=[.!?])\s+(?=[A-Z0-9`\"'(])", text)
-    return clip(text[:found.start()] if found else text, limit)
+    cuts = [c for c in boundaries(text, spans(text)) if c[0] <= limit]
+    sentence = [c for c in cuts if c[1] == "sentence" and c[0] >= 3]
+    if sentence:
+        end, _, start = sentence[0]
+        return text[:end + 1].rstrip(), text[start:].strip()  # the title keeps its full stop
+    if len(text) <= limit:
+        return text, ""
+    for kinds in (("clause",), ("word",)):
+        fitting = [c for c in cuts if c[1] in kinds and c[0] >= 15]
+        before = [c for c in fitting if c[0] <= target]
+        after = [c for c in fitting if c[0] > target]
+        # a span across the target pushes the cut before it, or past it when that still fits and the front is short
+        pick = before[-1] if before and (before[-1][0] >= 25 or not after) else (after[0] if after else None)
+        if pick:
+            end, kind, start = pick
+            title = text[:end].rstrip(" ,;:—–")
+            if kind == "word":
+                return title + "…", text
+            return title, text[start:].strip()
+    bare = text.replace("`", "")
+    head = bare[:target + 1]
+    space = head.rfind(" ")
+    return (head[:space] if space > 15 else bare[:target]).rstrip(" ,;:—–.") + "…", text
+
+
+def refuse_title(title):
+    """Why a model's short title is not accepted, in words that say what to fix; "" when it is."""
+    title = one_line(title)
+    if not title:
+        return "empty: write a short title"
+    if len(title) > TITLE_LIMIT:
+        return f"too long: {len(title)} > {TITLE_LIMIT} characters; aim for {TITLE_TARGET} or fewer, a whole phrase"
+    if not whole_phrase(title):
+        return "unbalanced backtick: close every `code` span or leave the code out"
+    if title.endswith(("…", "...")):
+        return "ends in an ellipsis: write a whole phrase, not a cut one"
+    return ""
 
 
 def slug(text):
@@ -144,7 +220,7 @@ def record(fid, severity, where, finding, action, status):
     severity = severity_of(severity)
     return {"id": fid, "severity": severity, "where": where.strip(), "finding": finding.strip(),
             "action": action.strip(), "status": status.strip(), "blocking": is_blocking(severity),
-            "title": first_sentence(finding, TITLE_LIMIT)}
+            "title": split_title(finding)[0]}
 
 
 # ---------------------------------------------------------------- parsers
@@ -194,10 +270,17 @@ def parse_report(data):
         found.append({
             "id": f"F-{n + 1:02d}", "severity": verdict.capitalize() if verdict else "Unrated", "where": where,
             "finding": summary.strip(), "action": "", "status": "New", "blocking": verdict == "CONFIRMED",
-            "title": clip(item.get("short_summary") or first_sentence(summary, TITLE_LIMIT), TITLE_LIMIT),
+            "title": clean_title(item.get("short_summary")) or split_title(summary)[0],
+            **({"short": clean_title(item.get("short_summary"))} if clean_title(item.get("short_summary")) else {}),
             "scenario": str(item.get("failure_scenario") or "").strip(), "category": str(item.get("category") or "").strip(),
         })
     return {"source": "code-review", "stage": "", "stage_name": "code review", "artifact": "", "findings": found}
+
+
+def clean_title(text):
+    """A reviewer's own short summary when it is a valid title, else ""."""
+    text = one_line(text)
+    return "" if refuse_title(text) else text
 
 
 CUT_OFF = ("the review brief was cut off (piped through head/tail/grep or redirected): run the command again "
@@ -294,8 +377,8 @@ def add(refs, ref):
 def readable(doc):
     """Each open finding in plain words, in the order of the form's cards:
     [{id, n, title, rest, what, suggested, suggested_by, where, blocking, scenario, refs}].
-    `title` is the first sentence (a code review's short summary), `rest` what the finding says after it, `what` the
-    whole finding, `suggested` the reviewer's required action, else the one the mod's model wrote, else a fixed line."""
+    `title` is the model's short title, else a whole sentence or clause cut by `split_title` (never inside a code span),
+    `rest` the card's body (the whole finding with a model's title, else what follows the cut), `what` the whole finding, `suggested` the reviewer's required action, else the one the mod's model wrote, else a fixed line."""
     code = doc.get("source") == "code-review"
     found = doc.get("findings") or []
     numbers = {f.get("id"): n for n, f in enumerate(found, 1)}
@@ -305,9 +388,11 @@ def readable(doc):
         where, ref = place(f, code)
         add(refs, ref)
         what = plain(f.get("finding"), numbers, refs)
-        title = plain(f.get("title") or first_sentence(f.get("finding"), TITLE_LIMIT), numbers, refs)
-        head = title.removesuffix("…")
-        rest = what[len(head):].strip() if what.startswith(head) else what
+        short = one_line(f.get("short"))
+        if short and not refuse_title(short):
+            title, rest = plain(short, numbers, refs), what  # a model's title: the body is the whole finding
+        else:
+            title, rest = split_title(what)
         action = one_line(f.get("action"))
         model = one_line(f.get("suggested"))
         skip = not action and model.rstrip(". ").lower() == NOT_WORTH
@@ -329,6 +414,11 @@ def readable(doc):
 def needs_suggestion(doc):
     """The ids of the open findings that have neither a required action nor a model's suggestion yet."""
     return [f["id"] for f in doc.get("findings") or [] if not one_line(f.get("action")) and not one_line(f.get("suggested"))]
+
+
+def needs_title(doc):
+    """The ids of the open findings that have no model-written short title yet."""
+    return [f["id"] for f in doc.get("findings") or [] if refuse_title(f.get("short"))]
 
 
 def reopens(doc):
@@ -435,6 +525,7 @@ def dialog(doc, findings_file=""):
     question = triage(doc)
     return {"findings": findings_file, "question": question, "markdown": dialog_markdown(doc),
             "lines": dialog_lines(doc), "needs_suggestion": needs_suggestion(doc),
+            "needs_title": needs_title(doc),
             "items": [{k: it[k] for k in ("id", "n", "title", "what", "where", "scenario")} for it in readable(doc)]}
 
 
@@ -448,6 +539,25 @@ def suggest(doc, suggestions):
             f["suggested"] = text
             done.append(f["id"])
     return done
+
+
+def titles(doc, given):
+    """Store the model's short title per finding ({"<id>": "…"}): (ids set, {id: why refused}). A refused title is not
+    stored, and the message says what to fix so the agent writes it again. An id that is not an open finding is refused."""
+    known = {f.get("id"): f for f in doc.get("findings") or []}
+    done, refused = [], {}
+    for fid, raw in (given or {}).items():
+        if fid not in known:
+            refused[fid] = "not an open finding of this review"
+            continue
+        why = refuse_title(raw)
+        if why:
+            refused[fid] = why
+            continue
+        known[fid]["short"] = one_line(raw)
+        known[fid]["title"] = one_line(raw)
+        done.append(fid)
+    return done, refused
 
 
 # ---------------------------------------------------------------- the chat side
@@ -827,6 +937,9 @@ def main(argv=None):
     g = sub.add_parser("suggest")
     g.add_argument("--findings", required=True)
     g.add_argument("--set", required=True, help='JSON {"<finding id>": "<suggested action>"}')
+    t = sub.add_parser("titles")
+    t.add_argument("--findings", required=True)
+    t.add_argument("--set", required=True, help='JSON {"<finding id>": "<short title>"}')
     b = sub.add_parser("board")
     b.add_argument("--findings", required=True)
     b.add_argument("--id")
@@ -874,6 +987,16 @@ def main(argv=None):
             if done:
                 dump(args.findings, doc, indent=1)
             print(json.dumps({"set": done}))
+        elif args.cmd == "titles":
+            doc = load_findings(args.findings)
+            done, refused = titles(doc, json.loads(args.set))
+            if done:
+                dump(args.findings, doc, indent=1)
+            print(json.dumps({"set": done, "refused": refused, "still_missing": needs_title(doc)}, ensure_ascii=False))
+            if refused:
+                print("findings.py: refused titles, write them again: " + "; ".join(f"{k}: {v}" for k, v in refused.items()),
+                      file=sys.stderr)
+                return 1
         elif args.cmd == "question":
             doc = load_findings(args.findings)
             if incomplete(doc):
