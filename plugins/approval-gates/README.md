@@ -165,6 +165,7 @@ the `--reason` of the rejected report. It never writes your notes, and never upd
 - A gate is not opened by a report the engine refused (`"kind": "error"`).
 - The same question until a message of the agent in the session's transcript carries the page's link
   `<artifact url>#<gate id>`: you get the link before the question, every time.
+- A turn that ends on the link, with the gate question never asked (a `Stop` hook blocks the stop once per published page and asks for the question; send the link and the question in one response).
 - The same question with the page's link in its text: the link goes in a message of its own, so the dialog stays readable.
 - `aidlc engine orchestrate report … --result approved|rejected|accepted` before that row exists.
 - A write to `gates/<id>` that carries `notes` (or a decision field: the page records none).

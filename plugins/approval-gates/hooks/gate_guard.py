@@ -513,12 +513,14 @@ def publish_instruction(stage, unit, page=None):
                 f"run `... finalize --bundle <that file> --out <a scratch folder>`, write its writes.json with one ArtifactData "
                 "batch into the AI-DLC unit approvals artifact (a `bundles/<id>` row; never a per-stage `gates/` row, never "
                 "the AI-DLC approval gates artifact), and give the developer the link `<artifact url>#<bundle id>` in "
-                "a message of its own before the question (never inside the question)")
+                "a text block of the same response that makes the question, before the AskUserQuestion call (never inside the "
+                "question, and never end the turn on the link alone)")
     script = os.path.join(PLUGIN_ROOT, "scripts", "gate_bundle.py")
     cmd = f'python3 "{script}" --stage {stage}' + (f" --unit {unit}" if unit else "")
     return (f"run `{cmd} --why <first|revision> --summary-file <a file holding your summary> --out <a scratch folder>`, "
             "write the rows of its writes.json with one ArtifactData batch, and give the developer the link "
-            "`<artifact url>#<gate id>` in a message of its own before the question (never inside the question)")
+            "`<artifact url>#<gate id>` in a text block of the same response that makes the question, before the "
+            "AskUserQuestion call (never inside the question, and never end the turn on the link alone)")
 
 
 def target_of(state, project, call_stage=None, call_unit=None):
@@ -727,7 +729,8 @@ def guard_question(event, state, project, questions):
                           f"{counts['thinking']} thinking, {counts['tool_use']} tool-call and {counts['text']} text "
                           "block(s), none with the link. Thinking is not output and a tool call is not a message: "
                           f"write `**Read:** {link_of(pub)}` as the text of your message, then ask the engine's "
-                          "question as it is, with no link in it.")
+                          "question as it is, with no link in it. Do both in this ONE response: the text block with the link first, "
+                          "then the AskUserQuestion call; never end the turn on the link alone.")
 
 
 def guard_report(state, project, call):
@@ -899,7 +902,9 @@ def record_artifact(project, state, tool_input, response):
             say("PostToolUse", f"gates/{doc_id} is published. Send the developer the link `{link_of(pub)}` in "
                                "a message of its own (the `**Read:**` line of the completion message), then "
                                "ask the engine's Approval question with no link in it; the question is "
-                               "refused until that message was sent.")
+                               "refused until that message was sent. Do both in ONE response: a text block with "
+                               "the link first, then the AskUserQuestion call in the same response; never end the "
+                               "turn on the link alone.")
         changed = True
     return changed
 
@@ -954,7 +959,8 @@ def record_bundle(state, project, intent, doc_id, url):
     state["published"][make_key(pending["stage"], unit) + "@" + page] = pub
     say("PostToolUse", f"bundles/{doc_id} is published in the AI-DLC unit approvals artifact. Send the developer the link `{link_of(pub)}` in a message of its "
                        "own, then ask the engine's Approval question with no link in it; the question is refused until "
-                       "that message was sent.")
+                       "that message was sent. Do both in ONE response: a text block with the link first, then the "
+                       "AskUserQuestion call in the same response; never end the turn on the link alone.")
     return True
 
 
@@ -987,6 +993,58 @@ def record_answers(project, state, tool_input, response):
                            "replaces the chat answer.")
 
 
+def pending_page(state, project):
+    """The published page of the gate the state has open, or None (no gate open, or not published since it opened)."""
+    pending = state["pending"]
+    if not pending or not pending.get("stage"):
+        return None
+    try:
+        return require_published(state, project, pending["stage"], pending.get("unit"), pending.get("opened_at"))
+    except Refusal:
+        return None
+
+
+def mark_asked(project, state, tool_input, response):
+    """The gate's question was asked (the tool call went through): the page needs no more nudging at a stop."""
+    if failed(response) or not gate_questions(state, questions_of(tool_input)):
+        return False
+    pub = pending_page(state, project)
+    if not pub or pub.get("asked_at"):
+        return False
+    pub["asked_at"] = time.time()
+    return True
+
+
+def stop(event, project):
+    """Block the stop once per published page whose gate question was not asked since: the assistant ended its turn
+    on the link (or on nothing) and the developer would never get the question."""
+    if event.get("stop_hook_active"):
+        return
+    with state_lock(event):
+        try:
+            state = load(event)
+        except Refusal:
+            return
+        sync_pending(state, project)
+        pub = pending_page(state, project)
+        if not pub or pub.get("asked_at") or pub.get("stop_blocked"):
+            return
+        pub["stop_blocked"] = time.time()
+        save(event, state)
+        try:
+            sent, _counts = link_sent(event, pub)
+        except Refusal:
+            sent = False
+    if sent:
+        todo = "ask the engine's Approval question now with AskUserQuestion; the link is already sent."
+    else:
+        todo = (f"the page's link {link_of(pub)} is not sent yet: in ONE response write `**Read:** {link_of(pub)}` as "
+                "text, then ask the engine's Approval question with AskUserQuestion.")
+    print(json.dumps({"decision": "block", "reason": f"approval-gates: the gate for {pub.get('id', 'this page')} is "
+                      f"published but its question was never asked, so the developer cannot answer it. {todo} "
+                      f"{RELEASE_HINT}"}))
+
+
 def post(event, project):
     tool, ti = event.get("tool_name"), event.get("tool_input") or {}
     if tool not in ("Bash", "ArtifactData", "AskUserQuestion"):
@@ -1007,6 +1065,7 @@ def post(event, project):
             changed = record_artifact(project, state, ti, event.get("tool_response")) or changed
         else:
             record_answers(project, state, ti, event.get("tool_response"))
+            changed = mark_asked(project, state, ti, event.get("tool_response")) or changed
         if changed:
             save(event, state)
 
@@ -1044,6 +1103,8 @@ def main():
         elif name == "PostToolUse":
             post(event, project)
             flush()
+        elif name == "Stop":
+            stop(event, project)
     except Refusal as why:
         print(f"{why} {RELEASE_HINT}", file=sys.stderr)
         return 2
