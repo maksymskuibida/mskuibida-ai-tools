@@ -782,5 +782,64 @@ class Manifest(unittest.TestCase):
                     self.assertNotIn("aidlc/spaces", hook["command"])  # the ReportFindings source applies anywhere
 
 
+UNIT_BRIEF = "aidlc engine review-brief review --stage code-generation --unit u3-pr-list --why first"
+
+
+def log_review(stage="code-generation", unit="u3-pr-list", verdict="READY", iteration=2):
+    command = (f"aidlc engine log review --stage {stage} --reviewer code-reviewer --iteration {iteration}"
+               + (f" --unit {unit}" if unit else "") + (f" --verdict '{verdict}'" if verdict else ""))
+    return {"command": command}
+
+
+COMPLETED = {"stdout": '{"emitted":"REVIEW_COMPLETED","reviewRecord":".aidlc-engine/reviews/code-generation/units/u3-pr-list/h/2.json"}'}
+
+
+class ReReview(GuardCase):
+    def setUp(self):
+        super().setUp()
+        self.h.brief(command=UNIT_BRIEF)
+        self.h.triage("Open in form")
+        self.h.write_form()
+        self.h.read_form("done", answers=SORTED)
+        self.approved = {"command": report_command("approved", stage="code-generation", extra=" --unit u3-pr-list")}
+
+    def test_fix_cards_block_the_approved_report_and_the_refusal_names_the_review_pass(self):
+        self.assertRefused(self.h.pre("Bash", self.approved), "not approved", "--iteration <N+1>", "report rejected")
+
+    def test_a_ready_re_review_settles_the_fix_cards(self):
+        _, out, _ = self.h.post("Bash", log_review(), COMPLETED)
+        self.assertIn("READY", context(out))
+        self.assertIsNone(self.h.pending())
+        self.assertAllowed(self.h.pre("Bash", self.approved))
+        self.assertAllowed(self.h.pre("AskUserQuestion", gate_input()))
+
+    def test_a_verdict_that_is_not_ready_keeps_the_block(self):
+        self.h.post("Bash", log_review(verdict="NEEDS_CHANGES"), COMPLETED)
+        self.assertIsNotNone(self.h.pending())
+        self.assertRefused(self.h.pre("Bash", self.approved), "not approved")
+
+    def test_a_log_that_emitted_no_completion_keeps_the_block(self):
+        self.h.post("Bash", log_review(), {"stdout": "refused: wrong iteration"})
+        self.assertRefused(self.h.pre("Bash", self.approved), "not approved")
+
+    def test_no_re_review_keeps_the_block(self):
+        self.h.post("Bash", log_review(verdict=""), {"stdout": '{"emitted":"REVIEW_REQUESTED"}'})
+        self.assertRefused(self.h.pre("Bash", self.approved), "not approved")
+
+    def test_another_unit_or_stage_does_not_clear_it(self):
+        self.h.post("Bash", log_review(unit="u4-other"), COMPLETED)
+        self.h.post("Bash", log_review(unit=""), COMPLETED)
+        self.h.post("Bash", log_review(stage="domain-design"), COMPLETED)
+        self.assertIsNotNone(self.h.pending())
+        self.assertRefused(self.h.pre("Bash", self.approved), "not approved")
+
+    def test_a_ready_review_before_the_picks_does_not_clear_unasked_findings(self):
+        h = Harness()
+        self.addCleanup(h.close)
+        h.brief(command=UNIT_BRIEF)
+        h.post("Bash", log_review(), COMPLETED)
+        self.assertIsNotNone(h.pending())
+
+
 if __name__ == "__main__":
     unittest.main()

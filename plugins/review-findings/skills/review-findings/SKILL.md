@@ -181,6 +181,16 @@ that skill's § 1 to publish it first.
 5. The gate (and, for a code review, every edit and commit) waits until the form is done; the hook
    refuses with `Answer the form to continue: <link>`.
 
+### Fixed in place, then re-reviewed (Code Generation, unit-end rhythm)
+
+Where the fixes land before the single gate, fix the Fix cards in place, commit, and run the next
+review pass of the same stage (and Unit): `aidlc engine log review --stage <stage> [--unit <unit>]
+--reviewer <reviewer> --iteration <N+1>`, dispatch the reviewer, then record its verdict with
+`aidlc engine log review … --iteration <N+1> --verdict <verdict>`. When that logs `REVIEW_COMPLETED`
+with verdict READY, the hook treats the picked findings as settled and the approved report goes
+through. Any other verdict, no re-review, or a pass of another stage or Unit leaves the round as it
+was: report rejected. Never ask the developer to release for this.
+
 ## 5. After the gate
 
 The hook clears the findings when the engine's approved or rejected report for the stage runs, so
