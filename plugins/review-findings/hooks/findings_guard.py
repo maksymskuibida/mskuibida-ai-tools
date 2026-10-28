@@ -23,7 +23,9 @@ What it enforces (PreToolUse, exit code 2 and the reason on stderr)
     `findings.py answers` printed the summary of the answers and it matches what was recorded. Answers from a done
     form need no summary.
   * A done form with cards in Fix (a stage review) is Request Changes: the Approval question and an approved report
-    are refused, and the rejected report's --reason names every Fix card.
+    are refused, and the rejected report's --reason names every Fix card. Fixing the cards in place and getting a
+    later review pass of the same stage (and Unit) back READY settles them: the PostToolUse of
+    `aidlc engine log review … --verdict READY` that emitted REVIEW_COMPLETED clears the round.
   * The review brief is printed unpiped and in full: a Bash call that pipes `aidlc engine review-brief`
     (`| head`, `| tail`, `| grep`, …) or redirects its output is refused, and a brief whose table lists
     open findings without their `> R-NN Finding:` lines (a cut-off output) is not recorded as findings:
@@ -332,6 +334,16 @@ def briefs_of(command):
             for seg in segs if aidlc_words(seg, ["engine", "review-brief"])]
 
 
+def review_logs_of(command):
+    """[{stage, unit, verdict}] for each `aidlc engine log review … --verdict V` in a command line."""
+    try:
+        segs = commands(command)
+    except ValueError:
+        return []
+    return [{"stage": option(seg, "--stage"), "unit": option(seg, "--unit"), "verdict": option(seg, "--verdict").strip().lower()}
+            for seg in segs if aidlc_words(seg, ["engine", "log", "review"]) and option(seg, "--verdict")]
+
+
 def cut_briefs(command):
     """True when a `aidlc engine review-brief` in the command line has its output piped to another command or
     redirected to a file, so the hook (and the agent) would see only part of it, or none."""
@@ -516,6 +528,13 @@ REQUEST_CHANGES_NOW = ("Do not ask the Approval question: report rejected now, w
                        "path>#R-NN=<note>\" for each Reject card. Then say in chat which findings go back for fixing.")
 
 
+REVIEW_AGAIN = ("If the fixes are already made, run the next review pass: `aidlc engine log review --stage <stage> "
+                "[--unit <unit>] --reviewer <reviewer> --iteration <N+1>`, dispatch the reviewer, then record its verdict with "
+                "`aidlc engine log review … --iteration <N+1> --verdict READY` (or its real verdict): after READY the approved "
+                "report goes through; otherwise report rejected as above. Never ask the developer to release unless both "
+                "are impossible.")
+
+
 def blocked(pend):
     """True while a code review's edits and commits wait: unanswered, the form not done, or the summary not sent."""
     return not pend.get("asked") or form_wait(pend) is not None or summary_wait(pend) is not None
@@ -631,7 +650,7 @@ def guard(event, tool, ti, command, pend):
         fixes = form_fix_ids(pend)
         if fixes and any(is_gate(q) for q in qs):
             raise Refusal(f"The developer marked {', '.join(fixes)} for Fix in the form, which already is Request Changes. "
-                          + REQUEST_CHANGES_NOW)
+                          + REQUEST_CHANGES_NOW + " " + REVIEW_AGAIN)
         return
     if tool in EDIT_TOOLS:
         if pend.get("source") == "code-review" and blocked(pend) and inside_project(event, ti):
@@ -678,7 +697,7 @@ def report_guard(pend, rep):
     if rep["result"] != "rejected":
         if fixes:
             raise Refusal(f"The developer marked {', '.join(fixes)} for Fix in the form, so the stage is not approved. "
-                          + REQUEST_CHANGES_NOW)
+                          + REQUEST_CHANGES_NOW + " " + REVIEW_AGAIN)
         return
     if fixes:
         missing = [i for i in fixes if not names_id(rep["reason"], i)]
@@ -706,7 +725,8 @@ def relevant(event):
         return True
     if tool == "Bash":
         command = str(ti.get("command", ""))
-        return "review-brief" in command or "orchestrate" in command or "findings.py" in command
+        return ("review-brief" in command or "orchestrate" in command or "findings.py" in command
+                or "log review" in command or re.search(r"\blog\s+review\b", command) is not None)
     return tool in ("AskUserQuestion", "ArtifactData") and os.path.exists(state_path(event))
 
 
@@ -844,6 +864,15 @@ def on_bash(event, state, ti, resp):
             state["pending"] = None
             return None
     text = bash_output(resp)
+    if "REVIEW_COMPLETED" in text:
+        for log in review_logs_of(command):
+            pend = pending_of(state)
+            if pend and not pend.get("truncated") and pend.get("asked") and log["verdict"] == "ready" \
+                    and pend.get("source") == "aidlc" and pend.get("stage") == log["stage"] \
+                    and (pend.get("unit") or "") == log["unit"]:
+                state["pending"] = None  # the findings were fixed in place and a later pass of this review came back READY
+                return (f"the {log['stage']} review came back READY after the findings were picked, so "
+                        f"{ids_text(pend)} are settled. Present the gate; the approved report goes through.")
     for brief in briefs_of(command):
         if "**Stage:**" not in text and "| ID |" not in text:
             continue
