@@ -535,5 +535,64 @@ class Cli(unittest.TestCase):
         self.assertIn("findings.py:", err)
 
 
+
+class ReopenedStage(unittest.TestCase):
+    """A stage re-opened for a blocking finding carries every minor finding worth fixing along."""
+
+    def doc(self, minor_action="Use one name.", minor_suggested="", blocking=True, source="aidlc"):
+        return {"source": source, "stage_name": "Domain Design", "findings": [
+            {"id": "R-02", "severity": "Major", "blocking": blocking, "where": "a.md", "finding": "Ambiguous rule.",
+             "action": "State it.", "title": "Ambiguous rule."},
+            {"id": "R-04", "severity": "Minor", "blocking": False, "where": "b.md", "finding": "Two names.",
+             "action": minor_action, "suggested": minor_suggested, "title": "Two names."}]}
+
+    def picks(self, doc):
+        code = doc.get("source") == "code-review"
+        n = findings.reopens(doc)
+        return [findings.card(it, f, code, "", n)["proposed"] for it, f in zip(findings.readable(doc), doc["findings"])]
+
+    def test_blocking_and_minor_with_action_are_both_fix(self):
+        major, minor = self.picks(self.doc())
+        self.assertEqual((major["k"], minor["k"]), ("fix", "fix"))
+        self.assertEqual(minor["why"], "Minor: the stage is re-opened anyway for 1 blocking finding, so fixing this now costs little")
+
+    def test_a_model_suggestion_counts_as_an_action(self):
+        self.assertEqual(self.picks(self.doc("", "Pick one name."))[1]["k"], "fix")
+
+    def test_minor_without_action_stays_accept(self):
+        self.assertEqual(self.picks(self.doc("", ""))[1]["k"], "accept")
+
+    def test_minor_marked_not_worth_fixing_stays_accept(self):
+        doc = self.doc("", "")
+        self.assertEqual(findings.suggest(doc, {"R-04": "None."}), ["R-04"])
+        self.assertEqual(findings.needs_suggestion(doc), [])
+        item = findings.readable(doc)[1]
+        self.assertEqual((item["suggested_by"], item["suggested"]), ("skip", findings.NOT_WORTH_LINE))
+        self.assertEqual(self.picks(doc)[1]["k"], "accept")
+
+    def test_a_reviewer_action_wins_over_none(self):
+        doc = self.doc()
+        self.assertEqual(findings.suggest(doc, {"R-04": "none"}), [])
+        self.assertEqual(self.picks(doc)[1]["k"], "fix")
+
+    def test_nothing_blocking_is_accept_as_today(self):
+        doc = self.doc(blocking=False)
+        self.assertEqual(findings.reopens(doc), 0)
+        self.assertEqual([p["k"] for p in self.picks(doc)], ["accept", "accept"])
+        self.assertEqual(self.picks(doc)[1]["why"], "Minor: it can be carried as a known risk")
+
+    def test_code_review_is_unchanged(self):
+        doc = self.doc(source="code-review")
+        self.assertEqual(findings.reopens(doc), 0)
+        self.assertEqual(self.picks(doc)[1]["k"], "accept")
+
+    def test_summary_says_fix_covers_the_minor_ones(self):
+        text = findings.summary(self.doc())
+        self.assertIn("re-opened anyway for 1 blocking finding, so Fix also covers the minor findings worth fixing", text)
+        self.assertEqual(text.count("Fix it too"), 1)
+        self.assertNotIn("re-opened anyway", findings.summary(self.doc(blocking=False)))
+        self.assertNotIn("re-opened anyway", findings.summary(self.doc("", "")))
+
+
 if __name__ == "__main__":
     unittest.main()

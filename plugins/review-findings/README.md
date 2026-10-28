@@ -52,6 +52,12 @@ one sentence (`suggestModel`, Haiku by default; `off` keeps a fixed line), once 
 keeps it only when it carries no id. Another finding's id in the text becomes "finding 2"; a path
 with a line becomes the file's name.
 
+**Why minor findings get Fix too.** At a stage gate the expensive part is re-opening the stage, not a small
+fix. When a blocking finding already means Request Changes, the agent recommends Fix for every other finding that has
+a real action to take, and says so in the summary and on the card. A finding with nothing to change, or one the model
+judged not worth fixing (it answers `none`), stays Accept; with nothing blocking, behaviour is as before. A code
+review is unchanged.
+
 - **Fix.** At a stage gate the agent presents the gate as usual and says that Request Changes
   carries the findings. When you pick Request Changes, the reason names every open finding and its
   required action. In a code review the agent applies the fixes now.

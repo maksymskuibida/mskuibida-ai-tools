@@ -77,7 +77,8 @@ async function suggestions($: EngineInterface, model: string, dialog: Dialog): P
       JSON.stringify(wanted.map(i => ({ id: i.id, title: i.title, what: i.what, where: i.where, scenario: i.scenario }))),
       '',
       'For each, write one plain sentence, at most 25 words, that starts with a verb and says what to change. No ids,',
-      'no file paths, no line numbers. Answer with JSON only: {"<id>": "<suggested action>"}',
+      'no file paths, no line numbers. If a finding needs no change (a nitpick or a false positive), answer "none" for it.',
+      'Answer with JSON only: {"<id>": "<suggested action>"}',
     ].join('\n'),
   })
   if (!reply.isAnswered) return {}
