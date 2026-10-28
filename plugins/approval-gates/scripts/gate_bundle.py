@@ -151,6 +151,12 @@ def stage_name(slug, graph_stage):
     return " ".join(ACRONYMS.get(w, w.capitalize()) for w in slug.split("-") if w)
 
 
+def gate_title(name, unit):
+    """What the gate is, for its H1, tab title and list row: `Unit u2-accounts: Approve Functional Design`, or
+    `Approve Requirements Analysis` without a Unit. approval-gate.html derives the same string for older rows."""
+    return (f"Unit {unit}: " if unit else "") + f"Approve {name}"
+
+
 def slugify(name):
     return re.sub(r"[^a-z0-9._-]+", "-", name.lower()).strip("-") or "doc"
 
@@ -556,7 +562,7 @@ def build(args):
     gate_id = slugify("-".join(parts)) + "-" + stamp.strftime("%Y%m%dT%H%M")
 
     gate = {
-        "title": name + (f" · {args.unit}" if args.unit else ""),
+        "title": gate_title(name, args.unit),
         "stage": args.stage,
         "stageName": name,
         "phase": phase,

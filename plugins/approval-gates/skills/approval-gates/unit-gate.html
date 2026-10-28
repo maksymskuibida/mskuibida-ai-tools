@@ -442,6 +442,9 @@ var GateView = (function () {
   function revTone(v) { var n = ((Math.max(2, v) - 2) % 4) + 2; return "r" + n; }
   function plural(n, one, many) { n = +n || 0; return n + " " + (n === 1 ? one : (many || one + "s")); }
   function int(n) { return (+n || 0) | 0; }
+  // What the page is: "Unit u2-accounts: Approve plan" / "... Approve Unit-end". Derived from unit + page so rows written
+  // with the older "U2 · Name" title read the same; unit_bundle.py page_title writes the identical string.
+  function pageTitle(unit, page, stored) { return unit && page ? "Unit " + unit + ": Approve " + (page === "plan" ? "plan" : "Unit-end") : String(stored || ""); }
   /* Only in-page anchors and http(s) addresses become links: a bundle is data, never a script. */
   function safeHref(u) { u = String(u || ""); return /^#[A-Za-z0-9._-]*$/.test(u) || /^https?:\/\//i.test(u) ? u : "#"; }
   function stepKey(st) { return st.source && st.source.key ? String(st.source.key) : "step:" + int(st.n); }
@@ -730,7 +733,7 @@ var GateView = (function () {
           return '<button type="button" class="revbtn" data-act="filter" data-val="' + (on ? "all" : "v" + rn) + '" aria-pressed="' + on + '" title="' + esc(r.note) + '" style="color:var(--' + t + "-fg);" + (on ? "background:var(--" + t + "-bg);border-color:var(--" + t + "-fg)" : "") + '"><span class="sw" style="background:var(--' + t + '-fg)"></span>v' + rn + " · " + plural(n, "change") + (rn === int(h.revision) ? " (current)" : "") + "</button>";
         }).join("") + '<span class="hint">Changed rows carry their version; press one to see only its changes.</span></div>';
     }
-    return '<header class="card head">' + crumbs + '<div class="titlerow"><div><h1>' + esc(h.title) + '</h1><p class="lede">' + esc(h.lede) + "</p></div>" + (facts ? '<div class="facts">' + facts + "</div>" : "") + "</div>" + revRow + "</header>";
+    return '<header class="card head">' + crumbs + '<div class="titlerow"><div><h1>' + esc(pageTitle(h.unit, bundle.page, h.title)) + '</h1><p class="lede">' + esc(h.lede) + "</p></div>" + (facts ? '<div class="facts">' + facts + "</div>" : "") + "</div>" + revRow + "</header>";
   }
 
   function chipFor(st, bundle, key) {
@@ -807,12 +810,12 @@ var GateView = (function () {
       Object.keys(groups).map(function (k) {
         return '<section class="card list"><h2>' + esc(k) + "</h2>" + groups[k].map(function (r) {
           var b = r.bundle || {}, h = b.header || {};
-          return '<a class="lrow" href="#' + esc(r.id) + '" data-nav="' + esc(r.id) + '"><b>' + esc(r.title || h.title || r.id) + "</b><small>" + esc(r.page === "plan" ? "Plan approval" : "Unit end") + " · v" + int(h.revision || 1) + " · " + esc(String(r.createdAt || "").replace("T", " ").replace(/:\d\d(\.\d+)?Z$/, " UTC")) + '</small><span class="end lc" style="' + tone(r.status === "open" ? "warn" : "low") + '">' + esc(r.status || "") + "</span></a>";
+          return '<a class="lrow" href="#' + esc(r.id) + '" data-nav="' + esc(r.id) + '"><b>' + esc(pageTitle(r.unit || h.unit, r.page, r.title || h.title) || r.id) + "</b><small>" + esc(r.page === "plan" ? "Plan approval" : "Unit end") + " · v" + int(h.revision || 1) + " · " + esc(String(r.createdAt || "").replace("T", " ").replace(/:\d\d(\.\d+)?Z$/, " UTC")) + '</small><span class="end lc" style="' + tone(r.status === "open" ? "warn" : "low") + '">' + esc(r.status || "") + "</span></a>";
         }).join("") + "</section>";
       }).join("");
   }
 
-  return { render: render, listHtml: listHtml, order: order, sortRows: sortRows, anchor: anchor, itemsOf: itemsOf, isRead: isRead, esc: esc, idMap: idMap };
+  return { render: render, listHtml: listHtml, pageTitle: pageTitle, order: order, sortRows: sortRows, anchor: anchor, itemsOf: itemsOf, isRead: isRead, esc: esc, idMap: idMap };
 })();
 if (typeof module !== "undefined") module.exports = GateView;
 /* RENDER-END */
@@ -1007,7 +1010,7 @@ if (typeof module !== "undefined") module.exports = GateView;
         }).catch(function () { /* local marks only */ });
       }
       if (!view.unsaved && !view.saving) { view.st.notes = Object.assign({}, row.notes || {}); view.st.picks = Object.assign({}, row.picks || {}); }
-      document.title = (view.bundle.header.title || "Unit approval") + " · AI-DLC unit approvals";
+      document.title = (pageTitle(view.bundle.header.unit, view.bundle.page, view.bundle.header.title) || "Unit approval") + " · AI-DLC unit approvals";
       paint();
     }, function () { app.innerHTML = '<div class="card msg"><b>Couldn’t load this page.</b><p>Reload the page.</p></div>'; }));
   }

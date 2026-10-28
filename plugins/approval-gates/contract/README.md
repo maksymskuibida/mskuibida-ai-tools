@@ -30,7 +30,7 @@ schema file itself, so the two cannot drift. Keep to that subset when the schema
 | Field | Meaning |
 |---|---|
 | `id` | `<intent>-<unit>-<page>-v<revision>-<YYYYMMDDTHHMM>`. Every presentation gets a new id. |
-| `header` | Header facts. Required: `project`, `intent`, `unit`, `unitName`, `title`, `lede` (what the Unit does, in plain words), `status` (one line, such as "Plan approval · answer in chat"), `revision`, `revisions[] {n, note, at?}`, and up to six `facts[] {label, value, note?}`. Optional: `intentName`, `unitLabel` (U4), `stages[] {slug, name, ran, note?}`, `links {records?, plan?}`, `footer`. |
+| `header` | Header facts. Required: `project`, `intent`, `unit`, `unitName`, `title` (what the page is: `Unit <unit>: Approve plan` / `Unit <unit>: Approve Unit-end`; `unit_bundle.py` writes it and the page derives the same from `unit` + `page`), `lede` (what the Unit does, in plain words), `status` (one line, such as "Plan approval · answer in chat"), `revision`, `revisions[] {n, note, at?}`, and up to six `facts[] {label, value, note?}`. Optional: `intentName`, `unitLabel` (U4), `stages[] {slug, name, ran, note?}`, `links {records?, plan?}`, `footer`. |
 | `sections[]` | Each `{key, kind, title, short, hint?, refsLabel?, asApproved?, rows[], map?}`. `short` is the section chip's name in the bar. |
 | `plan` | Plan page only: `{title?, hint?, path?, steps[]}`. |
 | `answers[]` | The person's answers, one group per questions file: `{key, stage, title, file, questions[] {id: "Q3", anchor, text, answer, proposed?}}`. An answer differs from the proposal when its first letter is not the proposed one. |

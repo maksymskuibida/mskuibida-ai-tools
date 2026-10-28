@@ -179,7 +179,7 @@ per-clone pointers (`aidlc/active-space`, `active-intent`, `.aidlc-engine/`) are
 ## Data contract, in brief (per-stage)
 
 ```
-gates/<id>                  {title, stage, stageName, phase?, intent, project?, unit?, round, why?, status,
+gates/<id>                  {title ("Unit <unit>: Approve <Stage name>", or "Approve <Stage name>" without a Unit), stage, stageName, phase?, intent, project?, unit?, round, why?, status,
                              createdAt, summary?, brief?, review?, nextStage?, options, ids?, documents: [index]}
 gates/<id>/documents/<key>  {n, key, title, path, kind, text}
 page writes                 gates/<id>.notes[<key>]

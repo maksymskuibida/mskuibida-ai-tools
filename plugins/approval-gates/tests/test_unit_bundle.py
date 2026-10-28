@@ -84,7 +84,7 @@ class TestPlanDraft(Base):
 
     def test_header(self):
         h = self.b["header"]
-        self.assertEqual((h["unitLabel"], h["unitName"], h["title"]), ("U2", "Pick-up slots", "U2 · Pick-up slots"))
+        self.assertEqual((h["unitLabel"], h["unitName"], h["title"]), ("U2", "Pick-up slots", "Unit u2-pickup-slots: Approve plan"))
         self.assertEqual(h["intentName"], "Bakery preorder")
         self.assertEqual(h["lede"], "The slot list with full slots marked, and moving an order to another slot.")
         ran = {s["slug"]: s["ran"] for s in h["stages"]}
@@ -293,6 +293,11 @@ class TestFinalize(Base):
         self.assertEqual(out.returncode, 1)
         self.assertIn("pass it with --previous", out.stderr)
 
+    def test_unit_end_title(self):
+        self.finished()
+        _path, end, _info = self.finished("unit-end")
+        self.assertEqual(end["header"]["title"], f"Unit {UNIT}: Approve Unit-end")
+
     def test_unit_end_page_folds_the_approved_plan(self):
         _p, plan, _i = self.finished()
         _path, end, _info = self.finished("unit-end")
@@ -319,11 +324,18 @@ class TestFinalize(Base):
 
 @unittest.skipUnless(NODE, "node is not installed")
 class TestRender(Base):
+    def test_an_old_title_reads_as_what_the_page_is(self):
+        _path, b, _info = self.finished()
+        b["header"]["title"] = "U2 · Pick-up slots"
+        page = render(b)["summary"]
+        self.assertIn(f"<h1>Unit {UNIT}: Approve plan</h1>", page)
+        self.assertNotIn("<h1>U2 · Pick-up slots</h1>", page)
+
     def test_the_plan_page_renders(self):
         _path, b, _info = self.finished()
         out = render(b, {"default": {}, "summary": {"mode": "summary"}, "full": {"mode": "full"}, "v1read": {"read": {"A-1": 1}}})
         page = out["summary"]
-        self.assertIn("U2 · Pick-up slots", page)
+        self.assertIn("Unit u2-pickup-slots: Approve plan", page)
         for key in ("narrows", "assumptions", "findings", "plan", "tests", "answers"):
             self.assertIn(f'id="{key}"', page)
         self.assertIn('id="FD-R-02"', page)

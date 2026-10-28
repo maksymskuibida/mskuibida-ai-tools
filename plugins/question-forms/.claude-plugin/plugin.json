@@ -1,7 +1,7 @@
 {
   "name": "question-forms",
   "displayName": "Question forms",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "Every AI-DLC questions file as a form in one private artifact: rows in, the developer's answers out, copied word for word into the file. A per-user, per-project preference (always, ask, never) decides, and hooks enforce it: the turn is held until the form is published and its link sent.",
   "author": {
     "name": "Maksym Skuibida"
