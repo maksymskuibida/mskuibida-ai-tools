@@ -230,6 +230,8 @@ TERMINAL_LINE = 79
 FINDING_REF = re.compile(r"(?<![\w-])R-\d+(?![\w-])")
 FILE_LINE = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)*([\w-][\w.-]*\.[A-Za-z]\w*)):(\d+)(?:-\d+)?(?![\w:])")
 DOC_EXT = re.compile(r"\.(?:md|markdown|txt)$", re.I)
+NOT_WORTH = "none"
+NOT_WORTH_LINE = "Nothing to change: the model judged this not worth fixing."
 NO_ACTION = "No change was named by the reviewer: decide in the form whether to fix, accept or reject it."
 
 
@@ -308,7 +310,9 @@ def readable(doc):
         rest = what[len(head):].strip() if what.startswith(head) else what
         action = one_line(f.get("action"))
         model = one_line(f.get("suggested"))
+        skip = not action and model.rstrip(". ").lower() == NOT_WORTH
         suggested, by = ((plain(action, numbers, refs), "reviewer") if action else
+                         (NOT_WORTH_LINE, "skip") if skip else
                          (plain(model, numbers, refs), "model") if model else ("", "none"))
         if not suggested:
             scenario = one_line(f.get("scenario"))
@@ -317,6 +321,7 @@ def readable(doc):
             suggested = f"Change it so that this no longer happens: {scenario}" if code and scenario else NO_ACTION
         out.append({"id": f.get("id"), "n": n, "title": title, "rest": rest, "what": what, "suggested": suggested,
                     "suggested_by": by, "where": where, "blocking": bool(f.get("blocking")),
+                    "has_action": by in ("reviewer", "model"),
                     "scenario": plain(f.get("scenario"), numbers, refs) if f.get("scenario") else "", "refs": refs})
     return out
 
@@ -324,6 +329,22 @@ def readable(doc):
 def needs_suggestion(doc):
     """The ids of the open findings that have neither a required action nor a model's suggestion yet."""
     return [f["id"] for f in doc.get("findings") or [] if not one_line(f.get("action")) and not one_line(f.get("suggested"))]
+
+
+def reopens(doc):
+    """How many open findings of a stage review are proposed Fix (blocking: Request Changes re-opens the stage).
+    A code review never re-opens anything: its Fix is a cheap in-code change."""
+    if doc.get("source") == "code-review":
+        return 0
+    return counts(doc)[1]
+
+
+def proposal(item, doc):
+    """The proposed pick for a finding: blocking is Fix; once a stage is re-opened anyway, so is every minor finding
+    that has a real action to take. Returns "fix" or "accept"."""
+    if item["blocking"] or (reopens(doc) and item["has_action"]):
+        return "fix"
+    return "accept"
 
 
 def label_of(doc):
@@ -413,7 +434,7 @@ def suggest(doc, suggestions):
     done = []
     for f in doc.get("findings") or []:
         text = one_line((suggestions or {}).get(f.get("id")))
-        if text and len(text) <= 400 and not one_line(f.get("action")):
+        if text and len(text) <= 400 and not one_line(f.get("action")):  # "none" marks it not worth fixing
             f["suggested"] = text
             done.append(f["id"])
     return done
@@ -432,8 +453,12 @@ def summary(doc):
     for it in readable(doc):
         meta = status_word(it) + (f", {it['where']}" if it["where"] else "")
         lines.append(f"{it['n']}. **{it['title']}** ({meta})" + (f" {clip(it['rest'], SUMMARY_LIMIT)}" if it["rest"] else ""))
-        lines.append(f"   **Suggested:** {it['suggested']}")
-    return head + "\n\n" + "\n".join(lines)
+        lines.append(f"   **Suggested:** {it['suggested']}" +
+                     (" Fix it too: the stage is re-opened anyway." if not it["blocking"] and proposal(it, doc) == "fix" else ""))
+    note = (f"\n\nThe stage is re-opened anyway for {blocking} blocking finding{'s' if blocking != 1 else ''}, so Fix also "
+            "covers the minor findings worth fixing: recommend Fix, not carrying them."
+            if reopens(doc) and any(not it["blocking"] and proposal(it, doc) == "fix" for it in readable(doc)) else "")
+    return head + "\n\n" + "\n".join(lines) + note
 
 
 def question_text(total, blocking):
@@ -602,17 +627,21 @@ def block(label, text):
     return f"**{label}:** {text}" if text else ""
 
 
-def why(f, code):
+def why(f, code, reopen=0):
     """Why the review suggests what it suggests, in plain words. The card starts undecided: this is only the reason."""
     if code:
         return ("Confirmed by the review, so it is worth fixing" if f.get("blocking") else
                 "Possible, not confirmed by the review, so it can be carried")
     sev = f.get("severity") or "Unrated"
-    return (f"{sev}: it blocks approval until it is fixed or rejected" if f.get("blocking") else
-            f"{sev}: it can be carried as a known risk")
+    if f.get("blocking"):
+        return f"{sev}: it blocks approval until it is fixed or rejected"
+    if reopen:
+        return (f"{sev}: the stage is re-opened anyway for {reopen} blocking finding{'s' if reopen != 1 else ''}, "
+                "so fixing this now costs little")
+    return f"{sev}: it can be carried as a known risk"
 
 
-def card(item, f, code, reviewer=""):
+def card(item, f, code, reviewer="", reopen=0):
     """One board card. `ctx` holds the plain words for a page that draws only it. The optional `plain` (what the
     finding means, under the title), `action` (the suggested action), `refs` and `detail` (ctx without the two) are
     for a page that draws them apart (question-forms § 5)."""
@@ -630,7 +659,8 @@ def card(item, f, code, reviewer=""):
         **({"plain": item["rest"]} if item["rest"] else {}), "action": item["suggested"],
         "detail": "\n\n".join(detail), "refs": item["refs"],
         "from": ", ".join(p for p in (who, f.get("severity"), f.get("category")) if p),
-        "proposed": {"k": "fix" if f.get("blocking") else "accept", "why": why(f, code)},
+        "proposed": ({"k": "fix", "why": why(f, code, reopen)} if f.get("blocking") or (reopen and item["has_action"])
+                     else {"k": "accept", "why": why(f, code)}),
         "outcomes": {"fix": "Fixed now, in the code." if code else "Goes into Request Changes; fixed, then reviewed again.",
                      "accept": "Carried as a known risk; no change.",
                      "reject": "Not applicable; your note says why."},
@@ -688,7 +718,7 @@ def board(doc, fid, title, out_dir, now=None, project_dir=""):
         row["stage"] = doc["stage_name"]
     if doc.get("artifact"):
         row["file"] = doc["artifact"]
-    cards = [(f["id"], card(item, f, code, doc.get("reviewer", ""))) for item, f in zip(readable(doc), doc["findings"])]
+    cards = [(f["id"], card(item, f, code, doc.get("reviewer", ""), reopens(doc))) for item, f in zip(readable(doc), doc["findings"])]
     try:
         ids, why = ids_for(doc, [c for _, c in cards], project_dir)
     except Exception as exc:  # noqa: BLE001 - the board is written without tooltips rather than not at all

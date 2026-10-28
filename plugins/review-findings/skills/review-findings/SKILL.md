@@ -54,6 +54,16 @@ its suggested action in bold and no ids, rule codes or paths in the sentences:
 When you talk about a finding in chat, do the same: its number in this list and its words, never
 `R-02` or `src/cart.py:42` in the sentence.
 
+**Re-opening is the cost, small fixes ride along.** At a stage gate a blocking finding already means Request
+Changes: the stage is re-opened, revised and re-reviewed. Then the minor findings that need a change are cheap, so
+recommend **Fix** for them too (the summary says so and marks each such **Suggested:** line) and do not recommend
+carrying them. Fix stays "fix every open finding". Only a minor finding with nothing to change, or one the model
+marked not worth fixing, is carried. With nothing blocking nothing re-opens: Accept is offered as before.
+
+The mod's model writes the **Suggested:** action for a finding with no required action. It may answer `"none"` for a
+nitpick or false positive (`FINDINGS suggest --findings <file> --set '{"R-04": "none"}'`): the finding is shown as
+"nothing to change" and stays Accept even in a re-opened stage.
+
 Then ask one `AskUserQuestion` and nothing else before it: `FINDINGS question --findings <file>`
 prints its input as JSON, `metadata: {"source": "review-findings"}` included; pass it as it is.
 The plugin's mod builds the question again from the saved findings and draws every finding above
@@ -129,7 +139,11 @@ that skill's § 1 to publish it first.
    with three decision buttons on each card: **Fix** ("Fixed before approval"), **Accept** ("Carried as a known
    risk") and **Reject** ("Not applicable"; its note field opens and a reason is required). Each finding is one
    card: the title is its first sentence, the details hold Where, Finding and Required action, and the card shows
-   its severity and whether it blocks. The review suggests Fix for a blocking finding and Accept for the rest; the
+   its severity and whether it blocks. The review suggests Fix for a blocking finding. Re-opening the stage is the
+   expensive part, not a small fix, so once a stage review has a blocking finding (the stage is re-opened anyway) it also
+   suggests Fix for every non-blocking finding that has a real action (the reviewer's required action or the model's
+   suggestion), with a `why` saying so; a finding with nothing to change, or one the model marked "none", stays Accept,
+   and so does everything when nothing blocks. A code review is unchanged (a blocking finding Fix, the rest Accept). The
    suggestion is marked on the card, but nothing is picked for the developer: every card has to be decided
    (Done stays off until it is), or the developer takes the suggestion with the bulk buttons. Its details say, in plain words, what is
    wrong, the suggested action and where; the card also carries them apart (`plain`, `action`,
