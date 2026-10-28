@@ -110,7 +110,7 @@ class TestRows(Case):
         gate = self.gate()
         self.assertRegex(summary["id"], r"^260101-bakery-preorder-user-stories-\d{8}T\d{4}$")
         self.assertRegex(summary["id"], r"^[a-z0-9._-]+-\d{8}T\d{4}$")
-        self.assertEqual(gate["title"], "User Stories")
+        self.assertEqual(gate["title"], "Approve User Stories")
         self.assertEqual(gate["stageName"], "User Stories")
         self.assertEqual(gate["stage"], "user-stories")
         self.assertEqual(gate["phase"], "inception")
@@ -165,11 +165,15 @@ class TestRows(Case):
         self.assertEqual(gate["phase"], "inception")
         self.assertEqual([d["key"] for d in gate["documents"]], ["bolt-plan"])
 
+    def test_build_and_test_title(self):
+        self.assertEqual(bundle.gate_title("Build and Test", ""), "Approve Build and Test")
+        self.assertEqual(bundle.gate_title("Build and Test", "u1-core"), "Unit u1-core: Approve Build and Test")
+
     def test_unit_stage(self):
         summary = self.summary("--stage", "functional-design", "--unit", "u1-core", "--no-brief")
         gate = self.gate()
         self.assertEqual(summary["documents"], ["entities", "rules", "functional-spec", "traceability"])
-        self.assertEqual(gate["title"], "Functional Design \u00b7 u1-core")
+        self.assertEqual(gate["title"], "Unit u1-core: Approve Functional Design")
         self.assertEqual(gate["unit"], "u1-core")
         self.assertEqual(gate["phase"], "construction")
         self.assertEqual(summary["unit"], "u1-core")

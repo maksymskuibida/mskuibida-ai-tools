@@ -338,7 +338,7 @@ class Board(unittest.TestCase):
     def test_form_row(self):
         form = self.made()[0]
         self.assertEqual((form["view"], form["status"], form["createdAt"]), ("board", "open", "2026-01-05T10:07:59Z"))
-        self.assertEqual(form["title"], "Review findings · Domain Design")
+        self.assertEqual(form["title"], "Review findings · Domain Design")  # a --title given by hand is kept
         self.assertEqual([b["k"] for b in form["boxes"]], ["fix", "accept", "reject"])
         self.assertEqual([b.get("tone") for b in form["boxes"]], ["ink", "muted", "warn"])
         self.assertEqual(form["boxes"][0]["hint"], "Fixed before approval")
@@ -396,6 +396,17 @@ class Board(unittest.TestCase):
             self.assertTrue(os.path.isabs(w["file_path"]) and os.path.isfile(w["file_path"]))
             self.assertNotIn("if_version", w)
             self.assertNotIn("data", w)
+
+    def test_board_title_says_what_it_is(self):
+        self.assertEqual(findings.board_title(self.doc), "Domain Design review findings")
+        self.assertEqual(findings.board_title(dict(self.doc, unit="u2-accounts")), "Unit u2-accounts: Domain Design review findings")
+        self.assertEqual(findings.board_title({"source": "code-review", "findings": []}), "Code review findings")
+        self.assertEqual(findings.board_title({"source": "code-review", "pr": "#12"}), "Code review findings · #12")
+
+    def test_board_row_carries_the_unit(self):
+        findings.board(dict(self.doc, unit="u2-accounts"), self.fid, findings.board_title(dict(self.doc, unit="u2-accounts")), self.tmp.name, now=self.NOW)
+        form = self.read("forms.json")
+        self.assertEqual((form["title"], form["unit"]), ("Unit u2-accounts: Domain Design review findings", "u2-accounts"))
 
     def test_code_review_cards(self):
         with open(os.path.join(FIXTURES, "report-findings.json"), encoding="utf-8") as f:

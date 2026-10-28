@@ -50,9 +50,12 @@ looked" marks with their account; without it they stay in that browser.)
 As soon as the questions file is written, one `ArtifactData` `batch` (no `if_version`
 on new documents):
 
-- `forms/<id>` — `{title, stage, file, status: "open", createdAt}`; `id` is `[a-z0-9._-]+`,
-  `<intent>-<stage-slug>` (a unit's file adds `-<unit>`). `title` is the stage name, `file` the
-  repo-relative path.
+- `forms/<id>` — `{title, stage, unit?, file, status: "open", createdAt}`; `id` is `[a-z0-9._-]+`,
+  `<intent>-<stage-slug>` (a unit's file adds `-<unit>`). `title` says what the page is:
+  `Unit <unit>: <Stage name> questions` for a unit's file (`unit` is the Unit id as written, e.g.
+  `u2-accounts`, also stored as `unit`), `<Stage name> questions` otherwise; the stage name is the
+  one the engine gives the stage (`stage`), never typed from memory. `file` is the repo-relative
+  path. The page's heading, tab and list row show this title.
 - `forms/<id>/questions/<qid>` per question — `{n, text, ctx?, kind: "single"|"multi",
   options: [{k, t}], proposed?: {k, why}, hint?}`, copied from the file **as written**: the
   heading text, the context, the option letters and labels, the `**Proposed:**` line as

@@ -140,6 +140,12 @@ def humanize(slug):
     return " ".join(out)
 
 
+def page_title(unit, page):
+    """What the page is, for its H1, tab title and list row: `Unit u2-accounts: Approve plan` / `... Approve Unit-end`.
+    unit-gate.html derives the same string from unit + page for rows written before this."""
+    return f"Unit {unit}: Approve {'plan' if page == 'plan' else 'Unit-end'}"
+
+
 def now_utc():
     return datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
 
@@ -655,7 +661,7 @@ def carry_over(draft, previous):
                 steps.append(st)
         draft["plan"]["steps"] = steps
     head, prev_head = draft["header"], previous.get("header") or {}
-    for field in ("lede", "title", "footer", "links"):
+    for field in ("lede", "footer", "links"):
         if field in prev_head:
             head[field] = prev_head[field]
     head["revisions"] = [r for r in prev_head.get("revisions") or [] if r.get("n", 0) < head["revision"]] + \
@@ -680,7 +686,7 @@ def draft(args):
     stamp = now_utc()
     header = {
         "project": humanize(unit.space), "intent": unit.intent, "intentName": humanize(unit.intent),
-        "unit": args.unit, "unitName": name, "title": (f"{label} · " if label else "") + name + (" — built" if args.page == "unit-end" else ""),
+        "unit": args.unit, "unitName": name, "title": page_title(args.unit, args.page),
         "lede": "", "status": "Plan approval · answer in chat" if args.page == "plan" else "End of Unit · answer in chat",
         "revision": revision,
         "revisions": [{"n": revision, "note": "first draft" if revision == 1 else "revision", "at": stamp.isoformat().replace("+00:00", "Z")}],

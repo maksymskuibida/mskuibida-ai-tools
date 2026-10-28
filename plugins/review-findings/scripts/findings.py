@@ -351,6 +351,16 @@ def label_of(doc):
     return "code review" if doc.get("source") == "code-review" else (doc.get("stage_name") or doc.get("stage") or "review")
 
 
+def board_title(doc):
+    """What the board is, for its H1, tab title and list row: `Unit u2-accounts: Functional Design review findings`,
+    `Domain Design review findings`, or `Code review findings` (with the PR or branch when the findings name one).
+    question-form.html derives the same string from older rows."""
+    if doc.get("source") == "code-review":
+        ref = doc.get("pr") or doc.get("branch") or ""
+        return "Code review findings" + (f" · {ref}" if ref else "")
+    return (f"Unit {doc['unit']}: " if doc.get("unit") else "") + f"{label_of(doc)} review findings"
+
+
 def status_word(item):
     return "Blocking" if item["blocking"] else "Not blocking"
 
@@ -716,6 +726,8 @@ def board(doc, fid, title, out_dir, now=None, project_dir=""):
            "view": "board", "boxes": boxes(code), "groups": groups(code)}
     if doc.get("stage_name") and not code:
         row["stage"] = doc["stage_name"]
+    if doc.get("unit") and not code:
+        row["unit"] = doc["unit"]
     if doc.get("artifact"):
         row["file"] = doc["artifact"]
     cards = [(f["id"], card(item, f, code, doc.get("reviewer", ""), reopens(doc))) for item, f in zip(readable(doc), doc["findings"])]
@@ -870,7 +882,7 @@ def main(argv=None):
         else:
             doc = load_findings(args.findings)
             code = doc.get("source") == "code-review"
-            title = args.title or "Review findings · " + ("code review" if code else doc.get("stage_name") or doc.get("stage") or "review")
+            title = args.title or board_title(doc)
             result = board(doc, args.id or form_id(doc, args.project_dir), title, args.out, project_dir=args.project_dir)
             print(json.dumps(result))
     except (OSError, ValueError) as why:

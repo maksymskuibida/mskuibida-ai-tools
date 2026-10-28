@@ -134,7 +134,7 @@ that skill's § 1 to publish it first.
 
 1. Build the rows: `FINDINGS board --findings <file> --out <scratch dir>`. It prints the form id
    (`<intent>-<stage>[-<unit>]-findings-<YYYYMMDDTHHMM>`, or `code-review-<YYYYMMDDTHHMM>`) and
-   the path of `writes.json`. The board is titled "Review findings · <stage name>" and is a
+   the path of `writes.json`. The board is titled "Unit <unit>: <stage name> review findings" ("<stage name> review findings" without a Unit; "Code review findings" for a code review) and is a
    list of cards in two sections (Blocking, then Can be carried; for a code review Confirmed, then Possible)
    with three decision buttons on each card: **Fix** ("Fixed before approval"), **Accept** ("Carried as a known
    risk") and **Reject** ("Not applicable"; its note field opens and a reason is required). Each finding is one
