@@ -1,0 +1,9 @@
+{
+  "name": "mac-cleanup",
+  "displayName": "Mac Cleanup",
+  "version": "3.0.0",
+  "description": "Find what fills a Mac's disk and reclaim it safely: one walk of the whole volume, six read-only investigators, a page to pick Remove or Keep per item, re-checked at removal; orphaned git worktrees through their own gates.",
+  "author": {
+    "name": "Maksym Skuibida"
+  }
+}

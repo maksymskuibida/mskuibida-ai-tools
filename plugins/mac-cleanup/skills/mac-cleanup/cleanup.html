@@ -1,0 +1,844 @@
+<title>Mac cleanup</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<!--
+  Mac cleanup — the one page for deciding what leaves a full disk. Same tokens, type and UX family as the
+  approval-gates pages (approval-gate.html, unit-gate.html): a header card with the facts, a sticky bar with
+  filters and a save state, then one collapsible card per group.
+
+  Published ONCE per developer as a private Artifact with capabilities {db: {}, user: {}}, icon "chart";
+  never regenerated per scan. Every scan is rows INSIDE this artifact, written by the agent with the
+  ArtifactData tool (scripts/mac_scan.py build writes them). The page renders whatever the rows say, live.
+
+  Data contract (what the agent writes — always NEW rows, a fresh id per scan):
+
+    scans/<id>                   {id, title, host, createdAt (ISO), status: "open",
+                                  disk: {container, free, used, dataVolume, volumes: [{name, role, bytes}]},
+                                  accounted, unverified: {bytes, denied: [{path, count, why}], note},
+                                  bar: [{key, label, bytes, tone}], recent: {since, bytes, top: [{path, bytes}]},
+                                  groups: [{key, title, blurb, count, bytes, safeBytes}], suggestedBytes,
+                                  itemCount, investigators: [{area, text}], summary (Markdown)}
+      id: <host>-<YYYYMMDDTHHMM>
+    scans/<id>/groups/<key>[-pN] {key, order, part, parts, items: [item]}   a group's items, split to fit a row
+      item: {id, path, bytes, what, category, group, risk: "safe"|"review"|"keep", kind: "path"|"worktree"|
+             "command"|"manual", regenerates?, action?, modified?, recent?, inUse?, notes?, source, verdict?}
+
+  What the page writes (the only thing the agent reads back, one `get` of scans/<id>):
+
+    scans/<id>.picks[<item id>] = {pick: "remove"|"keep"|"", note?, at}   "" clears a pick
+    scans/<id>.doneAt = ISO                                                the owner pressed "Done picking"
+
+  Removal never happens here: the agent re-checks every picked item against the disk at the moment it removes it.
+  Link to a scan: <artifact url>#<id>. No hash: the newest scan.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<style>
+/* Layout: the approval-gates family. Header card (facts + the capacity bar), what grew lately and what could not be
+   verified side by side, a sticky bar (filters, search, the running total to remove, save state), then the groups. */
+:root {
+  --bg: #F5F6F8; --surface: #FFFFFF; --raised: #F8F9FB; --fg: #171A21; --fg-2: #3D4350; --muted: #5A6170;
+  --line: #E4E7EC; --line-soft: #EEF0F3; --control: #D5D9E0; --hover: #F7F8FA;
+  --accent: #2F49C4; --accent-strong: #1E3399; --accent-soft: #EEF1FB; --accent-tint: #F4F6FE;
+  --crit-bg: #FDE4E4; --crit-fg: #9B1C1C; --high-bg: #FDEAD7; --high-fg: #8A3B00;
+  --low-bg: #EEF0F3; --low-fg: #4A5160;
+  --ok-bg: #E6F4EA; --ok-fg: #1F6B36; --warn-bg: #FFF4DB; --warn-fg: #7A4B00; --warn-dot: #B26B00;
+  --band-bg: #171A21; --band-fg: #FFFFFF; --band-muted: #C9CDD6; --tip-bg: #171A21; --tip-fg: #FFFFFF; --tip-line: #171A21;
+  --on-accent: #FFFFFF;
+  /* capacity bar: five categorical slots in fixed order (validated: dataviz validate_palette.js), a neutral for macOS */
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --sys: #8A909C; --hatch: #9AA1AF;
+  --remove: #9B1C1C; --remove-bg: #FDE4E4;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #111318; --surface: #1A1D24; --raised: #20232B; --fg: #E6E8EE; --fg-2: #C3C8D2; --muted: #9AA1AF;
+  --line: #2A2E38; --line-soft: #22262F; --control: #3A3F4B; --hover: #20242C;
+  --accent: #8FA2FF; --accent-strong: #B5C2FF; --accent-soft: #222B4D; --accent-tint: #1B2035;
+  --crit-bg: #3D1D1D; --crit-fg: #F4A4A4; --high-bg: #3A2614; --high-fg: #F2B27A;
+  --low-bg: #262A33; --low-fg: #AEB4C0;
+  --ok-bg: #183024; --ok-fg: #8FD3A6; --warn-bg: #3A2C12; --warn-fg: #F0C36B; --warn-dot: #F0A93B;
+  --band-bg: #252A34; --band-fg: #E6E8EE; --band-muted: #C3C8D2; --tip-bg: #2B303B; --tip-fg: #E6E8EE; --tip-line: #3A3F4B;
+  --on-accent: #111318;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --sys: #6B7280; --hatch: #6B7280;
+  --remove: #F4A4A4; --remove-bg: #3D1D1D;
+  color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #111318; --surface: #1A1D24; --raised: #20232B; --fg: #E6E8EE; --fg-2: #C3C8D2; --muted: #9AA1AF;
+  --line: #2A2E38; --line-soft: #22262F; --control: #3A3F4B; --hover: #20242C;
+  --accent: #8FA2FF; --accent-strong: #B5C2FF; --accent-soft: #222B4D; --accent-tint: #1B2035;
+  --crit-bg: #3D1D1D; --crit-fg: #F4A4A4; --high-bg: #3A2614; --high-fg: #F2B27A;
+  --low-bg: #262A33; --low-fg: #AEB4C0;
+  --ok-bg: #183024; --ok-fg: #8FD3A6; --warn-bg: #3A2C12; --warn-fg: #F0C36B; --warn-dot: #F0A93B;
+  --band-bg: #252A34; --band-fg: #E6E8EE; --band-muted: #C3C8D2; --tip-bg: #2B303B; --tip-fg: #E6E8EE; --tip-line: #3A3F4B;
+  --on-accent: #111318;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --sys: #6B7280; --hatch: #6B7280;
+  --remove: #F4A4A4; --remove-bg: #3D1D1D;
+  color-scheme: dark }
+
+* { box-sizing: border-box; }
+html { overflow-x: hidden; }
+body { background: var(--bg); color: var(--fg); font: 14px/1.5 var(--body); margin: 0; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+[hidden] { display: none !important; }
+a { color: var(--accent); }
+code, .mono { font: 500 12px var(--mono); }
+code { background: var(--line-soft); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+button { font: 500 13px var(--body); border-radius: 6px; cursor: pointer; color: var(--fg); background: var(--surface); border: 1px solid var(--control); padding: 0 12px; min-height: 30px; }
+button:hover { border-color: var(--accent); }
+button:disabled { opacity: .55; cursor: default; }
+button:focus-visible, summary:focus-visible, a:focus-visible, textarea:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+textarea, input[type="search"] { font: inherit; color: var(--fg); background: var(--surface); border: 1px solid var(--control); border-radius: 6px; padding: 6px 10px; }
+textarea { width: 100%; resize: vertical; font-size: 13px; min-height: 52px; }
+.num { font-variant-numeric: tabular-nums; }
+.pill { display: inline-flex; align-items: center; gap: 5px; font: 600 11px/1.3 var(--body); padding: 2px 7px; border-radius: 4px; background: var(--low-bg); color: var(--low-fg); white-space: nowrap; }
+.pill.ok { background: var(--ok-bg); color: var(--ok-fg); }
+.pill.warn { background: var(--warn-bg); color: var(--warn-fg); }
+.pill.crit { background: var(--crit-bg); color: var(--crit-fg); }
+.pill.accent { background: var(--accent-soft); color: var(--accent); }
+.pill.quiet { font-weight: 500; }
+#tip { position: fixed; z-index: 30; max-width: min(380px, calc(100vw - 24px)); background: var(--tip-bg); color: var(--tip-fg); border: 1px solid var(--tip-line); border-radius: 8px; padding: 7px 10px; box-shadow: 0 8px 24px rgba(0,0,0,.2); font-size: 12.5px; line-height: 1.45; pointer-events: none; }
+#toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); max-width: calc(100vw - 32px); background: var(--tip-bg); color: var(--tip-fg); border: 1px solid var(--tip-line); padding: 9px 14px; border-radius: 8px; font-size: 13px; z-index: 40; box-shadow: 0 6px 18px rgba(0,0,0,.18); }
+
+.wrap { width: 100%; max-width: 1180px; margin: 0 auto; padding-block: 24px 72px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 16px; }
+.wrap > * { min-width: 0; }
+.card0 { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.head { display: flex; flex-direction: column; gap: 16px; padding: 20px 24px 22px; }
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--muted); font-size: 13px; }
+.crumbs select { font: inherit; color: var(--fg-2); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; max-width: 100%; }
+.status { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 2px 10px; border-radius: 13px; background: var(--warn-bg); color: var(--warn-fg); font-weight: 500; }
+.status i { width: 7px; height: 7px; border-radius: 4px; background: var(--warn-dot); }
+.status.done { background: var(--ok-bg); color: var(--ok-fg); } .status.done i { background: var(--ok-fg); }
+h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.25; text-wrap: balance; }
+.lede { margin: 0; color: var(--fg-2); max-width: 78ch; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.fact { display: flex; flex-direction: column; gap: 2px; padding: 9px 14px; border-radius: 8px; background: var(--bg); min-width: 0; }
+.fact span { font-size: 12px; color: var(--muted); }
+.fact b { font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.fact small { font-size: 12px; color: var(--muted); }
+.fact.ok b { color: var(--ok-fg); } .fact.warn b { color: var(--crit-fg); }
+
+/* the capacity bar: one 100%-wide stacked bar, 2px surface gaps, rounded ends, legend with every value */
+.cap { display: grid; gap: 10px; }
+.cap h2, .panel h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.capbar { display: flex; gap: 2px; height: 26px; border-radius: 6px; overflow: hidden; background: var(--surface); }
+.capbar > span { display: block; min-width: 2px; height: 100%; }
+.capbar > span:first-child { border-radius: 4px 0 0 4px; } .capbar > span:last-child { border-radius: 0 4px 4px 0; }
+.capbar > span:hover { filter: brightness(1.08); }
+.t-c1 { background: var(--s1); } .t-c2 { background: var(--s2); } .t-c3 { background: var(--s3); } .t-c4 { background: var(--s4); } .t-c5 { background: var(--s5); }
+.t-c6 { background: color-mix(in srgb, var(--s5) 55%, var(--sys)); }
+.t-sys { background: var(--sys); }
+.t-unv { background: repeating-linear-gradient(45deg, var(--hatch) 0 3px, transparent 3px 7px); box-shadow: inset 0 0 0 1px var(--hatch); }
+.t-free { background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--control); }
+.legend { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 4px 18px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.legend li { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 2px 0; }
+.legend .sw { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+.legend .lab { flex: 1 1 auto; min-width: 0; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.legend .val { font: 500 12.5px var(--mono); color: var(--fg); font-variant-numeric: tabular-nums; }
+
+.two { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; }
+.panel { padding: 16px 20px 18px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.panel .hint { margin: 0; color: var(--muted); font-size: 13px; }
+.growth { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.growth li { display: grid; grid-template-columns: minmax(0, 1fr) 76px; gap: 4px 12px; align-items: center; font-size: 13px; }
+.growth .p { min-width: 0; font: 400 12px var(--mono); color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.growth .p > span { direction: ltr; unicode-bidi: isolate; }
+.growth .v { font: 500 12.5px var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
+.growth .b { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--line-soft); overflow: hidden; }
+.growth .b i { display: block; height: 6px; border-radius: 3px; background: var(--accent); }
+.band { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; padding: 12px 16px; border-radius: 10px; background: var(--band-bg); color: var(--band-fg); }
+.band b { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.band span { color: var(--band-muted); font-size: 13px; }
+.denied { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; font-size: 12.5px; max-height: 210px; overflow: auto; }
+.denied li { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.denied code { font-size: 11.5px; }
+.denied .why { margin-left: auto; color: var(--muted); white-space: nowrap; font-size: 12px; }
+.steps { margin: 0; padding-left: 20px; font-size: 13px; color: var(--fg-2); display: grid; gap: 2px; }
+
+/* sticky bar */
+.gbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 8; display: flex; flex-direction: column; gap: 10px; padding: 10px 14px; background: color-mix(in srgb, var(--surface) 96%, transparent); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 2px 8px rgba(23, 26, 33, .06); backdrop-filter: blur(6px); }
+.barrow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.filters { display: inline-flex; gap: 8px 20px; flex-wrap: wrap; }
+.fgroup { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.flabel { font-size: 12px; font-weight: 500; color: var(--muted); margin-right: 2px; cursor: default; }
+.fpill { height: 30px; padding: 0 12px; border-radius: 15px; font-weight: 500; }
+.fpill[aria-pressed="true"] { background: var(--fg); color: var(--surface); border-color: var(--fg); }
+.fpill .n { font-family: var(--mono); font-size: 12px; opacity: .7; margin-left: 4px; }
+.gbar input[type="search"] { height: 30px; width: 220px; max-width: 100%; font-size: 13px; padding: 4px 10px; }
+.tally { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.sel { display: inline-flex; align-items: baseline; gap: 6px; font-size: 13px; color: var(--fg-2); }
+.sel b { font: 600 16px var(--body); color: var(--remove); font-variant-numeric: tabular-nums; }
+.savestat { font-size: 12.5px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+.savestat i { width: 7px; height: 7px; border-radius: 4px; background: var(--ok-fg); }
+.savestat.busy i { background: var(--warn-dot); } .savestat.fail { color: var(--crit-fg); } .savestat.fail i { background: var(--crit-fg); }
+.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--on-accent); }
+
+/* groups and items */
+#groups { display: grid; gap: 14px; }
+.group { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; min-width: 0; scroll-margin-top: 120px; }
+.group > summary { list-style: none; cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 10px 14px 10px 10px; min-height: 56px; border-radius: 12px; }
+.group > summary::-webkit-details-marker { display: none; }
+.group > summary:hover { background: var(--hover); }
+.group[open] > summary { border-radius: 12px 12px 0 0; border-bottom: 1px solid var(--line); }
+.caret { width: 22px; height: 22px; flex: none; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); transition: transform .12s; }
+details[open] > summary > .caret { transform: rotate(90deg); }
+.group h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.group .end { margin-left: auto; display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; }
+.group .gsize { font: 600 14px var(--mono); font-variant-numeric: tabular-nums; }
+.gbody { padding: 4px 14px 14px; display: grid; gap: 0; }
+.gblurb { margin: 8px 0 6px; color: var(--muted); font-size: 13px; max-width: 90ch; }
+.gtools { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 8px; }
+.gtools button { min-height: 28px; font-size: 12.5px; }
+.item { border-top: 1px solid var(--line-soft); min-width: 0; }
+.item:first-of-type { border-top: 0; }
+.item.picked-remove { background: linear-gradient(90deg, var(--remove-bg) 0 3px, transparent 3px); }
+.item.picked-keep { background: linear-gradient(90deg, var(--ok-bg) 0 3px, transparent 3px); }
+.irow { display: grid; grid-template-columns: 84px minmax(0, 1fr) auto; gap: 4px 14px; align-items: start; padding: 10px 4px 10px 10px; }
+.isize { font: 600 14px var(--mono); text-align: right; font-variant-numeric: tabular-nums; padding-top: 1px; }
+.imain { min-width: 0; display: grid; gap: 3px; }
+.iwhat { font-weight: 500; overflow-wrap: anywhere; }
+.ipath { font: 400 12px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.ipath > span { direction: ltr; unicode-bidi: isolate; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.more { background: transparent; border: 0; padding: 0; min-height: 0; color: var(--accent); font-size: 12.5px; justify-self: start; }
+.more:hover { text-decoration: underline; }
+.seg { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--line-soft); gap: 2px; }
+.seg button { border: 0; min-height: 28px; padding: 0 11px; font-size: 12.5px; background: transparent; color: var(--muted); border-radius: 6px; }
+.seg button:hover { color: var(--fg); }
+.seg button[data-pick="remove"][aria-pressed="true"] { background: var(--remove-bg); color: var(--remove); box-shadow: 0 1px 2px rgba(23,26,33,.12); }
+.seg button[data-pick="keep"][aria-pressed="true"] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgba(23,26,33,.12); }
+.idet { grid-column: 2 / -1; display: grid; gap: 8px; padding: 2px 0 6px; }
+.idet dl { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; font-size: 13px; }
+.idet dt { color: var(--muted); font-size: 12px; line-height: 1.75; }
+.idet dd { margin: 0; overflow-wrap: anywhere; min-width: 0; }
+.cmd { display: flex; gap: 6px; align-items: flex-start; min-width: 0; }
+.cmd code { display: block; white-space: pre-wrap; padding: 5px 8px; flex: 1 1 auto; min-width: 0; }
+.cmd button { min-height: 26px; font-size: 12px; padding: 0 8px; flex: none; }
+.notelab { font-size: 12.5px; color: var(--muted); }
+.empty, .nomatch { padding: 22px 24px; color: var(--fg-2); }
+.empty h2 { margin: 0 0 6px; font-size: 16px; }
+.md { color: var(--fg-2); max-width: 82ch; }
+.md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
+.md p, .md ul { margin: 0 0 .6em; } .md ul { padding-left: 20px; }
+.how { padding: 0 20px; }
+.how > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 12px 0; font-weight: 600; }
+.how > summary::-webkit-details-marker { display: none; }
+.how .areas { display: grid; gap: 10px; padding: 0 0 16px 30px; font-size: 13px; color: var(--fg-2); }
+.how .areas b { color: var(--fg); font-weight: 600; }
+
+@media (max-width: 760px) {
+  .two { grid-template-columns: minmax(0, 1fr); }
+  .irow { grid-template-columns: 70px minmax(0, 1fr); }
+  .irow > .seg { grid-column: 2; justify-self: start; }
+  .idet { grid-column: 1 / -1; }
+  .tally { margin-left: 0; }
+  .head { padding: 16px; }
+  /* one line per filter row, scrolled sideways, so the sticky bar stays short on a phone */
+  .filters { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+  .fgroup { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .fgroup::-webkit-scrollbar { display: none; }
+  .fgroup > * { flex: none; }
+  .flabel { width: 64px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap" id="app">
+  <section class="card0 head" aria-labelledby="h1">
+    <div class="crumbs"><span id="host"></span><span id="when"></span><select id="scanpick" aria-label="Scan" hidden></select>
+      <span class="status" id="status"><i></i><span id="statustext"></span></span></div>
+    <div><h1 id="h1"></h1></div>
+    <div class="md lede" id="summary"></div>
+    <div class="facts" id="facts"></div>
+    <div class="cap" id="cap" hidden>
+      <h2 id="caph"></h2>
+      <div class="capbar" id="capbar" role="img"></div>
+      <ul class="legend" id="legend"></ul>
+    </div>
+  </section>
+
+  <div class="two" id="two" hidden>
+    <section class="card0 panel" aria-labelledby="growh">
+      <h2 id="growh"></h2>
+      <p class="hint" id="growhint"></p>
+      <ul class="growth" id="growth"></ul>
+    </section>
+    <section class="card0 panel" aria-labelledby="unvh">
+      <h2 id="unvh"></h2>
+      <div class="band"><b id="unvbytes"></b><span id="unvof"></span></div>
+      <p class="hint" id="unvnote"></p>
+      <ul class="denied" id="denied"></ul>
+      <p class="hint" id="accessh"></p>
+      <ol class="steps" id="steps"></ol>
+    </section>
+  </div>
+
+  <div class="gbar" id="gbar" hidden>
+    <div class="barrow">
+      <div class="filters" id="filters"></div>
+      <input type="search" id="q" autocomplete="off">
+      <div class="tally">
+        <span class="sel" id="sel"></span>
+        <span class="savestat" id="save"><i></i><span id="savetext"></span></span>
+        <button class="primary" id="done" type="button"></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="groups"></div>
+  <p class="card0 nomatch" id="nomatch" hidden></p>
+
+  <details class="card0 how" id="how" hidden>
+    <summary><span class="caret" aria-hidden="true">›</span><span id="howh"></span></summary>
+    <div class="areas" id="areas"></div>
+  </details>
+
+  <section class="card0 empty" id="empty" hidden><h2 id="emptyh"></h2><p id="emptyp"></p></section>
+</div>
+<div id="tip" hidden></div>
+<div id="toast" hidden></div>
+
+<script>
+"use strict";
+/* Every word this page shows lives here, English first. An element whose label is empty hides itself. */
+const STRINGS = {
+  title: "Where your disk went",
+  scanned: "Scanned {when}",
+  statusOpen: "Waiting for your picks",
+  statusDone: "Picks sent {when}",
+  factDisk: "Disk", factUsed: "Used", factFree: "Free", factSuggested: "Safe to remove", factUnverified: "Could not verify",
+  factSuggestedSub: "caches and build output", factUnverifiedSub: "no access",
+  capHead: "How the disk is used",
+  growHead: "Written in the last 30 days",
+  growHint: "{total} of files over 1 MB changed since {since}. Space that grew lately is where it went.",
+  unvHead: "Could not verify",
+  unvOf: "of the {data} Data volume",
+  accessHead: "To let the next scan see these folders:",
+  step1: "Open System Settings › Privacy & Security › Full Disk Access.",
+  step2: "Turn on Claude (or the terminal you run Claude Code in).",
+  step3: "Quit and reopen it, then ask Claude to scan again.",
+  whyPrivacy: "privacy", whyOwner: "root only",
+  filterRisk: "Risk", filterPick: "Your pick",
+  filterTip: "Turn on several in a row to see them together, and combine the two rows. All clears its row.",
+  filterAll: "All", filterSafe: "Safe", filterReview: "Look first", filterKeep: "Keep",
+  filterUnpicked: "Unpicked", filterRemove: "To remove", filterKept: "To keep",
+  search: "Search path or name",
+  selNone: "Nothing picked yet",
+  selSome: "{n} to remove",
+  saveSaved: "Saved", saveBusy: "Saving…", saveFail: "Not saved — try again", saveReadonly: "Read only",
+  done: "Done picking", doneAgain: "Picks sent ✓",
+  doneToast: "Saved. Tell Claude in chat that you're done picking.",
+  remove: "Remove", keep: "Keep",
+  riskSafe: "Safe", riskReview: "Look first", riskKeep: "Keep",
+  tipSafe: "A cache or build output that comes back on its own. Nothing you made is lost.",
+  tipReview: "Probably reclaimable, but only you can say: look before you pick.",
+  tipKeep: "In use or irreplaceable. Listed so you can see where the space goes.",
+  recent: "Changed lately", tipRecent: "Something in here was written in the last 30 days.",
+  inUse: "In use", tipInUse: "A running session or process works in here. Removal is held back while it does.",
+  kindWorktree: "Worktree", kindCommand: "Tool command", kindManual: "You do it",
+  tipWorktree: "Removed through the worktree gates: unpushed work and live sessions are re-checked at removal.",
+  tipCommand: "Removed by the owning tool's own command, which Claude shows you before it runs.",
+  tipManual: "A step only you can take (an app's setting, an update). Claude tells you how.",
+  details: "Details", less: "Less",
+  dRegenerates: "If removed", dAction: "How", dModified: "Last changed", dNotes: "Notes", dFound: "Found by",
+  copy: "Copy", copied: "Copied",
+  note: "Note for Claude",
+  pickSafe: "Pick all safe in this group", clearGroup: "Clear picks in this group",
+  safeIn: "{size} safe",
+  items: "{n} items",
+  nomatch: "Nothing matches these filters.",
+  howHead: "How this was found",
+  howWalk: "A walk of the whole Data volume with du accounted for {accounted}; investigators then looked into each area:",
+  emptyHead: "No scan yet",
+  emptyBody: "Ask Claude to clean up your Mac. It walks the whole disk, has each area looked into, and fills this page with what you can remove.",
+  noDb: "This page needs you to be signed in to claude.ai to show scans and save picks.",
+  loadFail: "This scan could not be loaded. Reload the page, or ask Claude to scan again.",
+};
+function t(key, vars) {
+  let s = STRINGS[key] || "";
+  if (vars) s = s.replace(/\{(\w+)\}/g, (_, k) => (vars[k] == null ? "" : String(vars[k])));
+  return s;
+}
+function say(el, text) { el.textContent = text || ""; el.hidden = !text; return el; }
+const $ = (id) => document.getElementById(id);
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = v; else if (k === "text") el.textContent = v; else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  return el;
+}
+
+/* sizes in decimal units, as Finder and System Settings show them */
+function size(b) {
+  b = Number(b) || 0;
+  if (b >= 1e12) return (b / 1e12).toFixed(2) + " TB";
+  if (b >= 1e9) return (b / 1e9).toFixed(b >= 1e11 ? 0 : 1) + " GB";
+  if (b >= 1e6) return Math.round(b / 1e6) + " MB";
+  return Math.max(0, Math.round(b / 1e3)) + " KB";
+}
+function when(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  return d.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+function under(child, parent) { return child === parent || child.startsWith(parent.replace(/\/$/, "") + "/"); }
+function tildify(p) { return String(p || "").replace(/^\/Users\/[^/]+/, "~"); }
+
+/* tooltip and toast */
+const tip = $("tip");
+document.addEventListener("pointerover", (e) => {
+  const el = e.target.closest && e.target.closest("[data-tip]");
+  if (!el) { tip.hidden = true; return; }
+  tip.textContent = el.getAttribute("data-tip");
+  tip.hidden = false;
+  const r = el.getBoundingClientRect();
+  const w = tip.offsetWidth, hgt = tip.offsetHeight;
+  tip.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left)) + "px";
+  tip.style.top = (r.bottom + hgt + 12 > window.innerHeight ? r.top - hgt - 8 : r.bottom + 8) + "px";
+});
+document.addEventListener("scroll", () => { tip.hidden = true; }, { passive: true });
+let toastTimer = 0;
+function toast(text) {
+  const el = $("toast");
+  el.textContent = text; el.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 4200);
+}
+
+/* state */
+const state = {
+  db: null, user: null, scanId: "", scan: null, scans: [], groupDocs: {}, items: [], byId: {},
+  picks: {}, pending: {}, saving: false, saveFailed: false, canWrite: true,
+  filters: { risk: new Set(), pick: new Set() }, stay: new Set(), query: "", openItems: new Set(), unsubScan: null, unsubGroups: null,
+};
+
+function pickOf(id) {
+  const p = state.pending[id] || state.picks[id];
+  return (p && p.pick) || "";
+}
+function noteOf(id) {
+  const p = state.pending[id] || state.picks[id];
+  return (p && p.note) || "";
+}
+
+/* ---- header ---- */
+function renderHeader() {
+  const s = state.scan;
+  say($("h1"), t("title"));
+  say($("host"), s.host || "");
+  say($("when"), t("scanned", { when: when(s.createdAt) }));
+  const done = !!s.doneAt;
+  $("status").classList.toggle("done", done);
+  say($("statustext"), done ? t("statusDone", { when: when(s.doneAt) }) : t("statusOpen"));
+  const sum = $("summary");
+  if (s.summary && window.marked && window.DOMPurify) {
+    sum.innerHTML = DOMPurify.sanitize(marked.parse(s.summary));
+    sum.hidden = false;
+  } else say(sum, s.summary || "");
+
+  const disk = s.disk || {};
+  const facts = $("facts");
+  facts.replaceChildren();
+  const fact = (cls, label, value, sub, tipText) => {
+    if (!label || value == null) return;
+    facts.append(h("div", { class: "fact " + cls, "data-tip": tipText || null },
+      h("span", { text: label }), h("b", { text: value }), sub ? h("small", { text: sub }) : null));
+  };
+  fact("", t("factDisk"), size(disk.container));
+  fact("", t("factUsed"), size(disk.used));
+  fact((disk.free || 0) < 0.1 * (disk.container || 1) ? "warn" : "", t("factFree"), size(disk.free));
+  fact("ok", t("factSuggested"), size(s.suggestedBytes), t("factSuggestedSub"));
+  fact("", t("factUnverified"), size((s.unverified || {}).bytes), t("factUnverifiedSub"));
+
+  const bar = s.bar || [];
+  $("cap").hidden = !bar.length;
+  if (bar.length) {
+    say($("caph"), t("capHead"));
+    const total = bar.reduce((a, b) => a + (b.bytes || 0), 0) || 1;
+    const capbar = $("capbar"), legend = $("legend");
+    capbar.replaceChildren(); legend.replaceChildren();
+    capbar.setAttribute("aria-label", bar.map((b) => b.label + " " + size(b.bytes)).join(", "));
+    for (const b of bar) {
+      const pct = (100 * b.bytes) / total;
+      const label = b.label + ": " + size(b.bytes) + " (" + pct.toFixed(pct < 1 ? 1 : 0) + "%)";
+      capbar.append(h("span", { class: "t-" + b.tone, style: "flex: " + Math.max(pct, 0.25) + " 0 0", "data-tip": label }));
+      legend.append(h("li", { "data-tip": label }, h("span", { class: "sw t-" + b.tone }), h("span", { class: "lab", text: b.label }),
+        h("span", { class: "val", text: size(b.bytes) })));
+    }
+  }
+
+  const recent = s.recent || {}, top = recent.top || [];
+  const unv = s.unverified || {};
+  $("two").hidden = !top.length && !unv.bytes;
+  say($("growh"), t("growHead"));
+  say($("growhint"), recent.bytes ? t("growHint", { total: size(recent.bytes), since: recent.since || "" }) : "");
+  const growth = $("growth");
+  growth.replaceChildren();
+  const max = Math.max(1, ...top.map((x) => x.bytes));
+  for (const g of top.slice(0, 10)) {
+    growth.append(h("li", { "data-tip": g.path + ": " + size(g.bytes) },
+      h("span", { class: "p" }, h("span", { text: tildify(g.path) })), h("span", { class: "v", text: size(g.bytes) }),
+      h("span", { class: "b" }, h("i", { style: "width:" + ((100 * g.bytes) / max).toFixed(1) + "%" }))));
+  }
+  say($("unvh"), t("unvHead"));
+  say($("unvbytes"), size(unv.bytes));
+  say($("unvof"), t("unvOf", { data: size(disk.dataVolume) }));
+  say($("unvnote"), unv.note || "");
+  const denied = $("denied");
+  denied.replaceChildren();
+  for (const d of unv.denied || []) {
+    denied.append(h("li", {}, h("code", { text: tildify(d.path) }),
+      h("span", { class: "why", text: d.why === "owner" ? t("whyOwner") : t("whyPrivacy") })));
+  }
+  say($("accessh"), (unv.denied || []).length ? t("accessHead") : "");
+  const steps = $("steps");
+  steps.replaceChildren();
+  if ((unv.denied || []).length) for (const k of ["step1", "step2", "step3"]) if (t(k)) steps.append(h("li", { text: t(k) }));
+
+  const areas = $("areas");
+  areas.replaceChildren();
+  const inv = s.investigators || [];
+  $("how").hidden = !inv.length && !s.accounted;
+  say($("howh"), t("howHead"));
+  if (s.accounted) areas.append(h("p", { text: t("howWalk", { accounted: size(s.accounted) }) }));
+  for (const a of inv) areas.append(h("p", {}, h("b", { text: a.area }), " — ", a.text));
+}
+
+/* ---- filters and tally ---- */
+/* Two rows that combine: what an item is, and what you picked for it. Several pills of a row can be on at once;
+   none on means all. A row picked while "Your pick" filters stays in view until a filter or the search changes,
+   so a misclick can still be undone. */
+const FILTERS = {
+  risk: { head: "filterRisk", of: (it) => it.risk, opts: [["safe", "filterSafe"], ["review", "filterReview"], ["keep", "filterKeep"]] },
+  pick: { head: "filterPick", of: (it) => pickOf(it.id) || "none", opts: [["none", "filterUnpicked"], ["remove", "filterRemove"], ["keep", "filterKept"]] },
+};
+try {
+  const saved = JSON.parse(localStorage.getItem("mac-cleanup:filters") || "{}");
+  for (const [k, f] of Object.entries(FILTERS)) {
+    if (Array.isArray(saved[k])) state.filters[k] = new Set(saved[k].filter((v) => f.opts.some(([o]) => o === v)));
+  }
+} catch (e) { /* storage blocked or unreadable */ }
+function passes(it, skip) {
+  for (const [k, f] of Object.entries(FILTERS)) {
+    if (k !== skip && state.filters[k].size && !state.filters[k].has(f.of(it))) return false;
+  }
+  return true;
+}
+function matches(it) {
+  if (!passes(it) && !state.stay.has(it.id)) return false;
+  const q = state.query.trim().toLowerCase();
+  if (q && ![it.path, it.label, it.what].some((s) => String(s || "").toLowerCase().includes(q))) return false;
+  return true;
+}
+function renderFilters() {
+  const box = $("filters");
+  box.replaceChildren();
+  for (const [k, f] of Object.entries(FILTERS)) {
+    const on = state.filters[k];
+    const pool = state.items.filter((it) => passes(it, k));  /* a row's counts follow the other row */
+    const grp = h("div", { class: "fgroup", role: "group", "aria-label": t(f.head) || null });
+    if (t(f.head)) grp.append(h("span", { class: "flabel", "data-tip": t("filterTip") || null, text: t(f.head) }));
+    const pill = (key, label, n) => {
+      if (!t(label)) return;
+      const b = h("button", { class: "fpill", type: "button", "aria-pressed": String(key == null ? !on.size : on.has(key)) },
+        t(label), h("span", { class: "n", text: String(n) }));
+      b.addEventListener("click", () => {
+        if (key == null) on.clear(); else if (on.has(key)) on.delete(key); else on.add(key);
+        if (on.size === f.opts.length) on.clear();  /* every pill on is the same as all */
+        filtersChanged();
+      });
+      grp.append(b);
+    };
+    pill(null, "filterAll", pool.length);
+    for (const [key, label] of f.opts) pill(key, label, pool.filter((it) => f.of(it) === key).length);
+    box.append(grp);
+  }
+}
+function filtersChanged() {
+  state.stay.clear();
+  const keep = Object.fromEntries(Object.entries(state.filters).map(([k, v]) => [k, [...v]]));
+  try { localStorage.setItem("mac-cleanup:filters", JSON.stringify(keep)); } catch (e) { /* storage blocked */ }
+  renderFilters(); applyFilter(true);
+}
+/* the total to remove counts a folder once, even when something inside it is picked too */
+function tally() {
+  const chosen = state.items.filter((i) => pickOf(i.id) === "remove").sort((a, b) => a.path.length - b.path.length);
+  const tops = [];
+  for (const it of chosen) if (!tops.some((t0) => under(it.path, t0.path))) tops.push(it);
+  const bytes = tops.reduce((a, b) => a + b.bytes, 0);
+  const sel = $("sel");
+  sel.replaceChildren();
+  if (!chosen.length) sel.append(t("selNone"));
+  else sel.append(h("b", { text: size(bytes) }), t("selSome", { n: chosen.length }));
+  const doneBtn = $("done");
+  doneBtn.textContent = state.scan && state.scan.doneAt ? t("doneAgain") : t("done");
+  doneBtn.disabled = !state.canWrite;
+}
+function saveStatus() {
+  const el = $("save");
+  const busy = state.saving || Object.keys(state.pending).length > 0;
+  el.classList.toggle("busy", busy && !state.saveFailed);
+  el.classList.toggle("fail", state.saveFailed);
+  say($("savetext"), !state.canWrite ? t("saveReadonly") : state.saveFailed ? t("saveFail") : busy ? t("saveBusy") : t("saveSaved"));
+}
+
+/* ---- groups ---- */
+function riskPill(r) {
+  const map = { safe: ["ok", "riskSafe", "tipSafe"], review: ["warn", "riskReview", "tipReview"], keep: ["quiet", "riskKeep", "tipKeep"] };
+  const [cls, label, tipKey] = map[r] || map.review;
+  return h("span", { class: "pill " + cls, "data-tip": t(tipKey), text: t(label) });
+}
+function kindPill(k) {
+  const map = { worktree: ["kindWorktree", "tipWorktree"], command: ["kindCommand", "tipCommand"], manual: ["kindManual", "tipManual"] };
+  if (!map[k] || !t(map[k][0])) return null;
+  return h("span", { class: "pill accent quiet", "data-tip": t(map[k][1]), text: t(map[k][0]) });
+}
+function itemRow(it) {
+  const pick = pickOf(it.id);
+  const row = h("div", { class: "item" + (pick ? " picked-" + pick : ""), id: "i-" + it.id, "data-id": it.id });
+  const seg = h("div", { class: "seg", role: "group", "aria-label": it.what || it.path });
+  for (const p of ["remove", "keep"]) {
+    const b = h("button", { type: "button", "data-pick": p, "aria-pressed": String(pick === p), disabled: !state.canWrite, text: t(p) });
+    b.addEventListener("click", () => setPick(it.id, pickOf(it.id) === p ? "" : p));
+    seg.append(b);
+  }
+  const chips = h("div", { class: "chips" }, riskPill(it.risk), kindPill(it.kind),
+    it.inUse && t("inUse") ? h("span", { class: "pill crit", "data-tip": t("tipInUse"), text: t("inUse") }) : null,
+    it.recent && t("recent") ? h("span", { class: "pill accent", "data-tip": t("tipRecent"), text: t("recent") }) : null);
+  const open = state.openItems.has(it.id);
+  const more = h("button", { class: "more", type: "button", "aria-expanded": String(open), text: open ? t("less") : t("details") });
+  const shown = it.label || it.path;  /* a Docker volume, a macOS volume: what it is called, not where it was placed */
+  const main = h("div", { class: "imain" }, h("div", { class: "iwhat", text: it.what || tildify(shown) }),
+    h("div", { class: "ipath", "data-tip": shown }, h("span", { text: tildify(shown) })), chips, more);
+  const irow = h("div", { class: "irow" }, h("div", { class: "isize", text: size(it.bytes) }), main, seg);
+  row.append(irow);
+  const det = h("div", { class: "idet", hidden: !open });
+  more.addEventListener("click", () => {
+    const now = det.hidden;
+    det.hidden = !now;
+    more.textContent = now ? t("less") : t("details");
+    more.setAttribute("aria-expanded", String(now));
+    if (now) state.openItems.add(it.id); else state.openItems.delete(it.id);
+    if (now && !det.firstChild) fillDetails(det, it);
+  });
+  if (open) fillDetails(det, it);
+  irow.append(det);
+  return row;
+}
+function fillDetails(det, it) {
+  const dl = h("dl");
+  const row = (label, value) => { if (label && value) dl.append(h("dt", { text: label }), h("dd", {}, value)); };
+  row(t("dRegenerates"), it.regenerates);
+  if (it.action) {
+    const code = h("code", { text: it.action });
+    const copy = h("button", { type: "button", text: t("copy") });
+    copy.addEventListener("click", () => {
+      Promise.resolve().then(() => navigator.clipboard.writeText(it.action))
+        .then(() => { copy.textContent = t("copied"); setTimeout(() => { copy.textContent = t("copy"); }, 1500); })
+        .catch(() => { const r = document.createRange(); r.selectNodeContents(code); const s = getSelection(); s.removeAllRanges(); s.addRange(r); });
+    });
+    row(t("dAction"), h("div", { class: "cmd" }, code, copy));
+  }
+  row(t("dModified"), it.modified);
+  row(t("dNotes"), it.notes);
+  row(t("dFound"), it.source);
+  det.append(dl);
+  const id = "note-" + it.id;
+  const ta = h("textarea", { id, rows: "2", disabled: !state.canWrite });
+  ta.value = noteOf(it.id);
+  ta.addEventListener("input", () => setNote(it.id, ta.value));
+  det.append(h("label", { class: "notelab", for: id, text: t("note") }), ta);
+}
+function renderGroups() {
+  const box = $("groups");
+  const openGroups = new Set([...box.querySelectorAll("details.group[open]")].map((d) => d.dataset.key));
+  const first = !box.childElementCount;
+  box.replaceChildren();
+  const meta = (state.scan.groups || []);
+  for (const g of meta) {
+    const items = state.items.filter((i) => i.group === g.key);
+    if (!items.length) continue;
+    const det = h("details", { class: "group", "data-key": g.key, id: "g-" + g.key });
+    if (first ? g.safeBytes > 0 || g.key === "other" : openGroups.has(g.key)) det.open = true;
+    const end = h("span", { class: "end" },
+      g.safeBytes ? h("span", { class: "pill ok", text: t("safeIn", { size: size(g.safeBytes) }) }) : null,
+      h("span", { class: "pill quiet", text: t("items", { n: items.length }) }),
+      h("span", { class: "gsize", text: size(g.bytes) }));
+    det.append(h("summary", {}, h("span", { class: "caret", "aria-hidden": "true", text: "›" }), h("h2", { text: g.title }), end));
+    const body = h("div", { class: "gbody" });
+    if (g.blurb) body.append(h("p", { class: "gblurb", text: g.blurb }));
+    if (state.canWrite) {
+      const tools = h("div", { class: "gtools" });
+      /* never overturns a pick you made: an item you chose to keep stays kept */
+      const pickable = () => items.filter((i) => i.risk === "safe" && !i.inUse && !pickOf(i.id));
+      if (items.some((i) => i.risk === "safe" && !i.inUse) && t("pickSafe")) {
+        const b = h("button", { type: "button", text: t("pickSafe") });
+        b.addEventListener("click", () => setMany(pickable().map((i) => i.id), "remove"));
+        tools.append(b);
+      }
+      if (t("clearGroup")) {
+        const c = h("button", { type: "button", text: t("clearGroup") });
+        c.addEventListener("click", () => setMany(items.filter((i) => pickOf(i.id)).map((i) => i.id), ""));
+        tools.append(c);
+      }
+      body.append(tools);
+    }
+    for (const it of items) body.append(itemRow(it));
+    det.append(body);
+    box.append(det);
+  }
+  applyFilter();
+}
+/* reveal: the filters or the search just changed, so open the groups that hold matches */
+function applyFilter(reveal) {
+  let any = false;
+  for (const det of $("groups").querySelectorAll("details.group")) {
+    let n = 0;
+    for (const row of det.querySelectorAll(".item")) {
+      const ok = matches(state.byId[row.dataset.id]);
+      row.hidden = !ok;
+      if (ok) n++;
+    }
+    det.hidden = !n;
+    if (n) any = true;
+    if (n && reveal && (state.query || state.filters.pick.size)) det.open = true;
+  }
+  say($("nomatch"), state.items.length && !any ? t("nomatch") : "");
+}
+function refreshRow(id) {
+  const old = document.getElementById("i-" + id);
+  const it = state.byId[id];
+  if (!old || !it) return;
+  const pick = pickOf(id);
+  old.className = "item" + (pick ? " picked-" + pick : "");
+  for (const b of old.querySelectorAll(".seg button")) b.setAttribute("aria-pressed", String(b.dataset.pick === pick));
+  const ta = old.querySelector("textarea");
+  if (ta && document.activeElement !== ta) ta.value = noteOf(id);
+}
+
+/* ---- saving: picks merge into scans/<id>.picks, one write at a time, coalesced ---- */
+let saveTimer = 0;
+function queue(id, patch) {
+  const cur = state.pending[id] || state.picks[id] || {};
+  state.pending[id] = Object.assign({}, cur, patch, { at: new Date().toISOString() });
+  if (state.filters.pick.size) state.stay.add(id);
+  refreshRow(id);
+  tally(); saveStatus();
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(flush, 700);
+}
+function setPick(id, pick) { queue(id, { pick }); renderFilters(); }
+function setMany(ids, pick) { for (const id of ids) queue(id, { pick }); renderFilters(); applyFilter(); }
+function setNote(id, note) { queue(id, { note }); }
+async function flush() {
+  if (state.saving || !state.db || !Object.keys(state.pending).length) return;
+  const batch = state.pending;
+  state.pending = {};
+  state.saving = true; saveStatus();
+  try {
+    await state.db.doc("scans/" + state.scanId).update({ picks: batch });
+    Object.assign(state.picks, batch);
+    state.saveFailed = false;
+  } catch (e) {
+    state.pending = Object.assign(batch, state.pending);
+    state.saveFailed = true;
+    if (e && (e.code === "permission_denied" || e.code === "not_granted")) { state.canWrite = false; renderGroups(); }
+  } finally {
+    state.saving = false; saveStatus();
+    if (Object.keys(state.pending).length && !state.saveFailed) saveTimer = setTimeout(flush, 400);
+  }
+}
+$("done").addEventListener("click", async () => {
+  if (!state.db || !state.scanId) return;
+  clearTimeout(saveTimer);
+  await flush();
+  try {
+    const at = new Date().toISOString();
+    await state.db.doc("scans/" + state.scanId).update({ doneAt: at });
+    state.scan.doneAt = at;
+    renderHeader(); tally();
+    toast(t("doneToast"));
+  } catch (e) { state.saveFailed = true; saveStatus(); }
+});
+$("q").addEventListener("input", (e) => { state.query = e.target.value; state.stay.clear(); applyFilter(true); });
+$("q").placeholder = t("search");
+$("q").setAttribute("aria-label", t("search"));
+
+/* ---- loading ---- */
+function showEmpty(head, body) {
+  say($("emptyh"), head); say($("emptyp"), body);
+  $("empty").hidden = false;
+  for (const id of ["gbar", "two", "cap", "how"]) $(id).hidden = true;
+}
+function rebuildItems() {
+  const docs = Object.values(state.groupDocs).sort((a, b) => (a.order - b.order) || (a.part - b.part));
+  state.items = docs.flatMap((d) => d.items || []);
+  state.byId = Object.fromEntries(state.items.map((i) => [i.id, i]));
+}
+function openScan(id) {
+  if (state.unsubScan) state.unsubScan();
+  if (state.unsubGroups) state.unsubGroups();
+  state.scanId = id; state.groupDocs = {}; state.items = []; state.byId = {}; state.picks = {}; state.pending = {};
+  $("groups").replaceChildren();
+  let gotGroups = false;
+  state.unsubScan = state.db.doc("scans/" + id).onSnapshot((snap) => {
+    if (!snap.exists) { showEmpty(t("emptyHead"), t("loadFail")); return; }
+    const first = !state.scan || state.scan.id !== id;
+    state.scan = snap.data();
+    state.picks = state.scan.picks || {};
+    $("empty").hidden = true;
+    $("gbar").hidden = false;
+    renderHeader();
+    if (gotGroups && first) renderGroups();
+    else for (const it of state.items) refreshRow(it.id);
+    renderFilters(); tally(); saveStatus();
+  }, () => showEmpty(t("emptyHead"), t("loadFail")));
+  state.unsubGroups = state.db.collection("scans/" + id + "/groups").onSnapshot((qs) => {
+    for (const d of qs.docs) state.groupDocs[d.id] = d.data();
+    for (const ch of qs.docChanges()) if (ch.type === "removed") delete state.groupDocs[ch.doc.id];
+    rebuildItems();
+    gotGroups = true;
+    if (state.scan) { renderGroups(); renderFilters(); tally(); }
+  }, () => showEmpty(t("emptyHead"), t("loadFail")));
+}
+function renderScanPicker() {
+  const sel = $("scanpick");
+  sel.replaceChildren();
+  sel.hidden = state.scans.length < 2;
+  for (const s of state.scans) sel.append(h("option", { value: s.id, text: (s.host || "") + " · " + when(s.createdAt), selected: s.id === state.scanId }));
+}
+$("scanpick").addEventListener("change", (e) => { location.hash = e.target.value; });
+window.addEventListener("hashchange", () => {
+  const id = decodeURIComponent(location.hash.slice(1));
+  if (id && id !== state.scanId && state.db) { state.scan = null; openScan(id); renderScanPicker(); }
+});
+
+async function boot() {
+  const db = await (window.claude && window.claude.use ? window.claude.use("db") : Promise.resolve(null));
+  if (!db) { showEmpty(t("emptyHead"), t("noDb")); return; }
+  state.db = db;
+  try {
+    const user = await window.claude.use("user");
+    if (user && user.can) { const ok = await user.can("data.write"); if (ok === false) state.canWrite = false; }
+  } catch (e) { /* not told: keep the controls; a refused write decides */ }
+  let list = [];
+  try {
+    const qs = await db.collection("scans").orderBy("createdAt", "desc").limit(30).get();
+    list = qs.docs.map((d) => d.data());
+  } catch (e) { list = []; }
+  state.scans = list;
+  const want = decodeURIComponent(location.hash.slice(1));
+  const id = (want && list.some((s) => s.id === want)) ? want : (list[0] && list[0].id) || want;
+  if (!id) { showEmpty(t("emptyHead"), t("emptyBody")); return; }
+  openScan(id);
+  renderScanPicker();
+}
+say($("h1"), t("title"));
+showEmpty(t("emptyHead"), t("emptyBody"));
+boot();
+</script>

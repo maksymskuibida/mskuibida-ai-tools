@@ -1,5 +1,5 @@
 #!/bin/bash
-# Regression suite for worktree-cleanup. Run: bash tests/regression.sh
+# Regression suite for mac-cleanup's worktree gates. Run: bash tests/regression.sh
 # Each case asserts on the fixture's final on-disk state, or on the remover's own
 # output, because a report claiming a worktree was preserved proves nothing.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

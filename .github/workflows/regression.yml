@@ -1,12 +1,12 @@
 name: regression
 
-# Gates for the plugins. worktree-cleanup: its regression suite. model-fit, project-panel, ask-guard, unit-claim
+# Gates for the plugins. mac-cleanup: its worktree regression suite. model-fit, project-panel, ask-guard, unit-claim
 # and review-findings:
 # the Claude Code CLI validates the manifests and the mods, then runs each mod's own tests. Every plugin: versions
 # are consistent, and bumped on PRs that change what users receive (scripts/check-versions.py); so is the
 # marketplace's own version, which names the tag tag-main.yml puts on main.
 #
-# The worktree-cleanup suite is the only gate on that code. The plugin's own history is the argument
+# The mac-cleanup worktree suite is the only gate on that code. The plugin's own history is the argument
 # for running it here: two of the three defects in its second commit silently disabled
 # a safety gate and were found by *executing* the tool against a fixture, not by
 # reading it. Nothing else obliges a reviewer to run it before merge.
@@ -52,7 +52,9 @@ jobs:
           fi
 
       - name: Run the regression suite
-        run: bash plugins/worktree-cleanup/skills/worktree-cleanup/tests/regression.sh
+        run: |
+          bash plugins/mac-cleanup/skills/mac-cleanup/tests/regression.sh
+          python3 -m unittest discover -s plugins/mac-cleanup/skills/mac-cleanup/tests -p "test_*.py"
 
       - uses: actions/setup-node@v4
         with:
@@ -123,7 +125,7 @@ jobs:
       - name: Validate the marketplace and the plugins without a test command
         run: |
           claude plugin validate .
-          claude plugin validate plugins/worktree-cleanup
+          claude plugin validate plugins/mac-cleanup
           claude plugin validate plugins/story-points
           claude plugin validate plugins/approval-gates
           claude plugin validate plugins/aidlc-session-titles

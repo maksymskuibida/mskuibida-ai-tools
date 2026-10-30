@@ -1,9 +1,7 @@
----
-name: worktree-cleanup
-description: Safely find and remove orphaned git worktrees across many local repos to reclaim disk space, without destroying unpushed work or deleting a worktree out from under a running session. Use this whenever worktrees are piling up, someone asks which worktrees are safe to delete, wants to prune or clean up worktrees, is low on disk space and suspects stale checkouts, or asks what worktrees exist across their projects — including vaguer forms like "clean up my repos", "what are all these old checkouts", or "reclaim the disk my worktrees are eating". Do NOT use it for general disk pressure that mentions no worktrees or checkouts — that is usually Docker images, DerivedData or Downloads, and a false trigger here starts a slow $HOME scan that writes to the git index of worktrees other live sessions are using. Use it too before any bulk `git worktree remove` or `rm -rf` over worktree directories, even a small one, because the ordering it enforces — re-verifying at the moment of deletion rather than trusting an earlier scan — is the part that is easy to get wrong and expensive to get wrong.
----
+# Worktrees
 
-# Worktree cleanup
+The worktree part of mac-cleanup. Read all of it before removing any worktree, alone or as part of a whole-disk
+cleanup. Scripts are in `../scripts/` (inside a skill: `${CLAUDE_PLUGIN_ROOT}/skills/mac-cleanup/scripts/`).
 
 Agent-driven development leaves worktrees everywhere. They accumulate quietly, each
 carrying a full `node_modules`, and a machine can easily hold tens of gigabytes of
