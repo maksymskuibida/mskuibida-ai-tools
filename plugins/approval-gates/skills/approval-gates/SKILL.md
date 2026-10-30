@@ -175,12 +175,15 @@ no test plan.
    `test-plan.html` once: `capabilities: {db: {}, user: {}}`, `icon: "checklist"`, description "Steps to check a Unit's
    not-verified points; Pass or Fail each, notes come back to Claude." Reuse its URL; republish from the file after a
    plugin update. Write the plan's `writes.json` with one `ArtifactData` batch (a `plans/<id>` row).
-4. **Drive it in chat.** Send `**Read:** <artifact url>#<plan id>` in a message of its own. In the same response ask
-   (`AskUserQuestion`, header "Test plan"): **Do the agent step for A** / **Change the plan**.
+4. **Drive it in chat.** Send `**Read:** <artifact url>#<plan id>` as a text block in a message of its own right after
+   the write (the hook names the exact link), and in the same response ask (`AskUserQuestion`, header "Test plan"): **Do
+   the agent step for A** / **Change the plan**. Never ask before the link: the plugin refuses every question until a
+   message of yours written after the plan was published carries it, and blocks a turn that ends without it. A plan
+   published again needs its link again. Every question here has two options, never one.
    - *Change the plan*: ask what to change, revise the plan (a new id, `-test-v2-`), publish it again, send the link, ask again.
    - *Do the agent step for A*: do it, then `ArtifactData` `update` of `plans/<id>` with `agentDone` (all keys done so
-     far); the developer's steps for the section open on the page. Ask a one-button question: **Section A completed, go
-     on**. For the last section the button is **Test plan completed**.
+     far); the developer's steps for the section open on the page. Ask (header "Test plan"): **Section A completed, go
+     on** / **Change the plan**. For the last section: **Test plan completed** / **Change the plan**.
    - On every button, first `ArtifactData` `get` of `plans/<id>` and read `results`. A step without a result, or a
      section the developer has not finished, is said in one line and asked again; never go on past it. After
      "Section A completed, go on", do the agent step of B the same way. Never write `results` (the page does).

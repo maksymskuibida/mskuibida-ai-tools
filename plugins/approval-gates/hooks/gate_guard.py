@@ -16,6 +16,10 @@ The order, for the session that opens a gate:
  4. A write that sets `status: "decided"`, or carries `decision` or `notes`, on a `gates` row is refused: those
     belong to the developer, who writes them in the page.
  5. When the developer answers Request Changes, the assistant is told to read the notes they left in the page.
+ 6. A test plan (a `plans/<id>` row written into the AI-DLC test plans artifact) has the same order: the write is
+    noticed (PostToolUse ArtifactData) and the exact link `<artifact url>#<plan id>` is named; until a text message of the
+    assistant written after the write carries it, every AskUserQuestion is refused, and a turn that ends with the link
+    never sent is blocked once (Stop). A plan written again needs its link again.
 
 Under the unit-end rhythm (the Unit's claim, `aidlc/.aidlc-unit-scope.json`, says `gate_rhythm: "unit-end"`, or the
 directive carries `unit_gate: "unit-end"`) a Unit has two pages instead of one per stage: the plan page at the Code
@@ -79,7 +83,7 @@ def state_path(event):
 
 
 def blank():
-    return {"pending": None, "published": {}, "updated": time.time()}
+    return {"pending": None, "published": {}, "plans": {}, "updated": time.time()}
 
 
 def normalize(data):
@@ -89,6 +93,8 @@ def normalize(data):
             state["pending"] = data["pending"]
         if isinstance(data.get("published"), dict):
             state["published"] = {k: v for k, v in data["published"].items() if isinstance(v, dict)}
+        if isinstance(data.get("plans"), dict):
+            state["plans"] = {k: v for k, v in data["plans"].items() if isinstance(v, dict)}
         if isinstance(data.get("updated"), (int, float)):
             state["updated"] = data["updated"]
     return state
@@ -664,10 +670,11 @@ def epoch_of(stamp):
         return None
 
 
-def link_sent(event, pub):
+def link_sent(event, pub, after=False):
     """(True, _) when a message of the assistant in this session's transcript carries the page's link; else
     (False, counts) of the assistant's text, thinking and tool_use blocks written since the page was published.
-    Tool results, the developer's prompts and subagent transcripts do not count. An unreadable transcript refuses."""
+    Tool results, the developer's prompts and subagent transcripts do not count. An unreadable transcript refuses.
+    With after=True only a message written since the page was published counts (a page written again needs its link again)."""
     gate_id, needle, since = str(pub.get("id", "")), link_of(pub), pub.get("at")
     path = event.get("transcript_path")
     if not path or not gate_id:
@@ -692,7 +699,7 @@ def link_sent(event, pub):
                 for block in blocks:
                     if not isinstance(block, dict):
                         continue
-                    if block.get("type") == "text" and needle in str(block.get("text", "")):
+                    if block.get("type") == "text" and needle in str(block.get("text", "")) and (recent or not after):
                         return True, counts
                     if recent and block.get("type") in counts:
                         counts[block["type"]] += 1
@@ -721,17 +728,57 @@ def call_written(event):
         return False
 
 
-def wait_for_link(event, pub):
+def wait_for_link(event, pub, after=False):
     """link_sent, tried again for a moment when the link is missing. Claude Code writes the blocks of a response to the
     transcript as they stream, and the hook of a tool call can run before the text block of the same response (one
     entry per block, one message id) has reached the file; a link sent in the response that asks the question would be
     refused for good. It waits for the text to land, and stops waiting once the question's own tool call is on disk."""
     deadline = time.time() + link_wait()
     while True:
-        sent, counts = link_sent(event, pub)
+        sent, counts = link_sent(event, pub, after)
         if sent or time.time() >= deadline or call_written(event):
             return sent, counts
         time.sleep(0.2)
+
+
+def plan_hint(plan_ids, state, with_bundle):
+    links = " and ".join(f"`{link_of(state['plans'][i])}`" for i in plan_ids)
+    text = (f"the test plan is published (plans/{', plans/'.join(plan_ids)}). Send the developer the link {links} as a text block "
+            "in a message of its own, and in the SAME response make the AskUserQuestion call (header \"Test plan\": "
+            "**Do the agent step for A** / **Change the plan**). Never ask before the link: every question is refused until "
+            "a message of yours written after this write carries it, and never end the turn on the link alone.")
+    if with_bundle:
+        text += (" This batch also wrote the unit-end page: put both links in that one message. The question that follows is "
+                 "the test-plan ask above, not the unit-end Approval question (the gate waits until the test plan is done and "
+                 "the page is republished with its outcome).")
+    return text
+
+
+def unsent_plans(event, state, wait=True):
+    """[(plan, counts)] of the test plans whose link no message of the assistant has carried since they were written."""
+    found = []
+    for plan in state["plans"].values():
+        if plan.get("linked"):
+            continue
+        sent, counts = wait_for_link(event, plan, after=True) if wait else link_sent(event, plan, True)
+        if sent:
+            plan["linked"] = time.time()
+        else:
+            found.append((plan, counts))
+    return found
+
+
+def guard_plan_links(event, state):
+    """Refuse any question while a test plan's link has not been sent: the developer opens the plan from the link."""
+    found = unsent_plans(event, state)
+    if found:
+        plan, counts = found[0]
+        raise Refusal(f"The developer gets the test plan's link before any test-plan question, and no message of yours written "
+                      f"since plans/{plan.get('id', '')} was published carries it. Since then your transcript holds "
+                      f"{counts['thinking']} thinking, {counts['tool_use']} tool-call and {counts['text']} text block(s), none "
+                      "with the link. Thinking is not output and a tool call is not a message: write "
+                      f"`**Read:** {link_of(plan)}` as the text of your message, then make the AskUserQuestion call in this ONE "
+                      "response; never end the turn on the link alone. (A plan written again needs its link again.)")
 
 
 def guard_question(event, state, project, questions):
@@ -782,6 +829,7 @@ def pre(event, project):
         return
     if tool == "AskUserQuestion":
         state = load(event)
+        guard_plan_links(event, state)
         sync_pending(state, project)
         gates = gate_questions(state, questions_of(ti))
         if gates:
@@ -904,11 +952,21 @@ def record_artifact(project, state, tool_input, response):
         if cand and cand[0] and cand not in candidates:
             candidates.append(cand)
     changed = False
+    plan_ids, bundle_ids = [], []
     for op, collection, doc_id, _data, url in writes_of(tool_input):
+        if collection == "plans":
+            if op == "set" and doc_id:
+                state["plans"][doc_id] = {"id": doc_id, "url": str(url or "").rstrip("/"), "at": time.time()}
+                if doc_id not in plan_ids:
+                    plan_ids.append(doc_id)
+                changed = True
+            continue
         if collection == "bundles":
             if op != "set":
                 continue
-            changed = record_bundle(state, project, intent, doc_id, url) or changed
+            if record_bundle(state, project, intent, doc_id, url):
+                bundle_ids.append(doc_id)
+                changed = True
             continue
         if op not in ("set", "update") or collection != "gates":
             continue
@@ -931,6 +989,8 @@ def record_artifact(project, state, tool_input, response):
                                "the link first, then the AskUserQuestion call in the same response; never end the "
                                "turn on the link alone.")
         changed = True
+    if plan_ids:
+        say("PostToolUse", plan_hint(plan_ids, state, bool(bundle_ids)))
     return changed
 
 
@@ -1068,6 +1128,20 @@ def stop(event, project):
         except Refusal:
             return
         sync_pending(state, project)
+        try:
+            unsent = [p for p, _c in unsent_plans(event, state, wait=False) if not p.get("stop_blocked")]
+        except Refusal:
+            unsent = []
+        if unsent:
+            for plan in unsent:
+                plan["stop_blocked"] = time.time()
+            save(event, state)
+            links = " and ".join(link_of(p) for p in unsent)
+            print(json.dumps({"decision": "block", "reason": f"approval-gates: the test plan {unsent[0].get('id', '')} is "
+                              f"published but its link was never sent, so the developer cannot open it. In ONE response write "
+                              f"`**Read:** {links}` as text, then ask the test-plan question with AskUserQuestion "
+                              f"(**Do the agent step for A** / **Change the plan**). {RELEASE_HINT}"}))
+            return
         pub = pending_page(state, project)
         if not pub or pub.get("asked_at") or pub.get("stop_blocked"):
             return
