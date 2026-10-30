@@ -548,6 +548,17 @@ def target_of(state, project, call_stage=None, call_unit=None):
     return stage, unit, opened
 
 
+def tested_first(pub, stage, unit):
+    """The developer answered Test first on this page: the gate is asked again only after the test plan, about a page
+    republished with its outcome (unit_bundle.py draft --tested)."""
+    if pub.get("test_first"):
+        raise Refusal("The developer answered Test first on this unit-end page, so the gate is not asked again until the "
+                      "test plan is done and the page is republished with its outcome: run test_plan.py finish, then "
+                      f"`unit_bundle.py draft --page unit-end --unit {unit} --tested <test-plan.json> ...`, finalize, write the "
+                      "new bundle row and send its link. (If the developer does not want to test after all, they type "
+                      "/approval-gates:release.)")
+
+
 def require_published(state, project, stage, unit, opened):
     """The record of this stage's gate page, or a Refusal when it was not published since the gate opened. A row
     recorded by its id alone (the stage was unknown when it was written) counts when its id names this stage. Under the
@@ -616,6 +627,19 @@ def check_gate_rows(tool_input):
             if any(str(k).split(".")[0] in ("notes", "picks", "decision") for k in data):
                 raise Refusal(f"bundles/{doc_id}: `notes` and `picks` are written by the developer in the page. Never "
                               "write them, and never update a row you wrote: a new presentation is a new bundle.")
+            continue
+        if collection == "plans":
+            if op == "delete":
+                continue
+            if data is None:
+                raise Refusal(f"The write to plans/{doc_id} cannot be read, so it cannot be checked. Write the row from the "
+                              "file test_plan.py made, or give the data inline.")
+            if op != "set" and any(str(k).split(".")[0] == "results" for k in data):
+                raise Refusal(f"plans/{doc_id}: `results` are the developer's Pass and Fail in the page. Never write them; "
+                              "read them with ArtifactData get.")
+            if op == "set" and data.get("results"):
+                raise Refusal(f"plans/{doc_id}: a plan row starts with no `results`; the developer's Pass and Fail "
+                              "are written by the page.")
             continue
         if collection != "gates" or op == "delete":
             continue
@@ -716,6 +740,7 @@ def guard_question(event, state, project, questions):
         if not stage:
             continue
         pub = require_published(state, project, stage, unit, opened)
+        tested_first(pub, stage, unit)  # only the question: the rejected report (fixes picked after the test) still goes
         text = str(q.get("question", ""))
         url = str(pub.get("url", "")).strip()
         if (url and url in text) or re.search(r"claude\.ai/artifact/|#[0-9]{6}-[a-z0-9.-]+-\d{8}T\d{4}\b", text, re.I):
@@ -965,7 +990,9 @@ def record_bundle(state, project, intent, doc_id, url):
 
 
 def record_answers(project, state, tool_input, response):
+    """Say what the answer to the gate question asks of the assistant. True when the state changed."""
     answers = answers_of(response)
+    changed = False
     for q in gate_questions(state, questions_of(tool_input)):
         answer = next((a for k, a in answers.items() if norm(k) == norm(q.get("question", ""))), None)
         pending = state["pending"]
@@ -973,7 +1000,16 @@ def record_answers(project, state, tool_input, response):
             page = page_of(pending)
             pub = state["published"].get(make_key(pending.get("stage"), pending.get("unit")) + "@" + page)
             where = f"bundles/{pub['id']}" if pub and pub.get("id") else "the Unit's bundle row"
-            if "request changes" in norm(answer):
+            if is_test_first(answer):
+                if pub:
+                    pub["test_first"] = time.time()  # the gate is asked again only about a page republished after the testing
+                    changed = True
+                say("PostToolUse", "the developer chose Test first: that is neither Approve nor Request Changes, and the gate "
+                                   f"stays open. Read {where} with ArtifactData get: `picks.<V row anchor>` is `now` or `later` on each "
+                                   "not-verified row. Then follow the test-plan flow (SKILL.md § 7; the skill "
+                                   "approval-gates:test-plan): write the plan, publish it in the AI-DLC test plans artifact, and "
+                                   "go on from there. Report nothing to the engine until the unit-end gate is asked again.")
+            elif "request changes" in norm(answer):
                 say("PostToolUse", f"the developer chose Request Changes. Read {where} with ArtifactData get and quote the "
                                    "notes they left on rows (notes.<row>) and their picks on suggestions (picks.<row>) in "
                                    "--reason, together with what they typed in chat.")
@@ -991,6 +1027,12 @@ def record_answers(project, state, tool_input, response):
                            "notes they left in the page (decision.note, notes.<document>) in --reason, quoted, "
                            "together with what they typed in chat. The page's decision.k is a draft and never "
                            "replaces the chat answer.")
+    return changed
+
+
+def is_test_first(answer):
+    """The unit-end gate's third answer: test the not-verified points before deciding. Not an approval, not a rejection."""
+    return norm(answer).startswith("test first")
 
 
 def pending_page(state, project):
@@ -1064,7 +1106,7 @@ def post(event, project):
         elif tool == "ArtifactData":
             changed = record_artifact(project, state, ti, event.get("tool_response")) or changed
         else:
-            record_answers(project, state, ti, event.get("tool_response"))
+            changed = record_answers(project, state, ti, event.get("tool_response")) or changed
             changed = mark_asked(project, state, ti, event.get("tool_response")) or changed
         if changed:
             save(event, state)

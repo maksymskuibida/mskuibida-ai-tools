@@ -1,6 +1,6 @@
 ---
 name: approval-gates
-description: Use at every AI-DLC approval gate. First read aidlc/.aidlc-unit-scope.json: for the Code Generation plan approval and the unit-end gate of a Unit claimed with gate_rhythm "unit-end" go straight to the unit-end flow (unit_bundle.py, a bundles/ row in "AI-DLC unit approvals"); every other gate follows the per-stage flow. Per-stage flow: right after `aidlc engine orchestrate report --result awaiting-approval` (or `--result revised`) and before the Approval question — publish the stage's documents as a page in the developer's "AI-DLC approval gates" artifact and send its link in a message of its own before the gate question. Also when the developer answered, to read the notes they left in the page.
+description: Use at every AI-DLC approval gate (and, at a unit-end gate answered Test first, for the test plan of its not-verified points: § 7). First read aidlc/.aidlc-unit-scope.json: for the Code Generation plan approval and the unit-end gate of a Unit claimed with gate_rhythm "unit-end" go straight to the unit-end flow (unit_bundle.py, a bundles/ row in "AI-DLC unit approvals"); every other gate follows the per-stage flow. Per-stage flow: right after `aidlc engine orchestrate report --result awaiting-approval` (or `--result revised`) and before the Approval question — publish the stage's documents as a page in the developer's "AI-DLC approval gates" artifact and send its link in a message of its own before the gate question. Also when the developer answered, to read the notes they left in the page.
 ---
 
 # Approval gates
@@ -142,7 +142,9 @@ republish from this file to the same URL after a plugin update.
    with one problem per line until it holds to the contract. Pass `--project-dir` when the project is not the working
    directory. Never edit `ids` by hand: run finalize again.
 4. Write `writes.json` with one `ArtifactData` `batch`, send `**Read:** <artifact url>#<bundle id>` in a message of its
-   own, then ask the engine's question as the protocol words it, with no link in it. End the turn.
+   own, then ask the engine's question as the protocol words it, with no link in it. End the turn. **At the unit-end
+   gate** (not the plan approval) the question carries a third option, **Test first**, after Approve and Request
+   Changes; see § 7.
 
 **After the answer**, `ArtifactData` `get` of `bundles/<id>`: the page stores the developer's notes per row
 (`notes.<row anchor>`) and their lean on a suggestion (`picks.<row anchor>`: `do` or `leave`). On Request Changes quote
@@ -150,6 +152,56 @@ them in the rejected report's `--reason` with the chat answer. On Approve with n
 and ask in chat whether to act on them; the decision is the chat answer. A Request Changes at the unit-end gate sends
 the Unit's whole chain back for review (the engine floors every stage of the Unit); say so when the developer asks for
 a small change that the plan page would have been the cheaper place for. Never write `notes` or `picks`.
+
+## 7. Testing the not-verified points before the unit-end gate
+
+On the unit-end page every row of "Not verified yet" has a **Test now / Later** pick (stored as `picks.<row anchor>` =
+`now` or `later`). The developer can test those points through a guided test plan before approving. It starts two ways:
+the developer answers the unit-end gate **Test first**, or types `/approval-gates:test-plan` at any time (the skill
+`approval-gates:test-plan` holds the same steps). Test first is not Approve and not Request Changes: the gate stays open,
+and the guard refuses the gate question again only until the page is republished after the testing. Per-stage gates have
+no test plan.
+
+1. **Which rows.** `ArtifactData` `get` of `bundles/<id>`, save its `picks` to a file, then
+   `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/test_plan.py" now --bundle <the unit-end bundle.json> --picks-file <file>`.
+   It prints the V rows to test: those picked Test now, or all of them when none is picked (then tell the developer
+   that all are covered because none was picked).
+2. **Write the plan** as JSON (`aidlc-test-plan/1`, contract/README.md): sections A, B, C … with steps A.1, A.2, B.1 …
+   A new section starts wherever you must do something first (seed data, start a server, deploy, reset state). Each
+   section has `agent` (what you will do) and the developer's steps, each with `do`, `expect` and `verifies` (the V
+   rows). Run `test_plan.py publish --plan <file> --bundle <bundle.json> --out <scratch>`; it refuses with one problem
+   per line until every id, step shape and Test-now row coverage holds.
+3. **The artifact (once per developer).** `Artifact` → `action: "list"` → **AI-DLC test plans**. If none, publish
+   `test-plan.html` once: `capabilities: {db: {}, user: {}}`, `icon: "checklist"`, description "Steps to check a Unit's
+   not-verified points; Pass or Fail each, notes come back to Claude." Reuse its URL; republish from the file after a
+   plugin update. Write the plan's `writes.json` with one `ArtifactData` batch (a `plans/<id>` row).
+4. **Drive it in chat.** Send `**Read:** <artifact url>#<plan id>` in a message of its own. In the same response ask
+   (`AskUserQuestion`, header "Test plan"): **Do the agent step for A** / **Change the plan**.
+   - *Change the plan*: ask what to change, revise the plan (a new id, `-test-v2-`), publish it again, send the link, ask again.
+   - *Do the agent step for A*: do it, then `ArtifactData` `update` of `plans/<id>` with `agentDone` (all keys done so
+     far); the developer's steps for the section open on the page. Ask a one-button question: **Section A completed, go
+     on**. For the last section the button is **Test plan completed**.
+   - On every button, first `ArtifactData` `get` of `plans/<id>` and read `results`. A step without a result, or a
+     section the developer has not finished, is said in one line and asked again; never go on past it. After
+     "Section A completed, go on", do the agent step of B the same way. Never write `results` (the page does).
+5. **After the last section.** Save `results` to a file and run `test_plan.py finish --plan <file> --results <file>
+   --bundle <bundle.json>`: it writes `test-plan.md` (plan, each step's result, notes, date) and `test-plan.json` into
+   the Unit's code-generation stage folder.
+   - **No failed steps** → go to step 6.
+   - **Failed steps** → ask which to fix. One or two: one `AskUserQuestion` per failed step (Fix / Leave as known), the
+     step and the developer's Fail note in the question text. Three or more: one form per the `question-forms` skill,
+     one question per failed step (options Fix / Leave as known, the Fail note as the question's context). Then run
+     `finish` again with `--fix <the step ids to fix>` (or `--fix none`).
+     - **Nothing to fix** → step 6; the left failures show as *Failed, left as known*.
+     - **Something to fix** → answer the unit-end gate with Request Changes through the engine's normal rejected
+       report, with the picked failures and their notes in `--reason` (the Unit's whole chain goes back for review;
+       say so), then fix them. The unit-end page that follows is built again with `--tested` (step 6), so the left
+       failures stay listed.
+6. **Back to the gate.** `unit_bundle.py draft --page unit-end --unit <unit> --tested <stage folder>/test-plan.json
+   --out <scratch>/bundle.json`, then the todo list and `finalize` as in § 5. The page splits the not-verified section:
+   *Verified by you* (passed), *Still not verified* (picked Later, or failed and being fixed), *Failed, left as known*.
+   Write the row, send the link in a message of its own, and ask the unit-end gate question again (Approve / Request
+   Changes / Test first).
 
 ## 6. The guard
 
@@ -159,3 +211,7 @@ a `gates` row for the stage (under the unit-end rhythm: the `bundles` row of the
 the link itself: the link goes in a message of its own. Send it as a text block and make the AskUserQuestion call in that same response; never end the turn on the link alone (a Stop hook catches it once). The plan approval counts as open as soon as the engine asks for it (the active
 directive is an `ask` with `ask_type: "plan-approval"`), and any question offering Approve Plan, Approve or Accept
 as-is while a gate is open is guarded, whatever its header. The developer clears it with `/approval-gates:release`.
+
+The answer Test first at the unit-end gate counts as neither approval nor rejection: the gate stays open, and the
+question is refused again only until a unit-end page newer than the answer is written. The rejected report still goes
+through, for the fixes picked after a test. Writes to `plans/` rows may not carry `results` (the developer's).
