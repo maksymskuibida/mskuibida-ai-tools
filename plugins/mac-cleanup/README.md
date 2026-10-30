@@ -1,7 +1,30 @@
-# worktree-cleanup
+# mac-cleanup
 
-Reclaims disk space from orphaned git worktrees across many local repos, without
-destroying unpushed work or deleting a worktree out from under a running session.
+Where a Mac's disk went, and what can leave it — the whole disk, not one folder. Formerly `worktree-cleanup`,
+whose worktree gates it keeps unchanged.
+
+## The whole disk
+
+`/mac-cleanup` (or "clean up my Mac", "where did my space go") runs one account of the disk, from the volume down:
+
+1. **One walk** of the Data volume with `du` (`scripts/mac_scan.py walk`), plus the APFS container's volumes,
+   every folder `du` could not read, and every file written in the last 30 days.
+2. **Six read-only investigators**, one per area (Apple and mobile tooling; containers, VMs and models; caches
+   and toolchains; code projects; personal files and apps; the system), started in parallel on Haiku. Each says
+   what every big thing is, whether removing it loses anything, and the command that would reclaim it
+   ([`references/investigators.md`](skills/mac-cleanup/references/investigators.md) is their contract).
+3. **One page** (`scripts/mac_scan.py build`, rendered by [`cleanup.html`](skills/mac-cleanup/cleanup.html) in
+   your private **Mac cleanup** artifact): the capacity bar, what grew lately, how much could not be verified and
+   which folders need Full Disk Access, then every item grouped, with Remove / Keep per item and a note for Claude.
+4. **Removal re-checked at the moment it happens** (`scripts/mac_scan.py remove`): only what you picked, each
+   still there, no session working inside, no file open in it, nothing written to it in the last 30 minutes.
+   Worktrees go through their own gates below; tool commands and manual steps are shown, never run blind.
+
+Every size comes from `du`. A size the walk contradicts (a mounted image's contents, a sparse file's apparent
+size) is left out rather than shown; what the walk could not read is reported as a number (the Data volume's
+consumed bytes minus what was measured), with the folders behind it.
+
+## Worktrees
 
 Agent-driven development leaves worktrees everywhere, each carrying its own
 `node_modules`. Tens of gigabytes accumulate quickly. The hard part is not finding
@@ -9,7 +32,7 @@ them — it is telling apart the ones that are genuinely disposable from the one
 holding the only copy of some commits, or the one a session started using ten minutes
 ago.
 
-## Three gates
+### Three gates
 
 A worktree is only removable when all three agree, and each catches things the others
 miss:
@@ -27,7 +50,7 @@ miss:
 3. **Observed recency** — when was the directory last touched? Depends on nothing
    being reported correctly, which is why it catches what the first two miss.
 
-## The ordering matters more than the checks
+### The ordering matters more than the checks
 
 Scanning and deleting are separate acts. A worktree idle at scan time can be someone's
 working directory by the time you delete it. So `remove_worktrees.py` re-derives the
@@ -44,9 +67,9 @@ or that is more than `--liveness-max-age` minutes old, and refuses a plan older 
 `--max-plan-age-hours` or produced on another machine. `--assume-no-live-sessions` is
 the explicit override — a claim a human makes, which a file cannot make for them.
 
-## Usage
+### Usage
 
-Claude drives this through the bundled skill; the scripts are also usable directly:
+Claude drives this through the bundled skill; the worktree scripts are also usable directly:
 
 ```bash
 python3 scan_worktrees.py --roots ~/projects \
@@ -103,5 +126,7 @@ revision of this file claimed coverage the suite did not have:
 
 ```bash
 /plugin marketplace add ~/mskuibida-ai-tools
-/plugin install worktree-cleanup@mskuibida-tooling
+/plugin install mac-cleanup@mskuibida-tooling
 ```
+
+Upgrading from `worktree-cleanup`: `/plugin uninstall worktree-cleanup@mskuibida-tooling`, then install as above.
