@@ -10,7 +10,7 @@ import sys
 import tempfile
 import unittest
 
-from bundle_helpers import NODE, PLUGIN, SCRIPTS
+from bundle_helpers import NODE, PAGE, PLUGIN, SCRIPTS
 from test_gate_guard import URL, gate_question
 from test_unit_bundle import Base, UNIT, rows_of
 from test_unit_rhythm_guard import UnitCase
@@ -316,6 +316,34 @@ class TestUnitEndSplit(Base):
         self.assertIn('data-val="now" aria-pressed="true"', shown)
         self.assertIn('data-val="later" aria-pressed="false"', shown)
         self.assertNotIn('class="testpick"', render(self.finished("plan")[1])["summary"])
+
+    @unittest.skipUnless(NODE, "node is not installed")
+    def test_picking_test_now_or_later_marks_the_row_read_and_unpicking_does_not(self):
+        script = r"""
+const fs = require("fs"), vm = require("vm");
+const html = fs.readFileSync(process.argv[1], "utf8");
+const src = html.split("/* RENDER-START")[1].split("/* RENDER-END */")[0];
+const ctx = { module: {} }; vm.createContext(ctx); vm.runInContext("/*" + src, ctx);
+const G = ctx.module.exports, item = { id: "V-1", rev: 2 };
+const fresh = () => ({ mode: "full", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {} });
+const out = {};
+let st = fresh(); out.now = [G.applyTestPick(st, "V-1", "now", item), st.picks["V-1"], G.isRead(st, "V-1", item), st.open["V-1"]];
+out.unpick = [G.applyTestPick(st, "V-1", "now", item), st.picks["V-1"], G.isRead(st, "V-1", item)];
+st = fresh(); out.later = [G.applyTestPick(st, "V-1", "later", item), G.isRead(st, "V-1", item)];
+st = fresh(); st.read["V-1"] = 1; out.reread = [G.applyTestPick(st, "V-1", "later", item), st.read["V-1"]];
+st = fresh(); out.do = [G.applyTestPick(st, "V-1", "do", item), st.picks["V-1"], G.isRead(st, "V-1", item)];
+st = fresh(); st.open["V-1"] = false; G.applyTestPick(st, "V-1", "now", item); out.closed = st.open["V-1"];
+process.stdout.write(JSON.stringify(out));
+"""
+        done = subprocess.run([NODE, "-e", script, PAGE], capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        got = json.loads(done.stdout)
+        self.assertEqual(got["now"], [True, "now", True, True])
+        self.assertEqual(got["unpick"], [False, "", True])
+        self.assertEqual(got["later"], [True, True])
+        self.assertEqual(got["reread"], [True, 2])
+        self.assertEqual(got["do"], [False, "do", False])
+        self.assertFalse(got["closed"])
 
 
 @unittest.skipUnless(NODE, "node is not installed")

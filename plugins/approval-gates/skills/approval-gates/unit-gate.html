@@ -491,6 +491,17 @@ var GateView = (function () {
   function isRead(st, key, item) { return (st.read[key] || 0) >= revOf(item); }
   /* Everything is open in the Full view; a row the viewer marked read stays folded until they open it. */
   function isOpen(st, key, read) { var o = st.open[key]; return o === undefined ? st.mode === "full" && !read : o; }
+  /* Test now / Later is proof the row was read: set the pick and mark the row read at its rev. A second click on the
+     pressed button un-picks and leaves the read state alone. A row that was open stays open, so the pick shows. */
+  function applyTestPick(st, key, val, item) {
+    var was = st.picks[key] === val;
+    st.picks[key] = was ? "" : val;
+    if (was || !item || (val !== "now" && val !== "later")) return false;
+    var open = isOpen(st, key, isRead(st, key, item));
+    st.read[key] = Math.max(st.read[key] || 0, revOf(item));
+    if (open) st.open[key] = true;
+    return true;
+  }
   function secOpen(st, key, dflt) { var o = st.sec[key]; return o === undefined ? dflt : o; }
   function passes(st, item, key, isStep) {
     var f = st.filter;
@@ -833,7 +844,7 @@ var GateView = (function () {
       }).join("");
   }
 
-  return { render: render, listHtml: listHtml, pageTitle: pageTitle, order: order, sortRows: sortRows, anchor: anchor, itemsOf: itemsOf, isRead: isRead, esc: esc, idMap: idMap };
+  return { render: render, listHtml: listHtml, pageTitle: pageTitle, order: order, sortRows: sortRows, anchor: anchor, itemsOf: itemsOf, isRead: isRead, applyTestPick: applyTestPick, esc: esc, idMap: idMap };
 })();
 if (typeof module !== "undefined") module.exports = GateView;
 /* RENDER-END */
@@ -985,7 +996,11 @@ if (typeof module !== "undefined") module.exports = GateView;
       markRead(GateView.itemsOf(view.bundle).map(function (x) { return x.key; }), rev);
       GateView.itemsOf(view.bundle).forEach(function (x) { st.open[x.anchor] = false; });
     }
-    else if (act === "pick") { st.picks[key] = st.picks[key] === val ? "" : val; queueSave(); }
+    else if (act === "pick") {
+      var pit = GateView.itemsOf(view.bundle).filter(function (x) { return x.anchor === key; })[0];
+      if (GateView.applyTestPick(st, key, val, pit && pit.item)) saveReads();
+      queueSave();
+    }
     paint();
   });
   app.addEventListener("input", function (e) {
