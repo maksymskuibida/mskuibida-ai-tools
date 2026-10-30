@@ -159,7 +159,9 @@ h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em; line
 /* sticky bar */
 .gbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 8; display: flex; flex-direction: column; gap: 10px; padding: 10px 14px; background: color-mix(in srgb, var(--surface) 96%, transparent); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 2px 8px rgba(23, 26, 33, .06); backdrop-filter: blur(6px); }
 .barrow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
-.filters { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.filters { display: inline-flex; gap: 8px 20px; flex-wrap: wrap; }
+.fgroup { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.flabel { font-size: 12px; font-weight: 500; color: var(--muted); margin-right: 2px; cursor: default; }
 .fpill { height: 30px; padding: 0 12px; border-radius: 15px; font-weight: 500; }
 .fpill[aria-pressed="true"] { background: var(--fg); color: var(--surface); border-color: var(--fg); }
 .fpill .n { font-family: var(--mono); font-size: 12px; opacity: .7; margin-left: 4px; }
@@ -233,6 +235,12 @@ details[open] > summary > .caret { transform: rotate(90deg); }
   .idet { grid-column: 1 / -1; }
   .tally { margin-left: 0; }
   .head { padding: 16px; }
+  /* one line per filter row, scrolled sideways, so the sticky bar stays short on a phone */
+  .filters { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+  .fgroup { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .fgroup::-webkit-scrollbar { display: none; }
+  .fgroup > * { flex: none; }
+  .flabel { width: 64px; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
@@ -269,7 +277,7 @@ details[open] > summary > .caret { transform: rotate(90deg); }
 
   <div class="gbar" id="gbar" hidden>
     <div class="barrow">
-      <div class="filters" id="filters" role="group"></div>
+      <div class="filters" id="filters"></div>
       <input type="search" id="q" autocomplete="off">
       <div class="tally">
         <span class="sel" id="sel"></span>
@@ -312,7 +320,10 @@ const STRINGS = {
   step2: "Turn on Claude (or the terminal you run Claude Code in).",
   step3: "Quit and reopen it, then ask Claude to scan again.",
   whyPrivacy: "privacy", whyOwner: "root only",
-  filterAll: "All", filterSafe: "Safe", filterReview: "Look first", filterKeep: "Keep", filterPicked: "Picked",
+  filterRisk: "Risk", filterPick: "Your pick",
+  filterTip: "Turn on several in a row to see them together, and combine the two rows. All clears its row.",
+  filterAll: "All", filterSafe: "Safe", filterReview: "Look first", filterKeep: "Keep",
+  filterUnpicked: "Unpicked", filterRemove: "To remove", filterKept: "To keep",
   search: "Search path or name",
   selNone: "Nothing picked yet",
   selSome: "{n} to remove",
@@ -337,7 +348,7 @@ const STRINGS = {
   pickSafe: "Pick all safe in this group", clearGroup: "Clear picks in this group",
   safeIn: "{size} safe",
   items: "{n} items",
-  nomatch: "Nothing matches this filter.",
+  nomatch: "Nothing matches these filters.",
   howHead: "How this was found",
   howWalk: "A walk of the whole Data volume with du accounted for {accounted}; investigators then looked into each area:",
   emptyHead: "No scan yet",
@@ -403,9 +414,8 @@ function toast(text) {
 const state = {
   db: null, user: null, scanId: "", scan: null, scans: [], groupDocs: {}, items: [], byId: {},
   picks: {}, pending: {}, saving: false, saveFailed: false, canWrite: true,
-  filter: "all", query: "", openItems: new Set(), unsubScan: null, unsubGroups: null,
+  filters: { risk: new Set(), pick: new Set() }, stay: new Set(), query: "", openItems: new Set(), unsubScan: null, unsubGroups: null,
 };
-try { const f = localStorage.getItem("mac-cleanup:filter"); if (f) state.filter = f; } catch (e) { /* storage blocked */ }
 
 function pickOf(id) {
   const p = state.pending[id] || state.picks[id];
@@ -500,11 +510,27 @@ function renderHeader() {
 }
 
 /* ---- filters and tally ---- */
-const FILTERS = [["all", "filterAll"], ["safe", "filterSafe"], ["review", "filterReview"], ["keep", "filterKeep"], ["picked", "filterPicked"]];
+/* Two rows that combine: what an item is, and what you picked for it. Several pills of a row can be on at once;
+   none on means all. A row picked while "Your pick" filters stays in view until a filter or the search changes,
+   so a misclick can still be undone. */
+const FILTERS = {
+  risk: { head: "filterRisk", of: (it) => it.risk, opts: [["safe", "filterSafe"], ["review", "filterReview"], ["keep", "filterKeep"]] },
+  pick: { head: "filterPick", of: (it) => pickOf(it.id) || "none", opts: [["none", "filterUnpicked"], ["remove", "filterRemove"], ["keep", "filterKept"]] },
+};
+try {
+  const saved = JSON.parse(localStorage.getItem("mac-cleanup:filters") || "{}");
+  for (const [k, f] of Object.entries(FILTERS)) {
+    if (Array.isArray(saved[k])) state.filters[k] = new Set(saved[k].filter((v) => f.opts.some(([o]) => o === v)));
+  }
+} catch (e) { /* storage blocked or unreadable */ }
+function passes(it, skip) {
+  for (const [k, f] of Object.entries(FILTERS)) {
+    if (k !== skip && state.filters[k].size && !state.filters[k].has(f.of(it))) return false;
+  }
+  return true;
+}
 function matches(it) {
-  const f = state.filter;
-  if (f === "safe" || f === "review" || f === "keep") { if (it.risk !== f) return false; }
-  else if (f === "picked" && !pickOf(it.id)) return false;
+  if (!passes(it) && !state.stay.has(it.id)) return false;
   const q = state.query.trim().toLowerCase();
   if (q && ![it.path, it.label, it.what].some((s) => String(s || "").toLowerCase().includes(q))) return false;
   return true;
@@ -512,17 +538,32 @@ function matches(it) {
 function renderFilters() {
   const box = $("filters");
   box.replaceChildren();
-  for (const [key, label] of FILTERS) {
-    const n = key === "all" ? state.items.length : key === "picked" ? state.items.filter((i) => pickOf(i.id)).length
-      : state.items.filter((i) => i.risk === key).length;
-    const b = h("button", { class: "fpill", type: "button", "aria-pressed": String(state.filter === key) }, t(label), h("span", { class: "n", text: String(n) }));
-    b.addEventListener("click", () => {
-      state.filter = key;
-      try { localStorage.setItem("mac-cleanup:filter", key); } catch (e) { /* storage blocked */ }
-      renderFilters(); applyFilter();
-    });
-    box.append(b);
+  for (const [k, f] of Object.entries(FILTERS)) {
+    const on = state.filters[k];
+    const pool = state.items.filter((it) => passes(it, k));  /* a row's counts follow the other row */
+    const grp = h("div", { class: "fgroup", role: "group", "aria-label": t(f.head) || null });
+    if (t(f.head)) grp.append(h("span", { class: "flabel", "data-tip": t("filterTip") || null, text: t(f.head) }));
+    const pill = (key, label, n) => {
+      if (!t(label)) return;
+      const b = h("button", { class: "fpill", type: "button", "aria-pressed": String(key == null ? !on.size : on.has(key)) },
+        t(label), h("span", { class: "n", text: String(n) }));
+      b.addEventListener("click", () => {
+        if (key == null) on.clear(); else if (on.has(key)) on.delete(key); else on.add(key);
+        if (on.size === f.opts.length) on.clear();  /* every pill on is the same as all */
+        filtersChanged();
+      });
+      grp.append(b);
+    };
+    pill(null, "filterAll", pool.length);
+    for (const [key, label] of f.opts) pill(key, label, pool.filter((it) => f.of(it) === key).length);
+    box.append(grp);
   }
+}
+function filtersChanged() {
+  state.stay.clear();
+  const keep = Object.fromEntries(Object.entries(state.filters).map(([k, v]) => [k, [...v]]));
+  try { localStorage.setItem("mac-cleanup:filters", JSON.stringify(keep)); } catch (e) { /* storage blocked */ }
+  renderFilters(); applyFilter(true);
 }
 /* the total to remove counts a folder once, even when something inside it is picked too */
 function tally() {
@@ -633,9 +674,11 @@ function renderGroups() {
     if (g.blurb) body.append(h("p", { class: "gblurb", text: g.blurb }));
     if (state.canWrite) {
       const tools = h("div", { class: "gtools" });
+      /* never overturns a pick you made: an item you chose to keep stays kept */
+      const pickable = () => items.filter((i) => i.risk === "safe" && !i.inUse && !pickOf(i.id));
       if (items.some((i) => i.risk === "safe" && !i.inUse) && t("pickSafe")) {
         const b = h("button", { type: "button", text: t("pickSafe") });
-        b.addEventListener("click", () => setMany(items.filter((i) => i.risk === "safe" && !i.inUse).map((i) => i.id), "remove"));
+        b.addEventListener("click", () => setMany(pickable().map((i) => i.id), "remove"));
         tools.append(b);
       }
       if (t("clearGroup")) {
@@ -651,7 +694,8 @@ function renderGroups() {
   }
   applyFilter();
 }
-function applyFilter() {
+/* reveal: the filters or the search just changed, so open the groups that hold matches */
+function applyFilter(reveal) {
   let any = false;
   for (const det of $("groups").querySelectorAll("details.group")) {
     let n = 0;
@@ -662,7 +706,7 @@ function applyFilter() {
     }
     det.hidden = !n;
     if (n) any = true;
-    if (n && (state.query || state.filter === "picked")) det.open = true;
+    if (n && reveal && (state.query || state.filters.pick.size)) det.open = true;
   }
   say($("nomatch"), state.items.length && !any ? t("nomatch") : "");
 }
@@ -682,9 +726,9 @@ let saveTimer = 0;
 function queue(id, patch) {
   const cur = state.pending[id] || state.picks[id] || {};
   state.pending[id] = Object.assign({}, cur, patch, { at: new Date().toISOString() });
+  if (state.filters.pick.size) state.stay.add(id);
   refreshRow(id);
   tally(); saveStatus();
-  if (state.filter === "picked") { renderFilters(); applyFilter(); }
   clearTimeout(saveTimer);
   saveTimer = setTimeout(flush, 700);
 }
@@ -721,7 +765,7 @@ $("done").addEventListener("click", async () => {
     toast(t("doneToast"));
   } catch (e) { state.saveFailed = true; saveStatus(); }
 });
-$("q").addEventListener("input", (e) => { state.query = e.target.value; applyFilter(); });
+$("q").addEventListener("input", (e) => { state.query = e.target.value; state.stay.clear(); applyFilter(true); });
 $("q").placeholder = t("search");
 $("q").setAttribute("aria-label", t("search"));
 
