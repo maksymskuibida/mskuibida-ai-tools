@@ -14,10 +14,10 @@ The developer wants to test the unit-end page's "Not verified yet" points before
 2. Write the plan: sections A, B, C … (a new section wherever you must do something first), each with your agent step
    and the developer's steps (`do`, `expect`, the V rows it `verifies`). `test_plan.py publish` validates it.
 3. Publish the plan in the **AI-DLC test plans** artifact (once per developer, `test-plan.html`, `capabilities:
-   {db: {}, user: {}}`), send its link in a message of its own and, in the same response, ask **Do the agent step for A** /
+   {db: {}, user: {}}`), send its link as a text block in a message of its own (a hook refuses every question until it is sent) and, in the same response, ask **Do the agent step for A** /
    **Change the plan**.
-4. After each agent step: set `agentDone`, ask **Section A completed, go on**; after the last, **Test plan completed**.
-   Read the page's results with `ArtifactData` before moving on.
+4. After each agent step: set `agentDone`, ask **Section A completed, go on** / **Change the plan**; after the last, **Test plan completed** / **Change the plan**
+   (a question has at least two options). Read the page's results with `ArtifactData` before moving on.
 5. `test_plan.py finish` writes `test-plan.md` into the Unit's code-generation stage folder. No fails → republish the
    unit-end page with `unit_bundle.py draft --tested` and ask the gate again. Fails → ask which to fix (an inline
    question for one or two; a `question-forms` form for more); nothing to fix → the gate as above, with the failures
