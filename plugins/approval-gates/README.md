@@ -12,6 +12,9 @@ page holds no decision.
 skills/approval-gates/SKILL.md            the procedure the agent follows at every gate
 skills/approval-gates/approval-gate.html  the per-stage template — the data contract is in its header
 skills/approval-gates/unit-gate.html      the unit-end template: a Unit's plan page and unit-end page
+skills/approval-gates/test-plan.html      the test-plan template (artifact "AI-DLC test plans")
+skills/test-plan/SKILL.md                 /approval-gates:test-plan
+scripts/test_plan.py                      validates, publishes and finishes a test plan
 skills/release/SKILL.md                   /approval-gates:release
 scripts/gate_bundle.py                    builds the rows for one per-stage gate from the intent's files
 scripts/unit_bundle.py                    drafts and finalizes a Unit's gate bundle (unit-end rhythm)
@@ -216,3 +219,25 @@ and those tests are skipped without it.
 reads them from that checkout's git branch into a temporary folder: `APPROVAL_GATES_U4_REPO`, default `~/dayboard`;
 `APPROVAL_GATES_U4_REF`, default `origin/unit/u4-day-navigation`. The records are never copied into this repository,
 so the class is skipped where that checkout is missing, such as in CI.
+
+## Testing the not-verified points
+
+On the unit-end page every row under "Not verified yet" has a **Test now / Later** pick. Before approving, you can test
+those points through a guided test plan:
+
+- Answer the unit-end gate **Test first** (the third option next to Approve and Request Changes), or type
+  `/approval-gates:test-plan` at any time. Test first is neither an approval nor a rejection; the gate stays open.
+- The agent writes a plan from the rows picked Test now (all of them if none is, and it says so): sections A, B, C …
+  with steps A.1, A.2, B.1 …. A new section starts wherever the agent must do something first (seed data, start a server,
+  deploy, reset state). Each section has the agent's step and your steps (what to do, what to expect), and each step
+  names the not-verified rows it verifies. `scripts/test_plan.py` checks the plan before it is shown.
+- The plan is a row in a third private artifact, **AI-DLC test plans** (`skills/approval-gates/test-plan.html`, published
+  once per developer). You mark each step **Pass** or **Fail**, with an optional note on a Pass and a required note on a
+  Fail. The agent does each section's agent step, then asks "Section A completed, go on", and reads your results.
+- At the end `test-plan.md` (plan, each step's result, notes, date) is written to the Unit's code-generation stage
+  folder. With no fails, the unit-end page is built again with the not-verified section split into *Verified by you*,
+  *Still not verified* and *Failed, left as known*, and the gate is asked again. With fails, you choose which to fix
+  (inline for one or two, a question form for more); fixes go back as Request Changes with the failures and your notes.
+
+Only the unit-end rhythm has a test plan; per-stage gates are unchanged. The contract is in
+[`contract/README.md`](contract/README.md#the-test-plan-unit-end-page-only).

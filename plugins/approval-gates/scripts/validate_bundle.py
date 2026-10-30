@@ -36,7 +36,7 @@ WEIGHT = ("core", "main", "minor")
 RANK = {"critical": 0, "high": 1, "core": 1, "medium": 2, "main": 2, "low": 3, "minor": 3}
 PAGE_KINDS = {
     "plan": {"narrows", "assumptions", "findings", "visible", "tests", "other"},
-    "unit-end": {"changes", "unverified", "built", "other"},
+    "unit-end": {"changes", "unverified", "verified", "failed", "built", "other"},
 }
 BUILD_TEST_SCHEMA_PATH = os.path.join(os.path.dirname(HERE), "contract", "build-test.schema.json")
 RESERVED_KEYS = {"plan", "answers", "design"}

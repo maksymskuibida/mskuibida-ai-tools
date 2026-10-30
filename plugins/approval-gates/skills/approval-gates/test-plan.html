@@ -1,0 +1,348 @@
+<title>AI-DLC test plans</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<!--
+  AI-DLC test plans — the one template for the test plan of a Unit's not-verified points (the unit-end rhythm).
+
+  Published ONCE per developer as a private Artifact with the `db` and `user` capabilities
+  (capabilities: {db: {}, user: {}}, icon "checklist"); never regenerated per Unit. Every plan is a row INSIDE this
+  artifact, written by the agent with the ArtifactData tool (SKILL.md next to this file, § 7; scripts/test_plan.py builds
+  the row). The page renders whatever the row says, live. Link to a plan: <artifact url>#<plan id>. No hash: the list.
+
+  Data contract:
+
+    plans/<id>   {plan, intent, unit, title, createdAt (ISO), status: "open"|"done", agentDone: ["A", …]}   written by the agent
+      plan: {schema: "aidlc-test-plan/1", id, intent, unit, bundle, title, now: ["V-1", …], allByDefault,
+             rows?: {"V-1": "title of the not-verified point"},
+             sections: [{key: "A", title, agent, steps: [{id: "A.1", do, expect, verifies: ["V-1"]}]}]}
+      id:   <intent>-<unit>-test-v<n>-<YYYYMMDDTHHMM>
+      agentDone: the keys of the sections whose agent step the agent has done. The agent updates it (ArtifactData
+        update) when it finishes a section's agent step; the steps of a section open for the developer only then.
+
+  What the page writes (the developer's, never the agent's):
+
+    plans/<id>.results[<step id>] = {result: "pass"|"fail", note, at}
+      A Pass may carry a note. A Fail is never saved without a note; the page asks for it.
+
+  The agent reads the results with ArtifactData when the developer says a section (or the plan) is completed.
+  The render functions between RENDER-START and RENDER-END use no DOM, so tests render a plan under Node.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root {
+  --bg: #F5F6F8; --surface: #FFFFFF; --raised: #F8F9FB; --fg: #171A21; --fg-2: #3D4350; --muted: #5A6170;
+  --line: #E4E7EC; --line-soft: #EEF0F3; --control: #D5D9E0; --hover: #F7F8FA;
+  --accent: #2F49C4; --accent-strong: #1E3399; --accent-soft: #EEF1FB; --accent-tint: #F4F6FE; --on-accent: #FFFFFF;
+  --ok-bg: #E6F4EA; --ok-fg: #1F6B36; --ok-line: #9FD2AF; --bad-bg: #FDE4E4; --bad-fg: #9B1C1C; --bad-line: #EDA3A3;
+  --warn-bg: #FFF4DB; --warn-fg: #7A4B00; --low-bg: #EEF0F3; --low-fg: #4A5160;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #111318; --surface: #1A1D24; --raised: #20232B; --fg: #E6E8EE; --fg-2: #C3C8D2; --muted: #9AA1AF;
+  --line: #2A2E38; --line-soft: #22262F; --control: #3A3F4B; --hover: #20242C;
+  --accent: #8FA2FF; --accent-strong: #B5C2FF; --accent-soft: #222B4D; --accent-tint: #1B2035; --on-accent: #111318;
+  --ok-bg: #183024; --ok-fg: #8FD3A6; --ok-line: #2F6A47; --bad-bg: #3D1D1D; --bad-fg: #F4A4A4; --bad-line: #7A3434;
+  --warn-bg: #3A2C12; --warn-fg: #F0C36B; --low-bg: #262A33; --low-fg: #AEB4C0;
+  color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #111318; --surface: #1A1D24; --raised: #20232B; --fg: #E6E8EE; --fg-2: #C3C8D2; --muted: #9AA1AF;
+  --line: #2A2E38; --line-soft: #22262F; --control: #3A3F4B; --hover: #20242C;
+  --accent: #8FA2FF; --accent-strong: #B5C2FF; --accent-soft: #222B4D; --accent-tint: #1B2035; --on-accent: #111318;
+  --ok-bg: #183024; --ok-fg: #8FD3A6; --ok-line: #2F6A47; --bad-bg: #3D1D1D; --bad-fg: #F4A4A4; --bad-line: #7A3434;
+  --warn-bg: #3A2C12; --warn-fg: #F0C36B; --low-bg: #262A33; --low-fg: #AEB4C0;
+  color-scheme: dark }
+* { box-sizing: border-box; }
+html { scroll-padding-top: 16px; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.55 var(--body); -webkit-font-smoothing: antialiased; }
+#app { max-width: 820px; margin: 0 auto; padding: 24px 16px 96px; }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, textarea:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.msg { padding: 20px; } .msg p { margin: 6px 0 0; color: var(--muted); }
+a { color: var(--accent); }
+
+.head { padding: 22px 24px; margin-bottom: 16px; }
+.crumbs { font-size: 12.5px; color: var(--muted); letter-spacing: .02em; margin-bottom: 6px; }
+h1 { margin: 0; font-size: 22px; line-height: 1.25; font-weight: 600; }
+.lede { margin: 6px 0 0; color: var(--fg-2); }
+.covers { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; align-items: center; }
+.covers > span:first-child { font-size: 12.5px; color: var(--muted); margin-right: 2px; }
+.vchip { font: 500 12px var(--mono); padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-strong); cursor: help; }
+.meter { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+.meter .bar { flex: 1; height: 8px; border-radius: 999px; background: var(--line-soft); overflow: hidden; display: flex; }
+.meter .bar i { display: block; height: 100%; }
+.meter .bar .p { background: var(--ok-fg); } .meter .bar .f { background: var(--bad-fg); }
+.meter b { font-weight: 600; font-variant-numeric: tabular-nums; } .meter small { color: var(--muted); }
+
+.sec { margin-bottom: 14px; overflow: hidden; }
+.sec.current { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.sec.locked { opacity: .72; }
+.sechead { display: flex; align-items: center; gap: 12px; padding: 14px 18px; }
+.letter { flex: none; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; font-weight: 600; background: var(--low-bg); color: var(--low-fg); }
+.current .letter { background: var(--accent); color: var(--on-accent); }
+.done .letter { background: var(--ok-bg); color: var(--ok-fg); }
+.sechead h2 { margin: 0; font-size: 16.5px; font-weight: 600; flex: 1; min-width: 0; }
+.chip { flex: none; font-size: 12px; font-weight: 500; padding: 3px 10px; border-radius: 999px; background: var(--low-bg); color: var(--low-fg); white-space: nowrap; }
+.chip.here { background: var(--accent); color: var(--on-accent); }
+.chip.ok { background: var(--ok-bg); color: var(--ok-fg); }
+.chip.wait { background: var(--warn-bg); color: var(--warn-fg); }
+.agent { margin: 0 18px 14px; padding: 12px 14px; border-radius: 10px; background: var(--raised); border: 1px dashed var(--control); }
+.agent h3 { margin: 0 0 2px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.agent p { margin: 0; color: var(--fg-2); }
+.agent .state { margin-top: 6px; font-size: 13px; color: var(--muted); }
+.steps { border-top: 1px solid var(--line-soft); }
+.step { padding: 16px 18px; border-bottom: 1px solid var(--line-soft); }
+.step:last-child { border-bottom: 0; }
+.step.pass { background: color-mix(in srgb, var(--ok-bg) 45%, transparent); }
+.step.fail { background: color-mix(in srgb, var(--bad-bg) 45%, transparent); }
+.stephead { display: flex; gap: 12px; align-items: baseline; }
+.sid { font: 500 13px var(--mono); color: var(--accent-strong); flex: none; min-width: 30px; }
+.stephead p { margin: 0; font-weight: 500; }
+.expect { margin: 6px 0 0 42px; color: var(--fg-2); }
+.expect b { font-weight: 600; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; margin-right: 6px; }
+.verifies { margin: 8px 0 0 42px; display: flex; gap: 6px; flex-wrap: wrap; }
+.act { margin: 12px 0 0 42px; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
+.rb { display: inline-flex; border: 1px solid var(--control); border-radius: 9px; overflow: hidden; background: var(--surface); }
+.rb button { height: 36px; padding: 0 18px; border: 0; background: transparent; font-weight: 500; }
+.rb button + button { border-left: 1px solid var(--control); }
+.rb button:hover:not(:disabled) { background: var(--hover); }
+.rb button[data-act="pass"][aria-pressed="true"] { background: var(--ok-fg); color: var(--surface); }
+.rb button[data-act="fail"][aria-pressed="true"] { background: var(--bad-fg); color: var(--surface); }
+.rb button:disabled { cursor: not-allowed; color: var(--muted); }
+.note { flex: 1 1 260px; min-width: 0; }
+.note textarea { width: 100%; min-height: 36px; resize: vertical; padding: 7px 10px; border: 1px solid var(--control); border-radius: 9px; background: var(--surface); color: var(--fg); font: inherit; font-size: 14px; }
+.note textarea:disabled { background: var(--raised); }
+.note.need textarea { border-color: var(--bad-fg); }
+.note small { display: block; margin-top: 3px; color: var(--muted); font-size: 12.5px; min-height: 18px; }
+.note.need small { color: var(--bad-fg); font-weight: 500; }
+.lockmsg { margin: 0; padding: 12px 18px 16px; color: var(--muted); font-size: 14px; }
+.list h2 { margin: 0 0 8px; font-size: 14px; color: var(--muted); font-weight: 600; }
+.list { padding: 16px 18px; margin-bottom: 14px; }
+.lrow { display: flex; align-items: center; gap: 12px; padding: 10px 8px; border-radius: 8px; color: inherit; text-decoration: none; }
+.lrow:hover { background: var(--hover); }
+.lrow b { font-weight: 500; flex: 1; min-width: 0; } .lrow small { color: var(--muted); }
+#toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 9px 16px; border-radius: 10px; font-size: 14px; z-index: 5; }
+@media (max-width: 640px) {
+  #app { padding: 12px 12px 80px; }
+  .head { padding: 18px 16px; } .sechead { padding: 12px 14px; } .agent { margin: 0 14px 12px; } .step { padding: 14px; }
+  .expect, .verifies, .act { margin-left: 0; }
+  .rb { width: 100%; } .rb button { flex: 1; }
+}
+@media (prefers-reduced-motion: no-preference) { .sec, .step, .rb button { transition: background .15s, border-color .15s, box-shadow .15s; } }
+</style>
+<div id="app"><div class="card msg"><b>Loading…</b></div></div>
+<div id="toast" role="status" hidden></div>
+<script>
+/* RENDER-START — no DOM below this line until RENDER-END */
+var PlanView = (function () {
+  "use strict";
+  function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+  function blank(s) { return !s || !String(s).trim(); }
+
+  /* The saved result of a step, with what the viewer typed and has not saved: {result, note, saved}. */
+  function stepResult(row, local, id) {
+    var l = local && local[id], s = (row.results || {})[id];
+    if (l) return { result: l.result || "", note: l.note == null ? ((s && s.note) || "") : l.note, saved: !!(s && s.result === l.result && !blank(l.result) && (l.result !== "fail" || !blank(l.note))) };
+    return s ? { result: s.result || "", note: s.note || "", saved: true } : { result: "", note: "", saved: false };
+  }
+  function counted(r) { return r.result === "pass" || (r.result === "fail" && !blank(r.note)); }
+
+  /* "agent" (the agent has not done its step), "yours" (waiting for the developer), "done" (every step answered) */
+  function sectionState(row, sec, local) {
+    var all = sec.steps.every(function (st) { return counted(stepResult(row, local, st.id)); });
+    if (all && (row.agentDone || []).indexOf(sec.key) >= 0) return "done";
+    return (row.agentDone || []).indexOf(sec.key) >= 0 ? "yours" : "agent";
+  }
+  function states(row, local) {
+    var plan = row.plan || {}, out = {}, current = "";
+    (plan.sections || []).forEach(function (sec) {
+      out[sec.key] = sectionState(row, sec, local);
+      if (!current && out[sec.key] !== "done") current = sec.key;
+    });
+    return { byKey: out, current: current };
+  }
+  function tally(row, local) {
+    var pass = 0, fail = 0, total = 0;
+    ((row.plan || {}).sections || []).forEach(function (sec) { sec.steps.forEach(function (st) {
+      total++; var r = stepResult(row, local, st.id);
+      if (counted(r)) { if (r.result === "pass") pass++; else fail++; }
+    }); });
+    return { pass: pass, fail: fail, total: total };
+  }
+
+  function vChip(plan, id) {
+    var t = (plan.rows || {})[id];
+    return '<span class="vchip"' + (t ? ' title="' + esc(t) + '"' : "") + ">" + esc(id) + "</span>";
+  }
+
+  function stepHtml(row, st, open, local) {
+    var plan = row.plan || {}, r = stepResult(row, local, st.id), need = r.result === "fail" && blank(r.note);
+    var cls = r.result === "pass" ? " pass" : (r.result === "fail" ? " fail" : "");
+    var hint = r.result === "fail" ? (need ? "Say what went wrong. A Fail is saved with its note." : "") : (r.result === "pass" ? "Optional: anything worth remembering." : "");
+    var dis = open ? "" : " disabled";
+    return '<div class="step' + cls + '" id="step-' + esc(st.id) + '"><div class="stephead"><span class="sid">' + esc(st.id) + "</span><p>" + esc(st.do) + "</p></div>" +
+      '<p class="expect"><b>Expect</b>' + esc(st.expect) + "</p>" +
+      '<div class="verifies">' + (st.verifies || []).map(function (v) { return vChip(plan, v); }).join("") + "</div>" +
+      '<div class="act"><div class="rb" role="group" aria-label="Result of ' + esc(st.id) + '">' +
+      '<button type="button" data-act="pass" data-step="' + esc(st.id) + '" aria-pressed="' + (r.result === "pass") + '"' + dis + ">Pass</button>" +
+      '<button type="button" data-act="fail" data-step="' + esc(st.id) + '" aria-pressed="' + (r.result === "fail") + '"' + dis + ">Fail</button></div>" +
+      '<div class="note' + (need ? " need" : "") + '"><textarea rows="1" data-note="' + esc(st.id) + '" aria-label="Note for ' + esc(st.id) + (r.result === "fail" ? " (required)" : "") + '" placeholder="' +
+      (r.result === "fail" ? "What went wrong (required)" : "Note (optional)") + '"' + dis + ">" + esc(r.note) + '</textarea><small id="ns-' + esc(st.id) + '">' + esc(hint) + "</small></div></div></div>";
+  }
+
+  function sectionHtml(row, sec, st8, local) {
+    var state = st8.byKey[sec.key], current = st8.current === sec.key, open = state === "yours" || state === "done";
+    var chip = state === "done" ? '<span class="chip ok">Done</span>' :
+      current ? '<span class="chip here">' + (state === "yours" ? "Your turn" : "Up next") + "</span>" :
+      '<span class="chip">Later</span>';
+    var agent = state === "agent" ? (current ? "Waiting for the agent to do this. Your steps open when it has." : "The agent does this when the section before is complete.") :
+      "Done by the agent.";
+    var steps = sec.steps.map(function (s) { return stepHtml(row, s, open, local); }).join("");
+    return '<section class="card sec ' + (state === "done" ? "done" : (current ? "current" : "locked")) + '" id="sec-' + esc(sec.key) + '"' + (current ? ' aria-current="step"' : "") + ">" +
+      '<div class="sechead"><span class="letter" aria-hidden="true">' + esc(sec.key) + "</span><h2>" + esc(sec.title) + "</h2>" + chip + "</div>" +
+      '<div class="agent"><h3>Agent step</h3><p>' + esc(sec.agent) + '</p><p class="state">' + esc(agent) + "</p></div>" +
+      '<div class="steps">' + steps + "</div></section>";
+  }
+
+  function render(row, local) {
+    var plan = row.plan || {}, st8 = states(row, local), t = tally(row, local);
+    var pp = t.total ? (t.pass / t.total * 100) : 0, ff = t.total ? (t.fail / t.total * 100) : 0;
+    var covers = (plan.now || []).map(function (v) { return vChip(plan, v); }).join("");
+    var allMsg = plan.allByDefault ? "No point was picked Test now, so the plan covers all of them." : "";
+    var head = '<header class="card head"><div class="crumbs">AI-DLC · ' + esc(row.unit || plan.unit || "") + ' · Test plan</div><h1>' + esc(row.title || plan.title || "Test plan") + "</h1>" +
+      (allMsg ? '<p class="lede">' + esc(allMsg) + "</p>" : "") +
+      '<div class="covers"><span>Verifies</span>' + covers + "</div>" +
+      '<div class="meter" role="img" aria-label="' + t.pass + " passed, " + t.fail + " failed, of " + t.total + ' steps"><div class="bar"><i class="p" style="width:' + pp + '%"></i><i class="f" style="width:' + ff + '%"></i></div><b>' + (t.pass + t.fail) + "/" + t.total + "</b><small>" + t.pass + " pass · " + t.fail + " fail</small></div></header>";
+    return head + (plan.sections || []).map(function (sec) { return sectionHtml(row, sec, st8, local); }).join("");
+  }
+
+  function listHtml(rows) {
+    if (!rows.length) return '<div class="card msg"><b>No test plans yet.</b><p>The agent adds one here when you pick Test first at a Unit’s end, or ask for a test plan, and gives you its link.</p></div>';
+    var groups = {};
+    rows.forEach(function (r) { var k = (r.intent || "") + " · " + (r.unit || ""); (groups[k] = groups[k] || []).push(r); });
+    return '<header class="card head"><div class="crumbs">AI-DLC</div><h1>Test plans</h1><p class="lede">Steps to check a Unit’s not-verified points. Mark each Pass or Fail here; the agent reads them from chat.</p></header>' +
+      Object.keys(groups).map(function (k) {
+        return '<section class="card list"><h2>' + esc(k) + "</h2>" + groups[k].map(function (r) {
+          var t = tally(r, null);
+          return '<a class="lrow" href="#' + esc(r.id) + '" data-nav="' + esc(r.id) + '"><b>' + esc(r.title || r.id) + "</b><small>" + esc(String(r.createdAt || "").replace("T", " ").replace(/:\d\d(\.\d+)?Z$/, " UTC")) + '</small><span class="chip' + (r.status === "done" ? " ok" : "") + '">' + (t.pass + t.fail) + "/" + t.total + "</span></a>";
+        }).join("") + "</section>";
+      }).join("");
+  }
+
+  return { render: render, listHtml: listHtml, states: states, tally: tally, stepResult: stepResult, counted: counted, esc: esc };
+})();
+if (typeof module !== "undefined") module.exports = PlanView;
+/* RENDER-END */
+</script>
+<script>
+(function () {
+  "use strict";
+  var app = document.getElementById("app"), toastEl = document.getElementById("toast");
+  var db = null, view = { id: "", row: null, local: {}, unsub: [], timer: 0, unsaved: false, saving: false };
+
+  function toast(text) { toastEl.textContent = text; toastEl.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(function () { toastEl.hidden = true; }, 2600); }
+  function teardown() {
+    if (view.unsaved) flush();
+    clearTimeout(view.timer);
+    view.unsub.forEach(function (u) { try { u(); } catch (e) { /* already gone */ } }); view.unsub = [];
+    view.unsaved = false; view.saving = false; view.local = {};
+  }
+  function pageId() { var h = decodeURIComponent(location.hash.slice(1)); return /-test-v\d+-\d{8}T\d{4}$/.test(h) ? h : ""; }
+  function paint() {
+    if (!view.row) return;
+    var y = window.scrollY, a = document.activeElement, key = a && a.dataset ? a.dataset.note : null;
+    app.innerHTML = PlanView.render(view.row, view.local);
+    window.scrollTo(0, y);
+    if (key) { var t = document.getElementById("step-" + key); t = t && t.querySelector("textarea"); if (t) { t.focus(); t.selectionStart = t.selectionEnd = t.value.length; } }
+  }
+
+  /* what is saved: every Pass, and every Fail that has its note; a Fail without a note stays on this page only */
+  function savable() {
+    var out = {}, now = new Date().toISOString();
+    ((view.row.plan || {}).sections || []).forEach(function (sec) { sec.steps.forEach(function (st) {
+      var r = PlanView.stepResult(view.row, view.local, st.id);
+      if (r.result === "pass" || (r.result === "fail" && r.note.trim())) {
+        var old = (view.row.results || {})[st.id];
+        out[st.id] = { result: r.result, note: r.note.trim(), at: old && old.result === r.result && old.note === r.note.trim() ? old.at : now };
+      }
+    }); });
+    return out;
+  }
+  function queueSave() { view.unsaved = true; clearTimeout(view.timer); view.timer = setTimeout(flush, 600); }
+  async function flush() {
+    clearTimeout(view.timer);
+    if (view.saving || !view.unsaved || !db || !view.id) return;
+    var id = view.id, results = savable();
+    view.saving = true; view.unsaved = false;
+    try { await db.doc("plans/" + id).update({ results: results }); }
+    catch (e) { if (view.id === id) { view.unsaved = true; toast("Couldn’t save. It is sent again when you change something."); } }
+    if (view.id === id) { view.saving = false; if (view.unsaved && !view.timer) view.timer = setTimeout(flush, 600); }
+  }
+
+  app.addEventListener("click", function (e) {
+    var nav = e.target.closest("[data-nav]");
+    if (nav) { e.preventDefault(); location.hash = nav.dataset.nav; return; }
+    var b = e.target.closest("button[data-act]");
+    if (!b || !view.row || b.disabled) return;
+    var step = b.dataset.step, cur = PlanView.stepResult(view.row, view.local, step), next = b.dataset.act;
+    if (cur.result === next) next = "";  /* pressing the chosen button again clears it */
+    view.local[step] = { result: next, note: cur.note };
+    paint();
+    if (next === "fail" && !cur.note.trim()) {
+      var t = document.querySelector("#step-" + CSS.escape(step) + " textarea"); if (t) t.focus();
+      toast("A Fail needs a note. Say what went wrong and it is saved.");
+    }
+    queueSave();
+  });
+  app.addEventListener("input", function (e) {
+    var step = e.target.dataset && e.target.dataset.note;
+    if (!step || !view.row) return;
+    var cur = PlanView.stepResult(view.row, view.local, step), hasNote = !!e.target.value.trim();
+    view.local[step] = { result: cur.result, note: e.target.value };
+    var box = e.target.closest(".note"), small = document.getElementById("ns-" + step), fail = cur.result === "fail";
+    if (box) box.classList.toggle("need", fail && !hasNote);
+    if (small) small.textContent = fail ? (hasNote ? "" : "Say what went wrong. A Fail is saved with its note.") : (cur.result === "pass" ? "Optional: anything worth remembering." : "");
+    queueSave();
+  });
+
+  function showList() {
+    teardown(); view.id = ""; view.row = null;
+    if (!db) return;
+    document.title = "AI-DLC test plans";
+    view.unsub.push(db.collection("plans").orderBy("createdAt", "desc").limit(100).onSnapshot(function (snap) {
+      app.innerHTML = PlanView.listHtml(snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); }));
+    }, function () { app.innerHTML = '<div class="card msg"><b>Couldn’t load the plans.</b><p>Reload the page.</p></div>'; }));
+  }
+  function showPlan(id) {
+    teardown(); view.id = id; view.row = null;
+    if (!db) return;
+    app.innerHTML = '<div class="card msg"><b>Loading this plan…</b></div>';
+    view.unsub.push(db.doc("plans/" + id).onSnapshot(function (snap) {
+      if (!snap.exists) { app.innerHTML = '<div class="card msg"><b>Waiting for this plan</b><p>Nothing is stored under this id yet. The agent writes the plan just before it sends you the link.</p><p><a href="#" data-nav="">All plans</a></p></div>'; return; }
+      var row = Object.assign({ id: id }, snap.data());
+      if (!row.plan || row.plan.schema !== "aidlc-test-plan/1") { app.innerHTML = '<div class="card msg"><b>This plan is newer than this view.</b><p>Ask the agent to republish the test plans page from the plugin.</p></div>'; return; }
+      view.row = row;
+      if (!view.unsaved && !view.saving) {  /* keep a Fail whose note is still being typed; everything else comes from the row */
+        var keep = {};
+        Object.keys(view.local).forEach(function (k) { var l = view.local[k]; if (l.result === "fail" && !(l.note || "").trim()) keep[k] = l; });
+        view.local = keep;
+      }
+      document.title = (row.title || "Test plan") + " · AI-DLC test plans";
+      paint();
+      var cur = PlanView.states(row, view.local).current, el = cur && document.getElementById("sec-" + cur);
+      if (!view.scrolled && el) { view.scrolled = true; el.scrollIntoView({ block: "start" }); }
+    }, function () { app.innerHTML = '<div class="card msg"><b>Couldn’t load this plan.</b><p>Reload the page.</p></div>'; }));
+  }
+  function route() { view.scrolled = false; var id = pageId(); if (id) showPlan(id); else showList(); }
+  window.addEventListener("hashchange", function () { if (pageId() || !location.hash) route(); });
+
+  (async function boot() {
+    var use = window.claude && typeof window.claude.use === "function" ? window.claude.use : null;
+    db = use ? await use("db") : null;
+    if (!db) { app.innerHTML = '<div class="card msg"><b>Sign in to claude.ai to use this page.</b><p>The plans are stored with the artifact, and only a signed-in viewer can read them.</p></div>'; return; }
+    try { await use("user"); } catch (e) { /* the page keeps no per-viewer marks */ }
+    route();
+  })();
+})();
+</script>

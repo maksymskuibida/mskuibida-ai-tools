@@ -208,7 +208,7 @@
       "additionalProperties": false,
       "properties": {
         "key": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
-        "kind": { "enum": ["narrows", "assumptions", "findings", "visible", "tests", "changes", "unverified", "built", "other"] },
+        "kind": { "enum": ["narrows", "assumptions", "findings", "visible", "tests", "changes", "unverified", "verified", "failed", "built", "other"] },
         "title": { "$ref": "#/$defs/line" },
         "short": { "type": "string", "minLength": 1, "maxLength": 16 },
         "hint": { "type": "string", "maxLength": 120 },

@@ -23,6 +23,10 @@
 
     bundles/<id>.notes[<row anchor>] = "text"          a note to the agent on a row or a step (step-<n>)
     bundles/<id>.picks[<row anchor>] = "do"|"leave"    the person's lean on a suggestion row
+                                       "now"|"later"   on a row of the `unverified` section: Test now or Later; the
+                                                       agent's test plan covers the rows picked Test now
+    A unit-end page presented after a test plan also holds the sections `verified` (Verified by you), `unverified`
+    (Still not verified) and `failed` (Failed, left as known); see contract/README.md.
     data/users/<viewer>/reads-<intent>--<unit>--<page>  {marks: {<row anchor or step key>: <revision read>}}
       Read marks are the viewer's own (localStorage when the user capability is not served), set only with the row's
       read dot (opening a row does not mark it). A row is read when its mark is at least the row's revision, so on a
@@ -193,6 +197,13 @@ a.aidlc-id:hover { color: var(--accent-strong); }
 .picks { display: inline-flex; gap: 6px; }
 .picks button { height: 34px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--control); background: var(--surface); font-weight: 500; }
 .picks button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.testpick { display: inline-flex; flex: none; border: 1px solid var(--control); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.testpick button { height: 28px; padding: 0 11px; border: 0; background: transparent; color: var(--fg-2); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; }
+.testpick button + button { border-left: 1px solid var(--control); }
+.testpick button:hover { background: var(--hover); }
+.testpick button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.testpick button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-strong); }
+.testpick button[aria-pressed="true"][data-val="later"] { background: var(--low-bg); color: var(--low-fg); }
 .subs { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; line-height: 1.5; }
 .subs li { padding: 1px 4px; border-radius: 4px; }
 .subs .sv { margin-left: 8px; font-size: 11px; font-weight: 600; }
@@ -565,6 +576,12 @@ var GateView = (function () {
     return '<div class="notebox"><label for="nt-' + esc(key) + '">Note to the agent<textarea id="nt-' + esc(key) + '" rows="2" data-note="' + esc(key) + '" placeholder="' + esc(placeholder) + '">' + esc(note) + '</textarea><span class="notestat" id="ns-' + esc(key) + '">' + esc(st.noteStat[key] || "") + "</span></label>" + picks + "</div>";
   }
 
+  /* The pick on a not-verified row: Test now or Later. It decides which rows the agent's test plan covers. */
+  function testPick(st, key) {
+    var pick = st.picks[key];
+    return '<span class="testpick" role="group" aria-label="Test this point"><button type="button" data-act="pick" data-key="' + esc(key) + '" data-val="now" aria-pressed="' + (pick === "now") + '">Test now</button><button type="button" data-act="pick" data-key="' + esc(key) + '" data-val="later" aria-pressed="' + (pick === "later") + '">Later</button></span>';
+  }
+
   function rowHtml(st, bundle, sec, r) {
     var key = anchor(r.id), read = isRead(st, key, r), open = isOpen(st, key, read);
     var t = r.rev ? revTone(r.rev) : null;
@@ -575,6 +592,7 @@ var GateView = (function () {
       '<button type="button" class="rtitle" data-act="row" data-key="' + esc(key) + '" title="' + esc(r.title) + '">' + esc(r.title) + "</button>" +
       revBadge(r) + (r.lookFirst ? '<span class="look">look first</span>' : "") +
       (r.where ? '<span class="where' + (r.whereIsPath ? " path" : "") + '" title="' + esc(r.where) + '">' + esc(r.where) + "</span>" : "") +
+      (sec.kind === "unverified" ? testPick(st, key) : "") +
       '<span class="lab" style="' + tone(LABEL_TONE[r.label] || "low") + '">' + esc(r.label) + "</span>" +
       '<button type="button" class="dot" data-act="read" data-key="' + esc(key) + '" aria-label="Mark ' + esc(r.id) + (read ? " unread" : " read") + '" title="Mark ' + (read ? "unread" : "read") + '"><i></i></button></div>';
     var body = "";

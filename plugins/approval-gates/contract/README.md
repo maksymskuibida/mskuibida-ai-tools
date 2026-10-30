@@ -48,7 +48,9 @@ schema file itself, so the two cannot drift. Keep to that subset when the schema
 | plan | `visible` | Changes to what the person sees, stored data, API or MCP shape, security, dependencies. |
 | plan | `tests` | The plan's tests, one row per group. |
 | unit-end | `changes` | What changed after plan approval. `asApproved: true` with no rows says "the design stays as approved". |
-| unit-end | `unverified` | What isn't verified yet. |
+| unit-end | `unverified` | What isn't verified yet. After a test plan: the points still not verified (picked Later, or failed and being fixed). |
+| unit-end | `verified` | Only after a test plan: the points the person tested and passed ("Verified by you"). Each row keeps its V id. |
+| unit-end | `failed` | Only after a test plan: the points that failed and the person left as known ("Failed, left as known"). |
 | unit-end | `built` | What was built, in plain words, labelled core, main or minor. It may carry a `map` of how the pieces connect. |
 | both | `other` | Anything else the agent needs to show. |
 
@@ -156,6 +158,11 @@ document defines it. A design id among a row's references (a `path:` target) is 
 Leave it), are stored with the page's row for the agent to read when the person answers in chat. The decision itself
 is always given in chat.
 
+**Test now / Later.** Each row of an `unverified` section carries a Test now / Later pick, stored like the lean on a
+suggestion: `picks.<row anchor>` is `"now"` or `"later"` (on these rows only). The agent's test plan covers the rows
+picked Test now, or every row when none is. The pick is read by the agent through `ArtifactData`; the bundle itself
+does not change.
+
 ## Changing the contract
 
 - A field that renderers may ignore is a minor change: add it to the schema, the validator and this file.
@@ -171,3 +178,33 @@ filterable target matrix and a decision card per Not Met or Unverified target wh
 other when it is not. Its shape is [`build-test.schema.json`](build-test.schema.json); check a row with
 `python3 validate_bundle.py --build-test <gate.json>`. The developer's picks come back in the row's `targetPicks`
 (`{<target id>: {pick: "accept"|"followup"|"fix", note?}}`), written by the page, never by the agent.
+
+## The test plan (unit-end page only)
+
+Not part of the bundle: the developer can test the not-verified points before approving. The plan, its page and the
+results have their own files and artifact (**AI-DLC test plans**, `skills/approval-gates/test-plan.html`):
+
+| File | What it is |
+|---|---|
+| `scripts/test_plan.py` | `validate` a plan against the unit-end bundle, `publish` it as a `plans/<id>` row, `finish` it into `test-plan.md` and `test-plan.json` in the Unit's code-generation stage folder. |
+
+A plan (`aidlc-test-plan/1`):
+
+```
+{schema, id, intent, unit, bundle (the unit-end bundle id), title, createdAt, now[] (the V ids covered),
+ allByDefault (true when no row was picked Test now), sections[] {key: "A", title, agent, steps[] {id: "A.1", do, expect, verifies[]}}}
+```
+
+- Section keys are A, B, C … in order; step ids are `<key>.<n>` from 1. A new section starts wherever the agent must do
+  something first (seed data, start a server, deploy, reset state); `agent` says what the agent will do.
+- Each step names the V rows it verifies; every row in `now` is verified by at least one step, and no step names a row
+  outside `now`.
+
+The `plans/<id>` row holds `{plan, intent, unit, title, createdAt, status, agentDone[]}`; the agent sets `agentDone`
+(the keys of sections whose agent step is done). The page writes `results.<step id>` = `{result: "pass"|"fail", note,
+at}`; a fail without a note is never saved.
+
+`test-plan.json` (the outcome, written by `finish`) is `{schema: "aidlc-test-outcome/1", plan, results, rows: {<V id>:
+{state: "passed"|"failed"|"later", steps[], notes[], decision?: "fix"|"left"}}}`. `unit_bundle.py draft --tested
+<test-plan.json>` rebuilds the unit-end page from it: passed rows move to a `verified` section, failed rows decided
+`left` to a `failed` section, and every other row stays in `unverified` (retitled "Still not verified").

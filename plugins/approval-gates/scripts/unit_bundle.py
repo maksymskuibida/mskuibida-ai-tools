@@ -2,7 +2,7 @@
 """Build the gate bundle of a Unit claimed with the unit-end rhythm: its plan page or its unit-end page.
 
     unit_bundle.py draft    --page plan|unit-end --unit <u> [--project-dir <dir>] [--previous <bundle.json>]
-                            [--same-revision] --out <draft.json>
+                            [--same-revision] [--tested <test-plan.json>] --out <draft.json>
     unit_bundle.py finalize --bundle <draft.json> [--project-dir <dir>] [--previous <bundle.json>] --out <dir>
 
 `draft` reads the Unit's stage records and writes a bundle with every row a script can find by itself:
@@ -15,6 +15,11 @@
                  empty `narrows`, `visible` and `tests` sections for the agent to fill.
   unit-end page  `code-summary.md`: Deviations From the Plan as `changes`, Not Verified Here as `unverified`,
                  Files Created and Changed as `built`; the approved plan bundle, folded, as `design`.
+
+With `--tested <test-plan.json>` (the outcome `test_plan.py finish` wrote after the developer tested the not-verified
+points), the unit-end page's `unverified` section is split: points they passed go to a `verified` section ("Verified by
+you"), failed points they left as known to `failed` ("Failed, left as known"), the rest stay in `unverified`
+("Still not verified"). The page is a new revision, as after any change.
 
 Rows the script cannot judge carry `"label": null` (and the header a lede to rewrite): the bundle does not validate until
 the agent has labelled every row, rewritten the titles and bodies in plain words and filled the empty sections. The
@@ -608,6 +613,48 @@ def next_free(rid, taken):
     return f"{prefix}{n}"
 
 
+TESTED_KINDS = ("verified", "failed")
+
+
+def apply_tested(bundle, outcome):
+    """Split the unit-end page's not-verified section by a test plan's outcome (test-plan.json, written by test_plan.py
+    finish): points the developer passed move to `verified`, failed points decided "left as known" to `failed`, and
+    everything else (picked Later, failed and being fixed) stays in `unverified`, now titled "Still not verified"."""
+    section = next((s for s in bundle["sections"] if s["kind"] == "unverified"), None)
+    if section is None:
+        return {}
+    rows = outcome.get("rows") or {}
+    keep, passed, left = [], [], []
+    for r in section["rows"]:
+        info = rows.get(r["id"]) or {}
+        state = info.get("state")
+        notes = " ".join(info.get("notes") or [])
+        if state == "passed":
+            moved = copy.deepcopy(r)
+            moved["body"] = f"{r['body'].rstrip()} You tested this and it passed." + (f" {notes}" if notes else "")
+            moved["revNote"] = "Passed in your test plan."
+            passed.append(moved)
+        elif state == "failed" and info.get("decision") == "left":
+            moved = copy.deepcopy(r)
+            moved["body"] = f"{r['body'].rstrip()} You tested this and it failed; you left it as known. {notes}".rstrip()
+            moved["revNote"] = "Failed in your test plan and left as known."
+            left.append(moved)
+        else:
+            keep.append(r)
+    section["rows"] = keep
+    section.update(title="Still not verified", short="Not verified", hint="Left for Build and Test or CI, or picked Later")
+    at = bundle["sections"].index(section)
+    extra = []
+    if passed:
+        extra.append({"key": "verified", "kind": "verified", "title": "Verified by you", "short": "Verified",
+                      "hint": "Passed in your test plan", "refsLabel": "For", "rows": passed})
+    if left:
+        extra.append({"key": "failed", "kind": "failed", "title": "Failed, left as known", "short": "Failed",
+                      "hint": "Failed in your test plan; you chose to leave them", "refsLabel": "For", "rows": left})
+    bundle["sections"][at:at + 1] = extra[:1] + [section] + extra[1:]
+    return {"passed": len(passed), "left": len(left), "stillNotVerified": len(keep)}
+
+
 def carry_over(draft, previous):
     """Rows whose source is unchanged come back as the agent left them; hand-written rows and sections come back too."""
     if not previous:
@@ -619,6 +666,8 @@ def carry_over(draft, previous):
                 prev_rows[(r["source"]["path"], r["source"]["key"])] = r
     by_key = {s["key"]: s for s in draft["sections"]}
     for s in previous.get("sections") or []:
+        if s.get("kind") in TESTED_KINDS:
+            continue  # derived from a test plan each time (apply_tested), never carried
         mine = by_key.get(s["key"])
         hand = [r for r in s.get("rows") or [] if not r.get("source")]
         if mine is None:
@@ -743,6 +792,15 @@ def draft(args):
                  "`built`: say each piece in plain words, label it core, main or minor, and add a `map` of how the pieces connect",
                  "header.facts: the test count, coverage and the other figures of the code summary"]
     carry_over(bundle, previous)
+    if args.tested:
+        if args.page != "unit-end":
+            raise BundleError("--tested belongs to the unit-end page")
+        counts = apply_tested(bundle, load_json(args.tested) or {})
+        if counts and revision > 1:
+            header["revisions"] = [r for r in header["revisions"] if r.get("n") != revision] + [
+                {"n": revision, "at": stamp.isoformat().replace("+00:00", "Z"),
+                 "note": f"Tested: {counts['passed']} verified by you, {counts['left']} failed and left as known, "
+                         f"{counts['stillNotVerified']} still not verified"}]
     filled = {s["key"] for s in bundle["sections"] if s["rows"]}
     todo = [t for t in todo if not any(t.startswith(f"write `{k}`") for k in filled)]
     bundle["id"] = f"{gate_bundle.slugify(unit.intent + '-' + args.unit)}-{args.page}-v{revision}-{stamp.strftime('%Y%m%dT%H%M')}"
@@ -949,6 +1007,7 @@ def main(argv=None):
     d.add_argument("--project-dir")
     d.add_argument("--previous")
     d.add_argument("--same-revision", action="store_true")
+    d.add_argument("--tested", help="test-plan.json of the Unit's test plan: split the not-verified section by its outcome")
     d.add_argument("--out", required=True)
     f = sub.add_parser("finalize")
     f.add_argument("--bundle", required=True)
