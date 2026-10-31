@@ -98,3 +98,5 @@ claude plugin test plugins/unit-claim
 
 The first covers the hook and the script, with the Python 3 standard library only. The second runs the mod's tests
 (`tests/dialog.test.ts`) against the engine, with the dialog, the processes and the two models stood in for.
+
+The engine ignores `--help`/`-h` on `unit claim <unit>` and claims for real, so the hook checks such a command like any claim; read the help with `aidlc unit claim --help` (no Unit). A claim that went through with a rhythm or skipped stages other than the chosen ones is flagged after the fact.
