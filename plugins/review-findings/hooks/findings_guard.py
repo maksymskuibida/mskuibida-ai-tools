@@ -432,6 +432,117 @@ def summary_sent(event, pend):
     return False
 
 
+SUMMARY_CAP = 4000
+
+
+def transcript_since(event, pend):
+    """(texts, bash_summary): the text blocks of the assistant's own messages written since these findings were saved,
+    and whether a Bash call that ran `findings.py summary` was made in that time. Unreadable: ([], False)."""
+    path, since = event.get("transcript_path"), pend.get("at")
+    texts, ran = [], False
+    if not path:
+        return texts, ran
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                if '"assistant"' not in line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(entry, dict) or entry.get("type") != "assistant" or entry.get("isSidechain"):
+                    continue
+                stamp = epoch_of(entry.get("timestamp"))
+                if isinstance(since, (int, float)) and stamp is not None and stamp < since - 1:
+                    continue
+                message = entry.get("message")
+                content = message.get("content") if isinstance(message, dict) else None
+                for block in content if isinstance(content, list) else []:
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") == "text" and str(block.get("text", "")).strip():
+                        texts.append(str(block["text"]))
+                    elif block.get("type") == "tool_use" and block.get("name") == "Bash":
+                        command = str((block.get("input") or {}).get("command", ""))
+                        ran = ran or ("findings.py" in command and re.search(r"\bsummary\b", command) is not None)
+    except OSError:
+        pass
+    return texts, ran
+
+
+def summary_text(pend):
+    """The summary as `findings.py summary` prints it, rendered from the saved findings file (which holds the titles the
+    agent set, not the older ones of the pending state); "" when it cannot be rendered or would be too long."""
+    try:
+        text = F.summary(F.load_findings(pend.get("file")))
+    except Exception:  # noqa: BLE001
+        return ""
+    return text if len(text) <= SUMMARY_CAP else ""
+
+
+def summary_diagnosis(event, pend):
+    """What the transcript shows about the summary, in words the agent can act on: why what it sent does not count."""
+    texts, ran = transcript_since(event, pend)
+    since = pend.get("at")
+    when = (datetime.datetime.fromtimestamp(since).strftime("%H:%M:%S") if isinstance(since, (int, float)) else "")
+    saved = f"Since the findings were saved{' at ' + when if when else ''}, "
+    if not texts:
+        ran_note = (" The summary you printed with `findings.py summary` in Bash is a tool result, which the developer "
+                    "never sees." if ran else " A tool result and thinking are not seen by the developer.")
+        return saved + "none of your messages had any text." + ran_note
+    label = (pend.get("stage_name") or pend.get("stage") or "").lower() if pend.get("source") != "code-review" else ""
+    total = len(pend.get("findings") or [])
+
+    def score(text):
+        low = text.lower()
+        return ("review findings" in low) + (bool(label) and label in low) + min(low.count("suggested"), total) / (total or 1)
+
+    best = max(texts, key=score)
+    low = best.lower()
+    missing = []
+    if "review findings" not in low:
+        missing.append('the "Review findings" heading')
+    if label and label not in low:
+        missing.append(f'the stage name "{pend.get("stage_name") or pend.get("stage")}"')
+    if low.count("suggested") < total:
+        missing.append(f'{total} "Suggested:" line{"s" if total != 1 else ""} (found {low.count("suggested")})')
+    quote = " ".join(best.split())[:80]
+    return (saved + f'the closest of your messages is "{quote}{"…" if len(" ".join(best.split())) > 80 else ""}", '
+            "which is not the summary: it lacks " + ", ".join(missing or ["the summary's wording"]) + ".")
+
+
+def bump_refusals(event):
+    """Count one more refusal of the same pending set, in the state; returns the count."""
+    with state_lock(event):
+        try:
+            state = load(event)
+        except Refusal:
+            return 1
+        pend = pending_of(state)
+        if pend is None:
+            return 1
+        pend["refused"] = int(pend.get("refused") or 0) + 1
+        with contextlib.suppress(OSError):
+            save(event, state)
+        return pend["refused"]
+
+
+def summary_refusal(event, pend):
+    count = bump_refusals(event)
+    command = f"python3 {os.path.join(SCRIPTS, 'findings.py')} summary --findings {pend.get('file') or '<the saved findings file>'}"
+    text = summary_text(pend)
+    titles = ("Write the missing titles first with `findings.py titles` (see the saved findings). "
+              if missing_titles(pend) else "")
+    body = (("Write this as the text of your next response, word for word, and call AskUserQuestion in that same "
+             "response:\n\n" + text) if text else
+            f"Run `{command}` and write its output as the text of your next response, word for word, and call "
+            "AskUserQuestion in that same response.")
+    return ("Refused again for the same reason: " if count > 1 else "") + (
+        "The developer has not been shown the summary of the findings. " + summary_diagnosis(event, pend) + " "
+        + titles + body + "\n\nThinking is not output and a tool result is not a message.")
+
+
 def summary_flush_wait():
     try:
         return max(0.0, float(os.environ.get("REVIEW_FINDINGS_SUMMARY_WAIT", "3")))
@@ -632,12 +743,7 @@ def guard(event, tool, ti, command, pend):
                                   "Fix, Accept, Open in form (in that order).")
         if not pend.get("asked"):
             if any(is_triage(q) for q in qs) and not wait_for_summary(event, pend):
-                raise Refusal(
-                    "Show the developer the summary of the findings in a message of its own before the question: run "
-                    f"`python3 {os.path.join(SCRIPTS, 'findings.py')} summary --findings {pend.get('file') or '<the saved findings file>'}` "
-                    "and send its output as the text of your message (every finding with its **Suggested:** action), "
-                    + ("after writing the missing titles with `findings.py titles` (see the saved findings), " if missing_titles(pend) else "")
-                    + "then ask. Thinking is not output and a tool result is not a message.")
+                raise Refusal(summary_refusal(event, pend))
             if not all(is_triage(q) for q in qs):
                 raise Refusal(
                     f"{total} review finding(s) are open and the developer has not been asked what to do with them. "
@@ -817,7 +923,7 @@ def instruction(event, doc, pend):
     options = "Fix, Open in form" if blocking else "Fix, Accept, Open in form"
     label = "code review" if doc["source"] == "code-review" else (doc.get("stage_name") or doc.get("stage") or "review")
     return (
-        f"{total} finding(s) of the {label} are open ({blocking} blocking). Show this summary in chat, then ask "
+        f"{total} finding(s) of the {label} are open ({blocking} blocking). Show this summary in chat (the output of `summary` is a tool result: copy it into your reply text), then ask "
         f"with AskUserQuestion, header \"Findings\": \"{F.question_text(total, blocking)}\" with the options "
         f"{options} (in that order{'' if blocking else '; Accept is offered because nothing blocks'}). Nothing "
         "else comes before that question: the hook refuses every other question, the approval gate and the "

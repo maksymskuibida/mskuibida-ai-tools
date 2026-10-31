@@ -52,7 +52,8 @@ stored): write the refused ones again, up to twice, then leave them: the plugin 
 at a sentence or clause end, never inside a code span. The card body is the whole finding when a title exists.
 
 Print the summary block from the hook message in chat (or render it again with `FINDINGS summary
---findings <file>`), as the text of a message of its own, before the question. The hook refuses the
+--findings <file>`), as the text of a message of its own, before the question. The output of `summary` is a tool
+result, which the developer never sees: copy it into your reply text. The hook refuses the
 triage question until a message of yours since the findings were saved shows it: the review named
 and a **Suggested:** action for every open finding. It shows each open finding in plain words, with
 its suggested action in bold and no ids, rule codes or paths in the sentences:
