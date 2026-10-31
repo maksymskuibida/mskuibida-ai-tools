@@ -95,6 +95,8 @@ class Case(unittest.TestCase):
             content = [{"type": "text", "text": text}]
         elif block == "thinking":
             content = [{"type": "thinking", "thinking": text}]
+        elif block == "ask":
+            content = [{"type": "tool_use", "name": "AskUserQuestion", "input": {"q": text}}]
         else:
             content = [{"type": block, "name": "X", "input": {"q": text}}]
         stamp = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
@@ -835,9 +837,9 @@ class TestStopNet(Case):
         code, out, err = self.stop()
         self.assertEqual((code, err), (0, ""))
         reason = self.blocked(out)
-        self.assertIn("ask the engine's Approval question now with AskUserQuestion", reason)
-        self.assertIn("link is already sent", reason)
-        code, out, err = self.stop()                           # the second stop passes
+        self.assertIn("The link is sent; now ask the engine's Approval question with AskUserQuestion", reason)
+        self.assertIn("Do not write the link again", reason)
+        code, out, err = self.stop()                           # the second stop on the same link message passes
         self.assertEqual((code, out, err), (0, "", ""))
 
     def test_a_stop_with_no_link_sent_asks_for_both_in_one_response(self):
@@ -857,8 +859,23 @@ class TestStopNet(Case):
         self.open_gate()
         self.publish()
         self.assertEqual(self.ask(self.Q)[0], 0)
+        self.said(self.Q, block="ask")
         self.post("AskUserQuestion", gate_question(self.Q), {"answers": {self.Q: "Approve"}})
         self.assertEqual(self.stop()[1:], ("", ""))
+
+    def test_a_bare_link_ending_is_blocked_with_the_now_ask_message_in_every_turn(self):
+        self.open_gate()
+        gate_id = self.publish(link=False)
+        code, _out, err = self.ask(self.Q)
+        self.assertEqual(code, 2)
+        self.assertIn("A response with only the link ends your turn and the developer has no question to answer", err)
+        self.assertIn("the link text block AND this AskUserQuestion call", err)
+        self.said(f"**Read:** {URL}#{gate_id}")
+        self.assertIn("now ask the engine's Approval question", self.blocked(self.stop()[1]))
+        self.assertEqual(self.stop()[1], "")                   # not twice on the same link message
+        self.said(f"**Read:** {URL}#{gate_id}")                # a later turn: refused ask again, link only again
+        self.assertIn("The link is sent; now ask", self.blocked(self.stop()[1]))
+        self.assertEqual(self.stop()[1], "")
 
     def test_a_question_that_failed_does_not_count_as_asked(self):
         self.open_gate()

@@ -912,5 +912,175 @@ class ReReview(GuardCase):
         self.assertIsNotNone(h.pending())
 
 
+MINOR = fixture("brief-open.txt").replace("| R-02 | Major |", "| R-02 | Minor |")
+PLACEHOLDER = "[User did not answer this question \u2014 they sent a message instead (they wrote: {}).]"
+
+
+def with_new_finding(brief):
+    """The brief of a later round: the same rows, plus a new finding R-04."""
+    brief = brief.replace("| R-03 | Minor | domain-model.md > Events | Unresolved |",
+                          "| R-03 | Minor | domain-model.md > Events | Unresolved |\n| R-04 | Minor | domain-model.md > Cart | New |")
+    return brief + "\n> R-04 Finding: The Cart has no maximum size.\n\n> R-04 Where: domain-model.md > Cart\n\n> R-04 Required action: Name a limit.\n"
+
+
+def user_says(h, text):
+    if h.transcript is None:
+        h.transcript = os.path.join(h.tmp.name, "transcript.jsonl")
+    with open(h.transcript, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"type": "user", "message": {"role": "user", "content": text}}) + "\n")
+
+
+def memory_files(h):
+    folder = os.path.join(h.state, "memory")
+    return os.listdir(folder) if os.path.isdir(folder) else []
+
+
+class Remembered(GuardCase):
+    """The engine keeps an Accepted finding New until the Unit is approved: later briefs list it again, and the
+    developer is not asked again (u18-pr-overview, 2026-10-31)."""
+
+    def accepted_round(self, h=None):
+        h = h or self.h
+        h.brief(MINOR)
+        h.triage("Accept", accept=True)
+        h.summary()
+
+    def test_accepted_findings_are_not_asked_again(self):
+        self.accepted_round()
+        _, out, _ = self.h.brief(with_new_finding(MINOR), session="s2")
+        pend = self.h.pending("s2")
+        self.assertEqual([f["id"] for f in pend["findings"]], ["R-04"])
+        text = context(out)
+        self.assertIn("1 open", text)
+        self.assertIn("Already answered: R-02, R-03 (accepted)", text)
+        self.assertIn("1 review finding is open", text)
+
+    def test_the_carried_accepts_ride_in_the_answers_summary(self):
+        self.accepted_round()
+        self.h.brief(with_new_finding(MINOR), session="s2")
+        self.h.triage("Accept", accept=True, session="s2")
+        _, done = self.h.summary(session="s2")
+        self.assertIn("Already answered: R-02, R-03 (accepted)", done.stdout)
+        self.assertIn("### R-04: Accept", done.stdout)
+        self.assertTrue(done.stdout.startswith("## Review Findings: User Answer\n"))
+
+    def test_nothing_new_means_no_question(self):
+        self.accepted_round()
+        _, out, _ = self.h.brief(MINOR)
+        self.assertIsNone(self.h.pending())
+        self.assertIn("Already answered: R-02, R-03 (accepted)", context(out))
+        self.assertIn("Do not ask the Findings question", context(out))
+        self.assertAllowed(self.h.pre("AskUserQuestion", gate_input()))
+        self.assertAllowed(self.h.pre("Bash", {"command": report_command("approved")}))
+
+    def test_a_changed_finding_is_asked_again(self):
+        self.accepted_round()
+        changed = MINOR.replace("The Events table lists `OrderPlaced`", "The Events table lists `OrderShipped`")
+        self.assertNotEqual(changed, MINOR)
+        self.h.brief(changed)
+        self.assertEqual([f["id"] for f in self.h.pending()["findings"]], ["R-03"])
+
+    def test_a_finding_answered_fix_that_is_still_new_is_asked_again(self):
+        self.h.brief()
+        self.h.triage("Fix")
+        self.h.brief()
+        self.assertEqual([f["id"] for f in self.h.pending()["findings"]], ["R-02", "R-03"])
+
+    def test_the_form_answers_are_remembered(self):
+        self.h.brief()
+        self.h.triage("Open in form")
+        self.h.write_form()
+        self.h.read_form("done", answers={"R-02": {"k": ["accept"], "note": ""}, "R-03": {"k": ["reject"], "note": "Deliberate."}})
+        _, out, _ = self.h.brief()
+        self.assertIsNone(self.h.pending())
+        self.assertIn("Already answered: R-02 (accepted); R-03 (rejected)", context(out))
+
+    def test_another_unit_or_stage_is_not_covered(self):
+        self.accepted_round()
+        self.h.brief(command=BRIEF_COMMAND + " --unit u1-core")
+        self.assertEqual(len(self.h.pending()["findings"]), 2)
+
+    def test_the_memory_outlives_the_session(self):
+        self.accepted_round()
+        self.h.brief(MINOR, session="other-session")
+        self.assertIsNone(self.h.pending("other-session"))
+
+    def test_approve_clears_the_memory(self):
+        self.accepted_round()
+        self.assertEqual(len(memory_files(self.h)), 1)
+        self.h.post("Bash", {"command": report_command("approved")}, {"stdout": "ok"})
+        self.assertEqual(memory_files(self.h), [])
+        self.h.brief(MINOR)
+        self.assertEqual(len(self.h.pending()["findings"]), 2)
+
+    def test_a_rejected_report_keeps_the_memory(self):
+        self.accepted_round()
+        self.h.post("Bash", {"command": report_command("rejected", "x")}, {"stdout": "ok"})
+        self.assertEqual(len(memory_files(self.h)), 1)
+
+    def test_releasing_the_unit_clears_the_memory(self):
+        self.h.brief(MINOR, command=BRIEF_COMMAND + " --unit u1-core")
+        self.h.triage("Accept", accept=True)
+        self.assertEqual(len(memory_files(self.h)), 1)
+        self.h.post("Bash", {"command": "aidlc unit release u1-core"}, {"stdout": "released"})
+        self.assertEqual(memory_files(self.h), [])
+
+    def test_the_release_prompt_clears_the_memory(self):
+        self.accepted_round()
+        self.h.run("UserPromptSubmit", tool_input="/review-findings:release")
+        self.assertEqual(memory_files(self.h), [])
+
+
+class TypedAnswer(GuardCase):
+    def ask(self, typed, brief=None):
+        self.h.brief(brief or MINOR)
+        user_says(self.h, typed)
+        ti = triage_input(accept=True)
+        return self.h.post("AskUserQuestion", ti, answer(ti, PLACEHOLDER.format(typed)))
+
+    def test_a_typed_accept_is_recorded(self):
+        _, out, _ = self.ask("accept")
+        pend = self.h.pending()
+        self.assertEqual((pend["asked"], pend["answer"]), (True, "accept"))
+        self.assertIn("typed \"Accept\" in chat instead of clicking", context(out))
+        self.assertEqual(len(memory_files(self.h)), 1)
+
+    def test_case_punctuation_and_all_do_not_matter(self):
+        self.ask("  Fix ALL! ")
+        self.assertEqual(self.h.pending()["answer"], "fix")
+
+    def test_form_is_open_in_form(self):
+        self.ask("form")
+        self.assertEqual(self.h.pending()["answer"], "form")
+
+    def test_ambiguous_text_is_not_recorded(self):
+        for text in ("accept R-02 but fix R-03", "accept it if the tests pass", "hmm"):
+            h = Harness()
+            self.addCleanup(h.close)
+            h.brief(MINOR)
+            user_says(h, text)
+            ti = triage_input(accept=True)
+            _, out, _ = h.post("AskUserQuestion", ti, answer(ti, PLACEHOLDER.format(text)))
+            self.assertFalse(h.pending()["asked"], text)
+            self.assertIn("not one of the options", context(out))
+
+    def test_a_typed_accept_while_blocking_decides_nothing(self):
+        self.ask("accept", brief=fixture("brief-open.txt"))
+        self.assertFalse(self.h.pending()["asked"])
+
+    def test_a_prompt_while_the_question_waits_is_recorded(self):
+        self.h.brief(MINOR)
+        self.h.say("**Review findings \u2014 Domain Design:** 2 open\n**Suggested:** a\n**Suggested:** b")
+        _, out, _ = self.h.run("UserPromptSubmit", tool_input="Accept.")
+        self.assertEqual(self.h.pending()["answer"], "accept")
+        self.assertIn("typed \"Accept\"", context(out))
+
+    def test_a_longer_prompt_is_left_alone(self):
+        self.h.brief(MINOR)
+        self.h.say("**Review findings \u2014 Domain Design:** 2 open\n**Suggested:** a\n**Suggested:** b")
+        self.assertEqual(self.h.run("UserPromptSubmit", tool_input="accept the first, explain the second")[1], "")
+        self.assertFalse(self.h.pending()["asked"])
+
+
 if __name__ == "__main__":
     unittest.main()
