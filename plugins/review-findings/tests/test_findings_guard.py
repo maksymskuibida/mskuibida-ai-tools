@@ -322,7 +322,7 @@ class SummaryFirst(GuardCase):
         return done.stdout
 
     def test_the_question_waits_for_the_summary(self):
-        self.assertRefused(self.h.pre("AskUserQuestion", triage_input()), "summary --findings", "**Suggested:**")
+        self.assertRefused(self.h.pre("AskUserQuestion", triage_input()), "Recording the review verdict", "**Suggested:**")
 
     def test_thinking_and_a_sidechain_do_not_count(self):
         text = self.summary_text()

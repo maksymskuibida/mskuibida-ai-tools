@@ -539,7 +539,7 @@ def summary_refusal(event, pend):
             f"Run `{command}` and write its output as the text of your next response, word for word, and call "
             "AskUserQuestion in that same response.")
     return ("Refused again for the same reason: " if count > 1 else "") + (
-        "the developer has not been shown the summary of the findings. " + summary_diagnosis(event, pend) + " "
+        "The developer has not been shown the summary of the findings. " + summary_diagnosis(event, pend) + " "
         + titles + body + "\n\nThinking is not output and a tool result is not a message.")
 
 
