@@ -112,6 +112,29 @@ class BuildTest(unittest.TestCase):
         # the deepest big folder, not its parent; ~/proj is explained by its node_modules row
         self.assertEqual(other, ["/Library/Big/Samples", self.home + "/.npm"])
 
+    def test_known_wrong_commands_are_fixed_before_the_owner_picks(self):
+        lib = self.home + "/Library"
+        report = {"area": "caches", "items": [
+            {"path": self.home + "/.nvm", "bytes": GB, "category": "dev-build", "risk": "safe",
+             "action": f"find '{self.home}/.nvm' -name 'node_modules' -type d -prune -exec rm -rf {{}} +"},
+            {"path": lib + "/Caches/pnpm", "bytes": GB, "category": "package-caches", "risk": "safe",
+             "action": "pnpm cache delete"},
+            {"path": lib + "/Caches/ms-playwright", "bytes": GB, "category": "package-caches", "risk": "safe",
+             "action": "npx playwright uninstall --all"},
+            {"path": lib + "/Application Support/Steam/Steam.AppBundle", "bytes": GB, "category": "app-data",
+             "risk": "keep", "action": "none (keep)."},
+        ]}
+        json.dump(report, open(os.path.join(self.dir, "agents", "caches.json"), "w"))
+        scan, _, _, _ = self.build()
+        by = {i["path"]: i for i in scan["items"]}
+        nvm = by[self.home + "/.nvm"]
+        # npm itself and the global packages live in there: never offered as build output
+        self.assertEqual((nvm["risk"], nvm["kind"], nvm["action"]), ("keep", "manual", ""))
+        self.assertEqual(by[lib + "/Caches/pnpm"]["kind"], "path")
+        self.assertEqual(by[lib + "/Caches/ms-playwright"]["action"], f'rm -rf "{lib}/Caches/ms-playwright"')
+        steam = by[lib + "/Application Support/Steam/Steam.AppBundle"]
+        self.assertEqual((steam["kind"], steam["action"]), ("manual", ""))
+
     def test_rows_fit_and_name_their_files(self):
         scan, printed, _, out = self.build()
         writes = json.load(open(printed["writes"]))
@@ -155,14 +178,99 @@ class RemoveTest(unittest.TestCase):
 
     def tearDown(self):
         mac_scan.REMOVABLE_ROOTS = self.saved_roots
+        for dirpath, dirs, files in os.walk(self.root):
+            os.chmod(dirpath, 0o755)
         self.tmp.cleanup()
 
-    def run_remove(self, execute):
+    def run_remove(self, execute, include_keep=False):
         args = argparse.Namespace(scan=self.scan, picks=self.picks, live_paths=self.live, quiet_minutes=30,
-                                  execute=execute)
+                                  include_keep=include_keep, execute=execute)
         with contextlib.redirect_stdout(io.StringIO()) as so:
             code = mac_scan.cmd_remove(args)
         return code, so.getvalue(), json.load(open(os.path.splitext(self.picks)[0] + "-result.json"))
+
+    def add(self, item, pick="remove"):
+        """One more item in the scan, picked."""
+        scan = json.load(open(self.scan))
+        item = dict({"bytes": 4096, "risk": "safe", "kind": "path"}, **item)
+        item.setdefault("id", mac_scan.item_id(item["path"]))
+        scan["items"].append(item)
+        json.dump(scan, open(self.scan, "w"))
+        picks = json.load(open(self.picks))
+        picks["picks"][item["id"]] = {"pick": pick}
+        json.dump(picks, open(self.picks, "w"))
+        return item
+
+    def old_folder(self, *parts):
+        p = os.path.join(self.root, *parts)
+        os.makedirs(p)
+        with open(os.path.join(p, "f.bin"), "wb") as fh:
+            fh.write(b"x" * 8192)
+        old = time.time() - 3 * 3600
+        os.utime(os.path.join(p, "f.bin"), (old, old))
+        for n in range(len(parts), 0, -1):    # every folder makedirs just created, or the re-check holds it
+            os.utime(os.path.join(self.root, *parts[:n]), (old, old))
+        return p
+
+    def test_a_failed_removal_is_not_counted_as_removed(self):
+        contents = self.old_folder("dotslash", "Tool.app", "Contents")
+        os.chmod(contents, 0o555)   # what App Management does to a bundle: nothing in it can be deleted
+        self.add({"path": os.path.join(self.root, "dotslash")})
+        code, out, plan = self.run_remove(True)
+        self.assertEqual(code, 1)
+        self.assertIn("Removed: 1 of 2 item(s)", out)
+        failed = [i for i in plan["remove"] if i["result"].startswith("failed")]
+        self.assertEqual(len(failed), 1)
+        self.assertIn("Finder", failed[0]["result"])
+        self.assertEqual(failed[0]["freed"], 0)
+
+    def test_picks_marked_keep_wait_for_a_second_yes(self):
+        p = self.old_folder("runtime")
+        self.add({"path": p, "risk": "keep"})
+        _, out, plan = self.run_remove(True)
+        self.assertTrue(os.path.exists(p))
+        self.assertEqual([i["path"] for i in plan["keep"]], [p])
+        self.assertIn("--include-keep", out)
+        self.run_remove(True, include_keep=True)
+        self.assertFalse(os.path.exists(p))
+
+    def test_commands_that_need_sudo_go_to_the_owner(self):
+        self.add({"path": self.root + "/dyld", "kind": "command", "action": "sudo rm -rf /Library/x"})
+        self.add({"path": self.root + "/npm", "kind": "command", "action": "npm cache clean --force"})
+        _, _, plan = self.run_remove(False)
+        self.assertEqual([i["path"] for i in plan["owner"]], [self.root + "/dyld"])
+        self.assertEqual([i["path"] for i in plan["commands"]], [self.root + "/npm"])
+
+    def test_a_folder_finder_refills_is_removed_on_the_next_pass(self):
+        p = self.old_folder("finder-open")
+        real, calls = mac_scan.shutil.rmtree, []
+
+        def flaky(path, *a, **k):
+            calls.append(path)
+            if len(calls) == 1:
+                raise OSError(mac_scan.errno.ENOTEMPTY, "Directory not empty", path)
+            return real(path, *a, **k)
+        mac_scan.shutil.rmtree = flaky
+        try:
+            self.assertIsNone(mac_scan.delete_path(p))
+        finally:
+            mac_scan.shutil.rmtree = real
+        self.assertFalse(os.path.exists(p))
+        self.assertEqual(len(calls), 2)
+
+    def test_check_holds_what_is_in_use_and_measures_the_rest(self):
+        args = argparse.Namespace(live_paths=self.live, quiet_minutes=30,
+                                  paths=[self.paths["cache"], self.paths["live"], self.paths["fresh"],
+                                         self.root + "/missing"])
+        with contextlib.redirect_stdout(io.StringIO()) as so:
+            code = mac_scan.cmd_check(args)
+        self.assertEqual(code, 3)
+        rows = {os.path.basename(r[2]): r for r in (l.split("\t") for l in so.getvalue().splitlines())}
+        self.assertEqual(rows["cache"][0], "ok")
+        self.assertGreater(int(rows["cache"][1]), 0)
+        self.assertIn("running session", rows["live"][3])
+        self.assertIn("written to", rows["fresh"][3])
+        self.assertEqual(rows["missing"][0], "gone")
 
     def test_dry_run_deletes_nothing(self):
         code, out, plan = self.run_remove(False)

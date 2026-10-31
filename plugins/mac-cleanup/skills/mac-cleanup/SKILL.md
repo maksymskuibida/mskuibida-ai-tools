@@ -83,13 +83,35 @@ python3 "$SC/mac_scan.py" remove --scan "$OUT/page/scan.json" --picks "$OUT/pick
   --live-paths "$OUT/live-paths-fresh.txt"                    # dry run
 ```
 
-Show the owner what it would remove, what it held back and why, and confirm. Then:
+Show the owner what it would remove, what it held back and why, and confirm. Its **Marked Keep on the page**
+section lists picks of items the page itself called Keep: an iOS runtime simulators still use, the Android
+emulator every virtual device needs, an app itself. Ask about those separately, saying what each one breaks (and
+what names it: test scripts, a list of device slots), and pass `--include-keep` only after the owner says yes to
+them again. Then:
 
-- **Plain folders and files** (`kind: path`): the same command with `--execute`. It re-checks each one first.
+- **Plain folders and files** (`kind: path`): the same command with `--execute`. It re-checks each one first and
+  counts only what is gone afterwards. A folder holding an app bundle can fail with "App Management": macOS lets
+  Finder delete it, not a script; give it to the owner ("drag it to the Trash").
 - **Worktrees**: `remove_worktrees.py --only <paths>` with fresh liveness, per `references/worktrees.md` § 3.
-- **Tool commands** (`kind: command`: `xcrun simctl runtime delete`, `docker volume rm`, `brew cleanup`, …):
-  one at a time, each shown before it runs. Never one that needs sudo: give it to the owner to run.
+- **Tool commands** (`kind: command`: `xcrun simctl runtime delete`, `docker volume rm`, `npm cache clean`, …):
+  one at a time, each shown before it runs. Right before each, run `mac_scan.py check --live-paths <fresh file>
+  <folders it clears>` (`npm cache clean` clears `~/.npm/_cacache`, `uv cache clean` clears `~/.cache/uv`): it
+  holds a folder a running process or session is using or that was written in the last 30 minutes, as a
+  package-manager cache serving a running MCP server or build is. Skip a held one, or use the narrower command
+  (`uv cache prune`). Run `check` again afterwards: the difference in its sizes is what the command freed. A
+  command that needs an app closed ("quit Chrome first") waits until the owner says it is closed. The **Need
+  sudo** section is the owner's to run.
 - **Manual steps** (`kind: manual`: an app's setting, installing a prepared macOS update): list them for the owner.
+
+What a command frees does not always show at once, so measure where the space really is:
+
+- **Docker** frees space inside its VM disk: measure
+  `~/Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw` with `du -sk` before and after, not
+  `docker system df`.
+- **`xcrun simctl runtime delete`** unregisters a downloaded runtime at once, and its dyld cache under
+  `/Library/Developer/CoreSimulator/Caches/dyld` goes with it, but the disk image under
+  `/System/Library/AssetsV2/com_apple_MobileAsset_iOSSimulatorRuntime/<hash>.asset` can stay until macOS purges
+  it. Measure that folder; while it is still there, report it as pending, not freed.
 
 ### 6. Report what was freed
 
@@ -101,6 +123,8 @@ access steps if they still apply.
 
 - Never remove what the owner did not pick, never widen a pick to its parent folder, never run a cleanup command
   "while we are at it".
+- Never run a command that would clear more than its row says. `build` rewrites the wrong ones it knows of (a
+  sweep of `node_modules` under `~/.nvm` deletes npm itself); read every other one before running it.
 - Never use sudo, change a security setting, delete a local snapshot or touch a system volume yourself; those are
   steps for the owner.
 - Never stop, start or recreate containers to measure or clean them; shared test infrastructure lives there.
