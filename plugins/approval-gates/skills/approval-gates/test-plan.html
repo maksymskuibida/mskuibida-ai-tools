@@ -100,6 +100,9 @@ h1 { margin: 0; font-size: 22px; line-height: 1.25; font-weight: 600; }
 .sid { font: 500 13px var(--mono); color: var(--accent-strong); flex: none; min-width: 30px; }
 .stephead p { margin: 0; font-weight: 500; }
 .expect { margin: 6px 0 0 42px; color: var(--fg-2); }
+.crit { margin: 8px 0 0 42px; padding: 0; list-style: none; display: grid; gap: 4px; color: var(--fg-2); }
+.crit li { display: flex; gap: 10px; align-items: baseline; }
+.cid { font: 500 12px var(--mono); color: var(--muted); flex: none; min-width: 42px; }
 .expect b { font-weight: 600; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; margin-right: 6px; }
 .verifies { margin: 8px 0 0 42px; display: flex; gap: 6px; flex-wrap: wrap; }
 .act { margin: 12px 0 0 42px; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
@@ -126,7 +129,7 @@ h1 { margin: 0; font-size: 22px; line-height: 1.25; font-weight: 600; }
 @media (max-width: 640px) {
   #app { padding: 12px 12px 80px; }
   .head { padding: 18px 16px; } .sechead { padding: 12px 14px; } .agent { margin: 0 14px 12px; } .step { padding: 14px; }
-  .expect, .verifies, .act { margin-left: 0; }
+  .expect, .crit, .verifies, .act { margin-left: 0; }
   .rb { width: 100%; } .rb button { flex: 1; }
 }
 @media (prefers-reduced-motion: no-preference) { .sec, .step, .rb button { transition: background .15s, border-color .15s, box-shadow .15s; } }
@@ -171,6 +174,15 @@ var PlanView = (function () {
     return { pass: pass, fail: fail, total: total };
   }
 
+  function expectHtml(st) {
+    var c = st.criteria;
+    if (Array.isArray(c) && c.length) {
+      return '<ol class="crit" aria-label="Acceptance criteria of ' + esc(st.id) + '">' + c.map(function (t, i) {
+        return '<li><span class="cid">' + esc(st.id) + "." + (i + 1) + "</span><span>" + esc(t) + "</span></li>";
+      }).join("") + "</ol>";
+    }
+    return st.expect ? '<p class="expect"><b>Expect</b>' + esc(st.expect) + "</p>" : "";  // a plan published before criteria
+  }
   function vChip(plan, id) {
     var t = (plan.rows || {})[id];
     return '<span class="vchip"' + (t ? ' title="' + esc(t) + '"' : "") + ">" + esc(id) + "</span>";
@@ -182,7 +194,7 @@ var PlanView = (function () {
     var hint = r.result === "fail" ? (need ? "Say what went wrong. A Fail is saved with its note." : "") : (r.result === "pass" ? "Optional: anything worth remembering." : "");
     var dis = open ? "" : " disabled";
     return '<div class="step' + cls + '" id="step-' + esc(st.id) + '"><div class="stephead"><span class="sid">' + esc(st.id) + "</span><p>" + esc(st.do) + "</p></div>" +
-      '<p class="expect"><b>Expect</b>' + esc(st.expect) + "</p>" +
+      expectHtml(st) +
       '<div class="verifies">' + (st.verifies || []).map(function (v) { return vChip(plan, v); }).join("") + "</div>" +
       '<div class="act"><div class="rb" role="group" aria-label="Result of ' + esc(st.id) + '">' +
       '<button type="button" data-act="pass" data-step="' + esc(st.id) + '" aria-pressed="' + (r.result === "pass") + '"' + dis + ">Pass</button>" +

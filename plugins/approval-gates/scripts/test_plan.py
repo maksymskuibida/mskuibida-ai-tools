@@ -18,7 +18,10 @@ outcome that `unit_bundle.py draft --tested` reads) into the Unit's code-generat
 the steps not fixed are then "left as known".
 
 The plan (`aidlc-test-plan/1`): {schema, id, intent, unit, bundle, title, createdAt, now[], allByDefault, sections[]
-{key: "A", title, agent, steps[] {id: "A.1", do, expect, verifies[]}}}. The script never touches the artifact.
+{key: "A", title, agent, steps[] {id: "A.1", do, criteria[], verifies[]}}}.
+A step's `criteria` are short checkable sentences (at least one); the page and test-plan.md number them under the step
+(A.1.1, A.1.2 …). `expect` is optional; plans published before criteria existed carry only `expect` and still render.
+The developer passes or fails a step as a whole; results may carry `failed: ["A.1.2"]` to name the criteria. The script never touches the artifact.
 Standard library only.
 """
 
@@ -131,12 +134,21 @@ def problems_of(plan, bundle):
             if sid in seen:
                 out.append(f"step id {sid} is used twice")
             seen.add(sid)
-            for field in ("do", "expect"):
-                v = st.get(field)
-                if blank(v):
-                    out.append(f"step {sid}: {field} is required (what to do / what to expect)")
-                elif len(v) > TEXT_MAX:
-                    out.append(f"step {sid}: {field} is over {TEXT_MAX} characters")
+            if blank(st.get("do")):
+                out.append(f"step {sid}: do is required (what to do)")
+            elif len(st["do"]) > TEXT_MAX:
+                out.append(f"step {sid}: do is over {TEXT_MAX} characters")
+            if st.get("expect") is not None and (not isinstance(st["expect"], str) or len(st["expect"]) > TEXT_MAX):
+                out.append(f"step {sid}: expect is a text of at most {TEXT_MAX} characters")
+            crit = st.get("criteria")
+            if not isinstance(crit, list) or not crit:
+                out.append(f"step {sid}: criteria is required (at least one short checkable sentence; they are numbered {sid}.1, {sid}.2 …)")
+            else:
+                for n, c in enumerate(crit, 1):
+                    if blank(c):
+                        out.append(f"step {sid}: criterion {sid}.{n} is empty")
+                    elif len(c) > LINE_MAX:
+                        out.append(f"step {sid}: criterion {sid}.{n} is over {LINE_MAX} characters (a short checkable sentence)")
             ver = st.get("verifies")
             if not isinstance(ver, list) or not ver or not all(isinstance(x, str) for x in ver):
                 out.append(f"step {sid}: verifies must name at least one V row")
@@ -155,6 +167,16 @@ def stamp():
     return datetime.datetime.now(datetime.timezone.utc)
 
 
+def criteria_of(st):
+    """{"A.1.1": "text", …} of a step; empty for a plan published without criteria."""
+    return {f"{st['id']}.{n}": c for n, c in enumerate(st.get("criteria") or [], 1)}
+
+
+def failed_ids(st, r):
+    """The criterion ids a failure names: those the results give, else none known."""
+    return [x for x in (r.get("failed") or []) if x in criteria_of(st)] if r.get("result") == "fail" else []
+
+
 def step_list(plan):
     return [st for sec in plan["sections"] for st in sec["steps"]]
 
@@ -169,6 +191,11 @@ def results_problems(plan, results):
             out.append(f"step {st['id']} has no Pass or Fail yet")
         elif r["result"] == "fail" and blank(r.get("note")):
             out.append(f"step {st['id']} failed with no note")
+        elif r["result"] == "fail" and r.get("failed") is not None:
+            ids = criteria_of(st)
+            bad = [x for x in r["failed"] if x not in ids] if isinstance(r["failed"], list) else ["?"]
+            if bad:
+                out.append(f"step {st['id']}: failed names {', '.join(map(str, bad))}, which are not its criteria")
     return out
 
 
@@ -183,7 +210,9 @@ def outcome_of(plan, results, bundle, fix=None):
             if r["result"] == "fail":
                 row["state"] = "failed"
             if (r.get("note") or "").strip():
-                row["notes"].append(f"{st['id']} {'failed' if r['result'] == 'fail' else 'passed'}: {r['note'].strip()}")
+                named = failed_ids(st, r)
+                label = st["id"] + (f" ({', '.join(named)})" if named else "")
+                row["notes"].append(f"{label} {'failed' if r['result'] == 'fail' else 'passed'}: {r['note'].strip()}")
     if fix is not None:
         for rid, row in rows.items():
             if row["state"] == "failed":
@@ -207,7 +236,16 @@ def markdown(plan, results, outcome, bundle, date):
         for st in sec["steps"]:
             r = results[st["id"]]
             lines += [f"- **{st['id']}** {'PASS' if r['result'] == 'pass' else 'FAIL'}: {st['do']}",
-                      f"  - Expected: {st['expect']}", f"  - Verifies: {', '.join(st['verifies'])}"]
+                      ]
+            crit = criteria_of(st)
+            if st.get("expect") and not crit:
+                lines.append(f"  - Expected: {st['expect']}")
+            named = failed_ids(st, r)
+            for cid, text in crit.items():
+                lines.append(f"  - {cid}{' FAIL' if cid in named else ''}: {text}")
+            if r["result"] == "fail":
+                lines.append(f"  - Failed criteria: {', '.join(named) if named else 'not named (the step failed as a whole)'}")
+            lines.append(f"  - Verifies: {', '.join(st['verifies'])}")
             if (r.get("note") or "").strip():
                 lines.append(f"  - Note: {r['note'].strip()}")
         lines.append("")

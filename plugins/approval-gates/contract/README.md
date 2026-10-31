@@ -192,7 +192,7 @@ A plan (`aidlc-test-plan/1`):
 
 ```
 {schema, id, intent, unit, bundle (the unit-end bundle id), title, createdAt, now[] (the V ids covered),
- allByDefault (true when no row was picked Test now), sections[] {key: "A", title, agent, steps[] {id: "A.1", do, expect, verifies[]}}}
+ allByDefault (true when no row was picked Test now), sections[] {key: "A", title, agent, steps[] {id: "A.1", do, criteria[], verifies[]}}} (criteria: short checkable sentences, at least one, numbered A.1.1 … on the page; older plans carry `expect` instead and still render)
 ```
 
 - Section keys are A, B, C … in order; step ids are `<key>.<n>` from 1. A new section starts wherever the agent must do

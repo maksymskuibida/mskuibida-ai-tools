@@ -33,10 +33,10 @@ def good_plan(now=("V-1", "V-2", "V-3")):
             "bundle": "bakery-u2-unit-end-v1-20260101T0900", "title": "Unit u2: test plan", "now": list(now), "allByDefault": False,
             "sections": [
                 {"key": "A", "title": "Run the app", "agent": "Start the dev server on port 3000.",
-                 "steps": [{"id": "A.1", "do": "Open the slot list.", "expect": "Full slots are greyed out.", "verifies": ["V-1", "V-2"]},
-                           {"id": "A.2", "do": "Move an order.", "expect": "It lands in the new slot.", "verifies": ["V-2"]}]},
+                 "steps": [{"id": "A.1", "do": "Open the slot list.", "criteria": ["Full slots are greyed out.", "Free slots are clickable."], "verifies": ["V-1", "V-2"]},
+                           {"id": "A.2", "do": "Move an order.", "criteria": ["It lands in the new slot."], "verifies": ["V-2"]}]},
                 {"key": "B", "title": "Reset the data", "agent": "Wipe and seed the test database.",
-                 "steps": [{"id": "B.1", "do": "Reload.", "expect": "The list is back to the seed.", "verifies": ["V-3"]}]}]}
+                 "steps": [{"id": "B.1", "do": "Reload.", "criteria": ["The list is back to the seed."], "verifies": ["V-3"]}]}]}
 
 
 class TestPlanValidator(unittest.TestCase):
@@ -72,12 +72,24 @@ class TestPlanValidator(unittest.TestCase):
     def test_a_section_needs_its_agent_step_and_every_step_its_shape(self):
         plan = good_plan()
         plan["sections"][0]["agent"] = " "
-        del plan["sections"][0]["steps"][0]["expect"]
+        del plan["sections"][0]["steps"][0]["criteria"]
         plan["sections"][1]["steps"][0]["verifies"] = []
         found = "\n".join(self.problems(plan))
         self.assertIn("section A: agent is required", found)
-        self.assertIn("step A.1: expect is required", found)
+        self.assertIn("step A.1: criteria is required", found)
         self.assertIn("step B.1: verifies must name at least one V row", found)
+
+    def test_empty_criteria_are_refused_and_an_old_plan_with_only_expect_is_not_a_good_new_one(self):
+        plan = good_plan()
+        plan["sections"][0]["steps"][0]["criteria"] = []
+        plan["sections"][0]["steps"][1]["criteria"] = ["ok", " "]
+        found = "\n".join(self.problems(plan))
+        self.assertIn("step A.1: criteria is required", found)
+        self.assertIn("step A.2: criterion A.2.2 is empty", found)
+        plan = good_plan()
+        del plan["sections"][1]["steps"][0]["criteria"]
+        plan["sections"][1]["steps"][0]["expect"] = "old style"
+        self.assertEqual(self.problems(plan), ["step B.1: criteria is required (at least one short checkable sentence; they are numbered B.1.1, B.1.2 …)"])
 
     def test_a_plan_of_another_page_is_refused(self):
         plan = good_plan()
@@ -146,7 +158,7 @@ class TestScript(unittest.TestCase):
         self.assertEqual(info["failedSteps"][0]["step"], "A.2")
         with open(os.path.join(stage, "test-plan.md"), encoding="utf-8") as f:
             text = f.read()
-        for want in ("A.2** FAIL", "Note: It stayed in the old slot.", "Agent step: Wipe and seed", "V-4 Point V-4: Still not verified (Later)"):
+        for want in ("  - A.2.1: It lands in the new slot.", "  - Failed criteria: not named", "  - A.1.2: Free slots are clickable.", "A.2** FAIL", "Note: It stayed in the old slot.", "Agent step: Wipe and seed", "V-4 Point V-4: Still not verified (Later)"):
             self.assertIn(want, text)
         done = self.run_script(*args, "--fix", "A.2")
         with open(os.path.join(stage, "test-plan.json"), encoding="utf-8") as f:
@@ -156,6 +168,26 @@ class TestScript(unittest.TestCase):
         with open(os.path.join(stage, "test-plan.json"), encoding="utf-8") as f:
             self.assertEqual(json.load(f)["rows"]["V-2"]["decision"], "left")
         self.assertEqual(self.run_script(*args, "--fix", "B.1").returncode, 1)
+
+    def test_a_failure_names_its_criteria_when_the_results_do(self):
+        bundle = self.file("bundle.json", end_bundle(("V-1", "V-2", "V-3")))
+        results = {"A.1": {"result": "fail", "note": "Greyed wrong.", "failed": ["A.1.2"]}, "A.2": {"result": "pass"},
+                   "B.1": {"result": "pass"}}
+        stage = os.path.join(self.tmp.name, "stage")
+        args = ["finish", "--plan", self.file("plan.json", good_plan()), "--results", self.file("results.json", results),
+                "--bundle", bundle, "--stage-dir", stage]
+        done = self.run_script(*args)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        with open(os.path.join(stage, "test-plan.md"), encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn("  - A.1.2 FAIL: Free slots are clickable.", text)
+        self.assertIn("  - Failed criteria: A.1.2", text)
+        with open(os.path.join(stage, "test-plan.json"), encoding="utf-8") as f:
+            self.assertIn("A.1 (A.1.2) failed: Greyed wrong.", json.load(f)["rows"]["V-1"]["notes"])
+        results["A.1"]["failed"] = ["A.9.9"]
+        done = self.run_script("finish", "--plan", self.file("plan.json", good_plan()), "--results", self.file("results.json", results),
+                               "--bundle", bundle, "--stage-dir", stage)
+        self.assertEqual(done.returncode, 1)
 
     def test_finish_refuses_an_unfinished_plan(self):
         done = self.run_script("finish", "--plan", self.file("plan.json", good_plan()), "--results", self.file("r.json", {"A.1": {"result": "pass"}}),
@@ -367,6 +399,20 @@ process.stdout.write(JSON.stringify({ page: G.render(input.row, input.local), st
                               capture_output=True, text=True, timeout=60)
         self.assertEqual(done.returncode, 0, done.stderr)
         return json.loads(done.stdout)
+
+    def test_criteria_render_numbered_under_the_step_and_an_old_plan_shows_its_expected_text(self):
+        page = self.render(self.row())["page"]
+        for want in ('<ol class="crit"', ">A.1.1<", ">A.1.2<", "Free slots are clickable.", ">A.2.1<"):
+            self.assertIn(want, page)
+        self.assertNotIn("<b>Expect</b>", page)
+        row = self.row()
+        for sec in row["plan"]["sections"]:
+            for st in sec["steps"]:
+                st["expect"] = "Old expectation."
+                del st["criteria"]
+        old = self.render(row)["page"]
+        self.assertIn("<b>Expect</b>Old expectation.", old)
+        self.assertNotIn('class="crit"', old)
 
     def test_the_first_section_is_current_and_waits_for_the_agent(self):
         out = self.render(self.row())
