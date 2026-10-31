@@ -350,6 +350,65 @@ class TestEveryClaimAsks(Case):
         self.assertIn(f'"source": "unit-claim:{UNIT}"', self.context(out))
 
 
+class TestHelpIsAClaim(Case):
+    """The engine ignores --help/-h on `unit claim <unit>` and claims for real: it is checked like any claim."""
+
+    def test_help_with_a_unit_is_refused_until_the_dialog_and_flags_match(self):
+        for cmd in (f"aidlc unit claim {UNIT} --help 2>&1 | head -40", f"aidlc unit claim {UNIT} -h", f"aidlc --claim {UNIT} --help",
+                    f"bun .claude/tools/aidlc-unit.ts claim {UNIT} --help"):
+            code, _out, err = self.pre("Bash", {"command": cmd})
+            self.assertEqual(code, 2, cmd)
+            self.assertIn("claims despite `--help`", err, cmd)
+            self.assertIn("aidlc unit claim --help", err, cmd)
+            self.assertIn(f"Before {UNIT} is claimed", err, cmd)
+        self.answer("functional-design", "unit-end")
+        code, _out, err = self.pre("Bash", {"command": f"aidlc unit claim {UNIT} --help | head -40"})
+        self.assertEqual(code, 2)
+        self.assertIn("--rhythm unit-end", err)
+        code, _out, err = self.pre("Bash", {"command": f"aidlc unit claim {UNIT} --team A --rhythm per-stage --help"})
+        self.assertEqual(code, 2)
+        self.assertIn("not per-stage", err)
+        code, _out, err = self.pre("Bash", {"command": f"aidlc unit claim {UNIT} --team A --rhythm unit-end --help"})
+        self.assertEqual(code, 0, err)
+
+    def test_help_without_a_unit_is_help(self):
+        for cmd in ("aidlc unit claim --help", "aidlc unit claim -h | head", "aidlc unit --help", "aidlc --help"):
+            code, _out, err = self.pre("Bash", {"command": cmd})
+            self.assertEqual(code, 0, cmd + err)
+
+
+class TestMismatchedClaim(Case):
+    OUT = ('{"claimed":true,"unit":"u4-day-navigation","gate_rhythm":"per-stage","generation":3,'
+           '"skipped_stages":[]}')
+
+    def test_a_claim_with_other_flags_is_flagged(self):
+        self.answer("functional-design", "unit-end")
+        cmd = f"aidlc unit claim {UNIT} --team A --help 2>&1 | head -40"
+        _code, out, _err = self.post("Bash", {"command": cmd}, {"stdout": self.OUT})
+        said = self.context(out)
+        self.assertIn("does not match the developer's choice", said)
+        self.assertIn("per-stage", said)
+        self.assertIn("unit-end", said)
+        self.assertIn("do not run `aidlc engine orchestrate next`", said)
+        self.assertIn(f"aidlc unit release {UNIT}", said)
+        self.assertIn("--rhythm unit-end", said)
+        # the answer stays open for the re-claim
+        self.assertEqual(self.claim()[0], 0)
+
+    def test_output_cut_by_head_still_reads(self):
+        self.answer("functional-design", "unit-end")
+        cut = '{\n  "claimed": true,\n  "unit": "u4-day-navigation",\n  "gate_rhythm": "per-stage",\n  "gen'
+        _code, out, _err = self.post("Bash", {"command": f"aidlc unit claim {UNIT} --team A | head -5"}, {"stdout": cut})
+        self.assertIn("does not match", self.context(out))
+
+    def test_a_matching_claim_is_not_flagged(self):
+        self.answer("functional-design", "unit-end")
+        ok = '{"claimed":true,"gate_rhythm":"unit-end"}'
+        _code, out, _err = self.post("Bash", {"command": f"aidlc unit claim {UNIT} --team A --rhythm unit-end"}, {"stdout": ok})
+        self.assertNotIn("does not match", self.context(out))
+        self.assertIn("is claimed with the unit-end rhythm", self.context(out))
+
+
 class TestPrompt(Case):
     def test_claim_prompt_says_how_to_open_the_dialog(self):
         _code, out, _err = self.run_hook({"hook_event_name": "UserPromptSubmit", "prompt": f"/aidlc --claim {UNIT} --team A"})
@@ -361,6 +420,18 @@ class TestPrompt(Case):
         said = self.context(out)
         self.assertIn("Functional Design, NFR Requirements, NFR Design", said)
         self.assertIn("--rhythm unit-end", said)
+
+    def test_the_unit_is_cleaned_of_surrounding_punctuation(self):
+        _code, out, _err = self.run_hook({"hook_event_name": "UserPromptSubmit", "prompt": "run (`aidlc unit claim web-sdk`),"})
+        said = self.context(out)
+        self.assertIn('"source": "unit-claim:web-sdk"', said)
+        self.assertNotIn("`),", said)
+
+    def test_a_name_that_is_no_unit_id_says_nothing(self):
+        _code, out, _err = self.run_hook({"hook_event_name": "UserPromptSubmit", "prompt": "see `aidlc unit claim `),"})
+        self.assertEqual(out, "")
+        _code, out, _err = self.run_hook({"hook_event_name": "UserPromptSubmit", "prompt": "aidlc unit claim a/b"})
+        self.assertEqual(out, "")
 
     def test_other_prompts(self):
         _code, out, _err = self.run_hook({"hook_event_name": "UserPromptSubmit", "prompt": "what is a claim?"})
