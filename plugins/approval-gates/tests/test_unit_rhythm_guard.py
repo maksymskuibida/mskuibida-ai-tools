@@ -235,7 +235,7 @@ class TestStopNetUnitEnd(UnitCase):
         code, out, err = self.stop()
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(json.loads(out)["decision"], "block")
-        self.assertIn("link is already sent", json.loads(out)["reason"])
+        self.assertIn("The link is sent; now ask", json.loads(out)["reason"])
         self.assertEqual(self.stop()[1], "")
 
     def test_the_plan_question_asked_then_stop_passes(self):

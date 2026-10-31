@@ -2,6 +2,7 @@
 question until the link was sent, the plan written again, and the Stop hook.
 Run: python3 -m unittest discover -s plugins/approval-gates/tests"""
 
+import json
 import time
 import unittest
 
@@ -126,7 +127,27 @@ class TestPlanLink(Case):
         self.publish_plan()
         self.assertEqual(self.stop(active=True)[1].strip(), "")
         self.said(f"**Read:** {URL}#{PLAN}")
+        self.said("Ready for section A?", block="ask")
         self.assertEqual(self.stop()[1].strip(), "")
+
+    def test_the_refusal_says_a_link_only_response_ends_the_turn(self):
+        self.publish_plan()
+        err = self.ask_plan()[2]
+        self.assertIn("A response with only the link ends your turn and the developer has no question to answer", err)
+        self.assertIn("the link text block AND this AskUserQuestion call", err)
+
+    def test_a_link_only_ending_is_blocked_once_per_link_message_and_again_in_a_later_turn(self):
+        self.publish_plan()
+        self.assertEqual(self.ask_plan()[0], 2)
+        self.said(f"**Read:** {URL}#{PLAN}")
+        reason = json.loads(self.stop()[1])["reason"]
+        self.assertIn("The link is sent; now ask the test-plan question", reason)
+        self.assertIn("Do not write the link again", reason)
+        self.assertEqual(self.stop()[1].strip(), "")           # the same link message: once
+        self.said(f"**Read:** {URL}#{PLAN}")                   # a later turn, same plan
+        self.assertIn("now ask", self.stop()[1])
+        self.said("Ready for section A?", block="ask")
+        self.assertEqual(self.stop()[1].strip(), "")           # link and question: allowed
 
     def test_a_plan_written_again_can_block_the_stop_again(self):
         self.publish_plan()
