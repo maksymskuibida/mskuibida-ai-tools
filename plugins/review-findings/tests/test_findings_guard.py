@@ -322,7 +322,7 @@ class SummaryFirst(GuardCase):
         return done.stdout
 
     def test_the_question_waits_for_the_summary(self):
-        self.assertRefused(self.h.pre("AskUserQuestion", triage_input()), "summary --findings", "**Suggested:**")
+        self.assertRefused(self.h.pre("AskUserQuestion", triage_input()), "Recording the review verdict", "**Suggested:**")
 
     def test_thinking_and_a_sidechain_do_not_count(self):
         text = self.summary_text()
@@ -365,6 +365,77 @@ class SummaryFirst(GuardCase):
         done = subprocess.run([sys.executable, HOOK], input=json.dumps(event), capture_output=True, text=True, env=env)
         self.assertEqual(done.returncode, 2, done.stderr)
         self.assertLess(time.time() - started, 10)
+
+
+class SummaryDiagnosis(GuardCase):
+    """The refusal of the Findings question says what the agent did instead of showing the summary."""
+
+    def setUp(self):
+        super().setUp()
+        self.h.brief()
+        time.sleep(0.05)
+
+    def stamp(self):
+        return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+    def bash_summary(self):
+        """The u18 case: `findings.py summary` run in Bash, its output a tool result, no text block."""
+        if self.h.transcript is None:
+            self.h.transcript = os.path.join(self.h.tmp.name, "transcript.jsonl")
+        command = f"python3 {FINDINGS} titles --findings x --set '{{}}' ; python3 {FINDINGS} summary --findings x"
+        with open(self.h.transcript, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"type": "assistant", "isSidechain": False, "timestamp": self.stamp(), "message": {
+                "role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "Bash",
+                                                  "input": {"command": command}}]}}) + "\n")
+            f.write(json.dumps({"type": "user", "timestamp": self.stamp(), "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": "**Review findings — x**"}]}}) + "\n")
+
+    def refusal(self):
+        code, _, err = self.h.pre("AskUserQuestion", triage_input())
+        self.assertEqual(code, 2, err)
+        return err
+
+    def test_a_summary_run_in_bash_is_named_a_tool_result(self):
+        self.bash_summary()
+        err = self.refusal()
+        self.assertIn("none of your messages had any text", err)
+        self.assertIn("in Bash is a tool result", err)
+        self.assertRegex(err, r"saved at \d\d:\d\d:\d\d")
+        self.assertIn("**Suggested:**", err)
+        self.assertIn("word for word", err)
+        self.assertIn("/review-findings:release", err)
+        self.assertNotIn("Refused again", err)
+
+    def test_a_paraphrase_is_quoted_with_what_it_lacks(self):
+        self.h.say("The one open finding is minor and not blocking, so nothing stops us. Should I accept it?")
+        err = self.refusal()
+        self.assertIn('"The one open finding is minor and not blocking', err)
+        self.assertIn('the "Review findings" heading', err)
+        self.assertIn('the stage name "', err)
+        self.assertIn('2 "Suggested:" lines (found 0)', err)
+        self.assertIn("**Suggested:**", err)
+
+    def test_the_proper_summary_is_allowed(self):
+        self.bash_summary()
+        file = os.path.join(self.h.state, "s1.findings")
+        done = subprocess.run([sys.executable, FINDINGS, "summary", "--findings", file], capture_output=True, text=True,
+                              env=dict(os.environ, REVIEW_FINDINGS_DIR=self.h.state), check=True)
+        self.h.say(done.stdout)
+        self.assertAllowed(self.h.pre("AskUserQuestion", triage_input()))
+
+    def test_a_second_refusal_says_so(self):
+        self.bash_summary()
+        self.assertNotIn("Refused again", self.refusal())
+        self.assertIn("Refused again for the same reason:", self.refusal())
+        self.assertEqual(self.h.pending()["refused"], 2)
+
+    def test_the_summary_in_the_refusal_uses_the_titles_that_were_set(self):
+        file = os.path.join(self.h.state, "s1.findings")
+        subprocess.run([sys.executable, FINDINGS, "titles", "--findings", file, "--set",
+                        json.dumps({"R-02": "A brand new title for the card"})], check=True, capture_output=True,
+                       env=dict(os.environ, REVIEW_FINDINGS_DIR=self.h.state))
+        self.bash_summary()
+        self.assertIn("A brand new title for the card", self.refusal())
 
 
 class Reports(GuardCase):
