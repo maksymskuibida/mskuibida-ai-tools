@@ -36,6 +36,8 @@ import claim_choice as cc  # noqa: E402
 SCRIPT = os.path.join(os.path.dirname(HERE), "scripts", "claim_choice.py")
 OPS = re.compile(r"^[();<>|&]+$")
 HINT = "(Refused by the unit-claim plugin.)"
+HELP_NOTE = ("The engine claims despite `--help`/`-h` on `unit claim <unit>`: this is a real claim. To read the help, run "
+             "`aidlc unit claim --help` without a Unit (or `aidlc unit --help`).")
 
 
 class Refusal(Exception):
@@ -99,8 +101,10 @@ def positional(tokens):
 
 
 def claims(command):
-    """[(unit or None, rhythm or None, skip-stages or None)] of the Unit claims in a command line; a Unit of None when
-    the claim names no Unit that can be read (the claim is then refused)."""
+    """[(unit or None, rhythm or None, skip-stages or None, helped)] of the Unit claims in a command line; a Unit of None
+    when the claim names no Unit that can be read (the claim is then refused). The engine ignores `--help`/`-h` on a
+    claim and claims for real, so a claim that names a Unit is a claim with or without them (`helped` says it had one);
+    only a help call with no Unit (`aidlc unit claim --help`) is left out."""
     found = []
     if "claim" not in command:
         return found
@@ -110,16 +114,18 @@ def claims(command):
             if not base.startswith("aidlc"):
                 continue
             rest = seg[i + 1:]
-            if "--help" in rest or "-h" in rest:
-                break
+            helped = "--help" in rest or "-h" in rest
             if base.startswith("aidlc-unit") and rest[:1] == ["claim"]:
-                found.append((positional(rest[1:]), option(rest, "rhythm"), option(rest, "skip-stages")))
+                unit = positional(rest[1:])
             elif rest[:2] == ["unit", "claim"]:
-                found.append((positional(rest[2:]), option(rest, "rhythm"), option(rest, "skip-stages")))
+                unit = positional(rest[2:])
             elif any(t == "--claim" or t.startswith("--claim=") for t in rest):
-                found.append((option(rest, "claim"), option(rest, "rhythm"), option(rest, "skip-stages")))
+                unit = option(rest, "claim")
             else:
                 continue
+            if helped and not unit:
+                break
+            found.append((unit, option(rest, "rhythm"), option(rest, "skip-stages"), helped))
             break
     return found
 
@@ -153,6 +159,30 @@ def records(command):
         for seg in segments(command) for i, tok in enumerate(seg))
 
 
+def check_claim(project, unit, rhythm, skip):
+    if not unit or unit.startswith("-"):
+        raise Refusal("This claim names no Unit that can be read. Write it as `aidlc unit claim <unit> --team \"<label>\" "
+                      "--rhythm <rhythm>`, the Unit first.")
+    choice = cc.open_choice_for(project, unit)
+    if not choice:
+        used = cc.choice_for(project, unit)
+        again = (" Its earlier answer was used by an earlier claim; every claim asks afresh." if used else "")
+        raise Refusal(f"Before {unit} is claimed, the developer chooses its design stages and rhythm.{again} {ask_line(unit)}")
+    eng = cc.engine(project)
+    flags = cc.claim_flags(choice, eng)
+    if rhythm != choice["rhythm"]:
+        raise Refusal(f"Claim {unit} with the chosen rhythm: add `--rhythm {choice['rhythm']}`"
+                      + (f" (not {rhythm})" if rhythm else "") + f". Its flags are `{flags}`.")
+    given = sorted(s for s in (skip or "").split(",") if s)
+    wanted = sorted(cc.left_out(choice)) if eng["skipStages"] else []
+    if not eng["skipStages"] and given:
+        raise Refusal("This project's engine has no `--skip-stages` at the claim. Claim with `--rhythm "
+                      f"{choice['rhythm']}` alone; the left-out stages are reported skipped as the directive reaches them.")
+    if given != wanted:
+        raise Refusal(f"Claim {unit} with the stages the developer left out: its flags are `{flags}`"
+                      + (f" (not --skip-stages {skip})" if skip else "") + ".")
+
+
 def pre(event, project):
     tool, ti = event.get("tool_name"), event.get("tool_input") or {}
     if tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
@@ -167,29 +197,13 @@ def pre(event, project):
     if records(command):
         raise Refusal("`claim_choice.py record` is run by the unit-claim mod with the developer's answer, never from "
                       "Bash. Open the claim dialog instead.")
-    eng = None
-    for unit, rhythm, skip in claims(command):
-        if not unit or unit.startswith("-"):
-            raise Refusal("This claim names no Unit that can be read. Write it as `aidlc unit claim <unit> --team \"<label>\" "
-                          "--rhythm <rhythm>`, the Unit first.")
-        choice = cc.open_choice_for(project, unit)
-        if not choice:
-            used = cc.choice_for(project, unit)
-            again = (" Its earlier answer was used by an earlier claim; every claim asks afresh." if used else "")
-            raise Refusal(f"Before {unit} is claimed, the developer chooses its design stages and rhythm.{again} {ask_line(unit)}")
-        eng = eng or cc.engine(project)
-        flags = cc.claim_flags(choice, eng)
-        if rhythm != choice["rhythm"]:
-            raise Refusal(f"Claim {unit} with the chosen rhythm: add `--rhythm {choice['rhythm']}`"
-                          + (f" (not {rhythm})" if rhythm else "") + f". Its flags are `{flags}`.")
-        given = sorted(s for s in (skip or "").split(",") if s)
-        wanted = sorted(cc.left_out(choice)) if eng["skipStages"] else []
-        if not eng["skipStages"] and given:
-            raise Refusal("This project's engine has no `--skip-stages` at the claim. Claim with `--rhythm "
-                          f"{choice['rhythm']}` alone; the left-out stages are reported skipped as the directive reaches them.")
-        if given != wanted:
-            raise Refusal(f"Claim {unit} with the stages the developer left out: its flags are `{flags}`"
-                          + (f" (not --skip-stages {skip})" if skip else "") + ".")
+    for unit, rhythm, skip, helped in claims(command):
+        try:
+            check_claim(project, unit, rhythm, skip)
+        except Refusal as why:
+            if helped:
+                raise Refusal(f"{HELP_NOTE} {why}")
+            raise
     for stage, unit in unit_starts(command):
         choice = cc.choice_for(project, unit)
         if choice and stage in cc.left_out(choice):
@@ -207,9 +221,17 @@ def post(event, project):
     response = event.get("tool_response")
     if isinstance(response, dict) and (response.get("is_error") or response.get("interrupted")):
         return
-    for unit, _rhythm, skip in claims(str(ti.get("command", ""))):
+    for unit, rhythm, skip, _helped in claims(str(ti.get("command", ""))):
         choice = cc.open_choice_for(project, unit)
         if not choice or not claim_went_through(response):
+            continue
+        mismatch = claim_mismatch(project, choice, response, rhythm, skip)
+        if mismatch:
+            # The answer stays open: the re-claim with the chosen flags is the claim it was given for.
+            flags = cc.claim_flags(choice, cc.engine(project))
+            say("PostToolUse", f"the claim of {unit} does not match the developer's choice: {mismatch}. Stop: do not run "
+                               "`aidlc engine orchestrate next`. Ask the developer whether to release the claim "
+                               f"(`aidlc unit release {unit}`, from the unscoped main checkout) and claim again with `{flags}`.")
             continue
         cc.mark_claimed(project, unit)
         out = cc.left_out(choice)
@@ -226,13 +248,34 @@ def post(event, project):
                                "`next`: " + "; ".join(f"`{cc.skip_command(s, unit)}`" for s in out))
 
 
-def claim_went_through(response):
-    """Whether the engine's output says the Unit was claimed (`"claimed": true`): a command that only routes to the
-    claim, or failed, leaves the answer open for the claim that follows."""
+def response_text(response):
     text = response if isinstance(response, str) else json.dumps(response) if response is not None else ""
     if isinstance(response, dict):
         text = str(response.get("stdout", "")) + str(response.get("output", ""))
-    return re.search(r'"claimed"\s*:\s*true', text) is not None
+    return text
+
+
+def claim_went_through(response):
+    """Whether the engine's output says the Unit was claimed (`"claimed": true`): a command that only routes to the
+    claim, or failed, leaves the answer open for the claim that follows."""
+    return re.search(r'"claimed"\s*:\s*true', response_text(response)) is not None
+
+
+def claim_mismatch(project, choice, response, rhythm, skip):
+    """What differs between the claim that went through and the developer's choice, or "". The engine's own output
+    (`"gate_rhythm": ...`, found by pattern so output cut by `head`/`tail` still reads) wins over the command's flags."""
+    found = re.search(r'"gate_rhythm"\s*:\s*"([^"]*)"', response_text(response))
+    got = found.group(1) if found else rhythm
+    problems = []
+    if got != choice["rhythm"]:
+        problems.append(f"it was claimed with the {got or 'default'} rhythm, the developer chose {choice['rhythm']}")
+    if cc.engine(project)["skipStages"]:
+        given = sorted(s for s in (skip or "").split(",") if s)
+        wanted = sorted(cc.left_out(choice))
+        if given != wanted:
+            problems.append("the stages skipped were " + (", ".join(given) or "none")
+                            + "; the developer left out " + (", ".join(wanted) or "none"))
+    return "; ".join(problems)
 
 
 def prompt(event, project):
@@ -240,7 +283,9 @@ def prompt(event, project):
     found = re.search(r"(?:^|\s)/aidlc\b[^\n]*?--claim[ =](\S+)", text) or re.search(r"\baidlc unit claim (\S+)", text)
     if not found:
         return
-    unit = found.group(1).strip("`'\"")
+    unit = found.group(1).strip("`'\"()[]{}<>,.:;!?")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", unit):
+        return
     choice = cc.open_choice_for(project, unit)
     if choice:
         say("UserPromptSubmit", f"{unit} has a recorded claim choice: "
