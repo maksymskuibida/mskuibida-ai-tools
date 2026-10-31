@@ -32,6 +32,17 @@ What it enforces (PreToolUse, exit code 2 and the reason on stderr)
     the state stays "cut off" and refuses the questions, the gate and the reports until a complete brief
     has been printed.
 
+Memory of answers (AI-DLC stage reviews): the engine keeps an Accepted finding "New" until the Unit is approved, so
+every new brief lists it again. The answers (Accept, Reject, Fix) are kept per project + stage + Unit in
+<state dir>/memory/, across rounds and sessions; a later brief's finding with the same id and the same text and place
+and an answer of Accept or Reject is not asked again ("Already answered: R-07 (accepted)"); a Fix answered finding that
+is still New is asked again. When nothing is left to ask, no question is asked. The memory is cleared when the
+stage's approved report runs, when the Unit is released and by /review-findings:release.
+
+A typed answer: when the Findings question comes back as "the user sent a message instead" and that message (or a
+prompt sent while the question waits) is just one option ("accept", "fix all", "open in form", "form", ...), it is
+recorded as that answer.
+
 What it records (PostToolUse), from what the harness reports: the triage answer, the form the
 agent wrote, a read that shows the form done, the engine's approved/rejected report. UserPromptSubmit
 `/review-findings:release` clears the state. State: ~/.claude/review-findings/<session>.json
@@ -41,6 +52,7 @@ PostToolUse/UserPromptSubmit. Standard library only.
 
 import contextlib
 import datetime
+import hashlib
 import importlib.util
 import json
 import os
@@ -163,6 +175,94 @@ def project_dir(event):
 
 def aidlc_project(event):
     return os.path.isdir(os.path.join(project_dir(event), "aidlc", "spaces"))
+
+
+# ---------------------------------------------------------------- memory of answers
+
+def memory_dir():
+    return os.path.join(state_dir(), "memory")
+
+
+def memory_key(event, stage, unit):
+    return hashlib.sha1("\0".join((os.path.realpath(project_dir(event)), stage or "", unit or "")).encode()).hexdigest()[:20]
+
+
+def memory_path(event, stage, unit):
+    return os.path.join(memory_dir(), memory_key(event, stage, unit) + ".json")
+
+
+def fingerprint(finding):
+    text = norm(finding.get("where") or "") + "\0" + norm(finding.get("finding") or "")
+    return hashlib.sha1(text.encode()).hexdigest()[:16]
+
+
+def memory_load(event, stage, unit):
+    try:
+        with open(memory_path(event, stage, unit), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    answers = data.get("answers") if isinstance(data, dict) else None
+    return answers if isinstance(answers, dict) else {}
+
+
+def remember(event, pend, picks):
+    """Keep the developer's answers of a stage review: picks is {finding id: (answer, note)}, answer fix, accept or
+    reject. Never raises: a memory that cannot be written only means the question is asked again."""
+    if pend.get("source") != "aidlc" or not pend.get("stage"):
+        return
+    try:
+        answers = memory_load(event, pend["stage"], pend.get("unit"))
+        for f in pend.get("findings") or []:
+            if f["id"] in picks:
+                answer, note = picks[f["id"]]
+                answers[f["id"]] = {"fp": fingerprint(f), "answer": answer, "note": note or ""}
+        os.makedirs(memory_dir(), exist_ok=True)
+        path = memory_path(event, pend["stage"], pend.get("unit"))
+        fd, tmp = tempfile.mkstemp(dir=memory_dir(), prefix="m.", suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump({"project": os.path.realpath(project_dir(event)), "stage": pend["stage"],
+                       "unit": pend.get("unit") or "", "answers": answers}, fh, indent=1)
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def forget(event, stage="", unit=""):
+    """Clear the remembered answers of a stage (and Unit) of this project; an empty stage or unit matches any."""
+    root = os.path.realpath(project_dir(event))
+    try:
+        names = os.listdir(memory_dir())
+    except OSError:
+        return
+    for name in names:
+        path = os.path.join(memory_dir(), name)
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and data.get("project") == root and (not stage or data.get("stage") == stage) \
+                and (not unit or data.get("unit") == unit):
+            with contextlib.suppress(OSError):
+                os.remove(path)
+
+
+def split_answered(event, doc):
+    """Take the findings answered earlier (Accept or Reject, same id and same text and place) out of the document;
+    they are kept under `carried`. Returns the document."""
+    if doc.get("source") != "aidlc" or not doc.get("stage"):
+        return doc
+    known = memory_load(event, doc["stage"], doc.get("unit"))
+    left, carried = [], []
+    for f in doc["findings"]:
+        got = known.get(f["id"])
+        if isinstance(got, dict) and got.get("answer") in ("accept", "reject") and got.get("fp") == fingerprint(f):
+            carried.append({"id": f["id"], "answer": got["answer"], "note": got.get("note", "")})
+        else:
+            left.append(f)
+    doc["findings"], doc["carried"] = left, carried
+    return doc
 
 
 # ---------------------------------------------------------------- helpers copied from the pr-review flow guard
@@ -832,7 +932,7 @@ def relevant(event):
         return True
     if tool == "Bash":
         command = str(ti.get("command", ""))
-        return ("review-brief" in command or "orchestrate" in command or "findings.py" in command
+        return ("review-brief" in command or "orchestrate" in command or "findings.py" in command or "release" in command
                 or "log review" in command or re.search(r"\blog\s+review\b", command) is not None)
     return tool in ("AskUserQuestion", "ArtifactData") and os.path.exists(state_path(event))
 
@@ -869,9 +969,9 @@ def record(event, state):
     if tool == "Bash":
         return on_bash(event, state, ti, resp)
     if tool == "AskUserQuestion":
-        return on_answers(state, ti, resp)
+        return on_answers(event, state, ti, resp)
     if tool == "ArtifactData":
-        return on_data(state, ti, resp)
+        return on_data(event, state, ti, resp)
     return None
 
 
@@ -985,7 +1085,12 @@ def on_bash(event, state, ti, resp):
         return on_summary(state, resp)
     if not aidlc_project(event):
         return None
+    for seg in bash_segments(command):
+        if aidlc_words(seg, ["unit", "release"]):
+            forget(event, unit=seg[-1] if not seg[-1].startswith("-") else "")
     for rep in reports_of(command):
+        if rep["result"] in ("approved", "accepted") and rep["stage"]:
+            forget(event, rep["stage"], rep["unit"])
         pend = pending_of(state)
         if pend and rep["result"] in RESULTS_DONE and same_stage(pend, rep["stage"], rep["unit"]):
             state["pending"] = None
@@ -1012,8 +1117,22 @@ def on_bash(event, state, ti, resp):
             return None
         if F.unfilled(doc):
             return cut_off(event, state, doc, brief)
+        doc = split_answered(event, doc)
+        if not doc["findings"]:  # every open finding was answered in an earlier round: nothing to ask
+            if pend and same_stage(pend, doc["stage"], doc["unit"]):
+                state["pending"] = None
+            return (f"{F.answered_line(doc)}. The engine still lists them as New until the Unit is approved; there is "
+                    "nothing new to ask. Do not ask the Findings question: go on with the gate (on Approve the engine "
+                    "records them as accepted risks). Say in the completion message that these findings were answered earlier.")
         return instruction(event, doc, adopt(event, state, doc))
     return None
+
+
+def bash_segments(command):
+    try:
+        return commands(command)
+    except ValueError:
+        return []
 
 
 def cut_off(event, state, doc, brief):
@@ -1038,7 +1157,45 @@ def choice_of(answer):
     return {"fix": "fix", "accept": "accept", "open in form": "form"}.get(norm(answer))
 
 
-def on_answers(state, ti, resp):
+TYPED_ANSWERS = {"accept": "Accept", "accept all": "Accept", "accept them": "Accept", "accept them all": "Accept",
+                 "fix": "Fix", "fix all": "Fix", "fix them": "Fix", "fix them all": "Fix",
+                 "open in form": "Open in form", "form": "Open in form", "open form": "Open in form"}
+NOT_ANSWERED = "[user did not answer"
+
+
+def typed_choice(text):
+    """The option a short message names ("Accept all." -> Accept), or None for anything longer or ambiguous."""
+    return TYPED_ANSWERS.get(re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", str(text or "").lower())).strip())
+
+
+def last_prompt(event):
+    """The text of the developer's latest message in the session transcript, "" when it cannot be read."""
+    path, last = event.get("transcript_path"), ""
+    if not path:
+        return last
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                if '"user"' not in line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(entry, dict) or entry.get("type") != "user" or entry.get("isSidechain") or entry.get("isMeta"):
+                    continue
+                message = entry.get("message")
+                content = message.get("content") if isinstance(message, dict) else None
+                if isinstance(content, list):
+                    content = "\n".join(str(b.get("text", "")) for b in content if isinstance(b, dict) and b.get("type") == "text")
+                if isinstance(content, str) and content.strip():
+                    last = content
+    except OSError:
+        pass
+    return last
+
+
+def on_answers(event, state, ti, resp):
     pend = pending_of(state)
     if pend is None or pend.get("truncated"):
         return None
@@ -1058,7 +1215,16 @@ def on_answers(state, ti, resp):
         if answer is None:
             continue
         if triage:
-            notes.append(on_triage(state, pend, answer))
+            if str(answer).strip().lower().startswith(NOT_ANSWERED):
+                typed = typed_choice(last_prompt(event))
+                if pend.get("asked") and pend.get("answer"):
+                    notes.append("the answer to the Findings question is already recorded; nothing to ask again.")
+                    continue
+                if typed:
+                    notes.append(f"the developer typed \"{typed}\" in chat instead of clicking; recorded as {typed}. "
+                                 + on_triage(event, state, pend, typed))
+                    continue
+            notes.append(on_triage(event, state, pend, answer))
         elif pend.get("asked"):
             notes.append(on_gate_answer(pend, answer))
     return " ".join(n for n in notes if n) or None
@@ -1068,7 +1234,7 @@ def ids_text(pend):
     return ", ".join(f["id"] for f in pend.get("findings") or [])
 
 
-def on_triage(state, pend, answer):
+def on_triage(event, state, pend, answer):
     choice = choice_of(answer)
     if choice is None:
         return (f"the answer \"{str(answer).strip()[:120]}\" is not one of the options, so nothing is decided yet. "
@@ -1078,6 +1244,8 @@ def on_triage(state, pend, answer):
         return "Accept is not allowed while a finding is blocking, so nothing is decided. Ask the question again."
     code = pend.get("source") == "code-review"
     pend["asked"], pend["answer"] = True, choice
+    if choice in ("fix", "accept"):
+        remember(event, pend, {f["id"]: (choice, "") for f in pend.get("findings") or []})
     first = (summary_wait(pend) or "") + " "
     if choice == "fix":
         if code:
@@ -1121,7 +1289,7 @@ def on_gate_answer(pend, answer):
     return None
 
 
-def on_data(state, ti, resp):
+def on_data(event, state, ti, resp):
     pend = pending_of(state)
     if pend is None:
         return None
@@ -1159,6 +1327,8 @@ def on_data(state, ti, resp):
     else:
         return (f"the form {form['id']} is done, but its answers were not in this result. Read it with ArtifactData get "
                 f"of forms/{form['id']}: the next steps use them.")
+    remember(event, pend, {i: (v["k"][0], v.get("note")) for i, v in form["answers"].items()
+                           if v.get("k") and v["k"][0] in ("fix", "accept", "reject")})
     if pend.get("source") == "code-review":
         state["pending"] = None  # the developer's answers are in the form: nothing more to wait for
         return (f"the form {form['id']} is done. Fix cards are fixed now; Accept cards are "
@@ -1175,10 +1345,27 @@ def on_data(state, ti, resp):
 # ---------------------------------------------------------------- UserPromptSubmit
 
 def prompt(event):
-    if RELEASE_PROMPT.match((event.get("prompt") or "").strip()):
+    text = (event.get("prompt") or "").strip()
+    if RELEASE_PROMPT.match(text):
         with state_lock(event):
             drop(event)
+            forget(event)
         say("UserPromptSubmit", "findings guard state cleared for this session.")
+        return 0
+    typed = typed_choice(text)
+    if typed and os.path.exists(state_path(event)):
+        with state_lock(event):
+            try:
+                state = load(event)
+            except Refusal:
+                return 0
+            pend = pending_of(state)
+            if pend and not pend.get("truncated") and not pend.get("asked") and summary_sent(event, pend):
+                note = on_triage(event, state, pend, typed)
+                if pend.get("asked"):
+                    save(event, state)
+                    say("UserPromptSubmit", f"the developer typed \"{typed}\" in chat in answer to the Findings question; "
+                                            f"recorded as {typed}. {note}")
     return 0
 
 

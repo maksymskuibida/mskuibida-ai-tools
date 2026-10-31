@@ -578,7 +578,22 @@ def summary(doc):
     note = (f"\n\nThe stage is re-opened anyway for {blocking} blocking finding{'s' if blocking != 1 else ''}, so Fix also "
             "covers the minor findings worth fixing: recommend Fix, not carrying them."
             if reopens(doc) and any(not it["blocking"] and proposal(it, doc) == "fix" for it in readable(doc)) else "")
-    return head + "\n\n" + "\n".join(lines) + note
+    again = answered_line(doc)
+    return head + "\n\n" + "\n".join(lines) + note + (f"\n\n{again}" if again else "")
+
+
+ANSWERED_WORDS = {"accept": "accepted", "reject": "rejected"}
+
+
+def answered_line(doc):
+    """One line naming the findings the developer answered in an earlier round of the same stage (and Unit) that the
+    engine still lists as open ("Already answered: R-07, R-08 (accepted)"); "" when there are none."""
+    groups = {}
+    for item in doc.get("carried") or []:
+        groups.setdefault(ANSWERED_WORDS.get(item.get("answer"), str(item.get("answer"))), []).append(item["id"])
+    if not groups:
+        return ""
+    return "Already answered: " + "; ".join(f"{', '.join(ids)} ({word})" for word, ids in groups.items())
 
 
 def question_text(total, blocking):
@@ -636,6 +651,8 @@ def answer_summary(doc, picks):
     `picks` is {finding id: (box, note)}, box fix, accept or reject. Action items only where something is done (Fix);
     the note only where the developer wrote one."""
     lines = [ANSWERS_HEADING]
+    if answered_line(doc):
+        lines.append(answered_line(doc) + ". The engine records them as accepted risks on Approve.")
     for item in readable(doc):
         box, note = picks[item["id"]]
         lines.append(f"### {item['id']}: {BOX_WORDS[box]}")

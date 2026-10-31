@@ -138,7 +138,8 @@ that the output covers every finding with the recorded answer.
 **Open in form**: section 4.
 
 An answer typed under Other decides nothing: ask in chat what the developer wants, or ask the
-question again.
+question again. The exception is a message that is just an option (`accept`, `fix all`, `form`,
+…): the hook records it as that answer; do not ask again.
 
 ## 4. Open in form
 
@@ -210,5 +211,13 @@ was: report rejected. Never ask the developer to release for this.
 The hook clears the findings when the engine's approved or rejected report for the stage runs, so
 a revision's next brief starts a new round. If the same findings are printed again while the
 question is already answered, the answer stands.
+
+**Answered findings are not asked again.** The engine keeps an Accepted finding `New` until the Unit
+is approved, so later briefs list it again. The hook remembers the answers per stage and Unit (across
+sessions): a finding with the same id and text answered Accept or Reject is shown as one line,
+`Already answered: R-07 (accepted)`, and not asked; a changed finding, or one answered Fix and still
+open, is asked again. When nothing new is left there is no question: go on with the gate (Approve
+records the carried findings as accepted risks). The memory ends with the approved report or the
+Unit's release.
 
 If the guard gets in the way, the developer types `/review-findings:release`.
