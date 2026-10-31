@@ -168,7 +168,8 @@ no test plan.
    that all are covered because none was picked).
 2. **Write the plan** as JSON (`aidlc-test-plan/1`, contract/README.md): sections A, B, C … with steps A.1, A.2, B.1 …
    A new section starts wherever you must do something first (seed data, start a server, deploy, reset state). Each
-   section has `agent` (what you will do) and the developer's steps, each with `do`, `expect` and `verifies` (the V
+   section has `agent` (what you will do) and the developer's steps, each with `do`, `criteria` (at least one short
+   checkable sentence; the page numbers them under the step, A.1.1, A.1.2 …) and `verifies` (the V
    rows). Run `test_plan.py publish --plan <file> --bundle <bundle.json> --out <scratch>`; it refuses with one problem
    per line until every id, step shape and Test-now row coverage holds.
 3. **The artifact (once per developer).** `Artifact` → `action: "list"` → **AI-DLC test plans**. If none, publish
