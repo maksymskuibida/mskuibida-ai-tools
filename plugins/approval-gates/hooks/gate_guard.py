@@ -709,6 +709,40 @@ def link_sent(event, pub, after=False):
     return False, counts
 
 
+def link_then_ask(event, pub):
+    """(key, asked) of the latest message of the assistant that carries the page's link: key names that message (its uuid,
+    else its timestamp), asked is True when an AskUserQuestion call came after it. (None, False) when no such message."""
+    needle, since, path = link_of(pub), pub.get("at"), event.get("transcript_path")
+    key, asked = None, False
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                if '"assistant"' not in line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(entry, dict) or entry.get("type") != "assistant" or entry.get("isSidechain"):
+                    continue
+                message = entry.get("message")
+                content = message.get("content") if isinstance(message, dict) else None
+                if not isinstance(content, list):
+                    continue
+                stamp = epoch_of(entry.get("timestamp"))
+                recent = not isinstance(since, (int, float)) or stamp is None or stamp >= since
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") == "text" and needle in str(block.get("text", "")) and recent:
+                        key, asked = str(entry.get("uuid") or entry.get("timestamp") or ""), False
+                    elif block.get("type") == "tool_use" and block.get("name") == "AskUserQuestion" and key is not None:
+                        asked = True
+    except (OSError, TypeError):
+        return None, False
+    return (key or None), asked
+
+
 def link_wait():
     try:
         return max(0.0, float(os.environ.get("APPROVAL_GATES_LINK_WAIT", "3")))
@@ -778,7 +812,9 @@ def guard_plan_links(event, state):
                       f"{counts['thinking']} thinking, {counts['tool_use']} tool-call and {counts['text']} text block(s), none "
                       "with the link. Thinking is not output and a tool call is not a message: write "
                       f"`**Read:** {link_of(plan)}` as the text of your message, then make the AskUserQuestion call in this ONE "
-                      "response; never end the turn on the link alone. (A plan written again needs its link again.)")
+                      "response; never end the turn on the link alone. A response with only the link ends your turn and the developer has "
+                      "no question to answer. Your next response must hold both: the link text block AND this AskUserQuestion "
+                      "call. (A plan written again needs its link again.)")
 
 
 def guard_question(event, state, project, questions):
@@ -802,7 +838,9 @@ def guard_question(event, state, project, questions):
                           "block(s), none with the link. Thinking is not output and a tool call is not a message: "
                           f"write `**Read:** {link_of(pub)}` as the text of your message, then ask the engine's "
                           "question as it is, with no link in it. Do both in this ONE response: the text block with the link first, "
-                          "then the AskUserQuestion call; never end the turn on the link alone.")
+                          "then the AskUserQuestion call; never end the turn on the link alone. A response with only the link "
+                          "ends your turn and the developer has no question to answer. Your next response must hold both: the "
+                          "link text block AND this AskUserQuestion call.")
 
 
 def guard_report(state, project, call):
@@ -1143,22 +1181,42 @@ def stop(event, project):
                               f"(**Do the agent step for A** / **Change the plan**). {RELEASE_HINT}"}))
             return
         pub = pending_page(state, project)
-        if not pub or pub.get("asked_at") or pub.get("stop_blocked"):
-            return
-        pub["stop_blocked"] = time.time()
-        save(event, state)
-        try:
-            sent, _counts = link_sent(event, pub)
-        except Refusal:
-            sent = False
-    if sent:
-        todo = "ask the engine's Approval question now with AskUserQuestion; the link is already sent."
-    else:
-        todo = (f"the page's link {link_of(pub)} is not sent yet: in ONE response write `**Read:** {link_of(pub)}` as "
-                "text, then ask the engine's Approval question with AskUserQuestion.")
-    print(json.dumps({"decision": "block", "reason": f"approval-gates: the gate for {pub.get('id', 'this page')} is "
-                      f"published but its question was never asked, so the developer cannot answer it. {todo} "
-                      f"{RELEASE_HINT}"}))
+        if pub and not pub.get("asked_at"):
+            reason = None
+            if not pub.get("stop_blocked"):
+                try:
+                    sent, _counts = link_sent(event, pub)
+                except Refusal:
+                    sent = False
+                if not sent:
+                    pub["stop_blocked"] = time.time()
+                    reason = (f"approval-gates: the gate for {pub.get('id', 'this page')} is published but its question was "
+                              f"never asked, so the developer cannot answer it. The page's link {link_of(pub)} is not sent "
+                              f"yet: in ONE response write `**Read:** {link_of(pub)}` as text, then ask the engine's Approval "
+                              f"question with AskUserQuestion. {RELEASE_HINT}")
+            if reason is None:
+                reason = bare_link(event, pub, "the engine's Approval question")
+            if reason:
+                save(event, state)
+                print(json.dumps({"decision": "block", "reason": reason}))
+                return
+        bare = [(p, bare_link(event, p, "the test-plan question (**Do the agent step for A** / **Change the plan**)"))
+                for p in state["plans"].values() if p.get("linked")]
+        bare = [(p, r) for p, r in bare if r]
+        if bare:
+            save(event, state)
+            print(json.dumps({"decision": "block", "reason": bare[0][1]}))
+
+
+def bare_link(event, pub, question):
+    """The stop reason when the latest message with the page's link has no AskUserQuestion after it and that message
+    was not blocked yet (one block per link message, so one ending cannot loop and each new bare ending is caught)."""
+    key, asked = link_then_ask(event, pub)
+    if not key or asked or pub.get("bare_blocked") == key:
+        return None
+    pub["bare_blocked"] = key
+    return (f"approval-gates: The link is sent; now ask {question} with AskUserQuestion — it will be allowed. "
+            f"Do not write the link again. {RELEASE_HINT}")
 
 
 def post(event, project):
