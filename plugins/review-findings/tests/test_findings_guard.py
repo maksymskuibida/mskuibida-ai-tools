@@ -841,7 +841,7 @@ class Manifest(unittest.TestCase):
     def test_hooks_json(self):
         with open(HOOKS_JSON, encoding="utf-8") as f:
             hooks = json.load(f)["hooks"]
-        self.assertEqual(set(hooks), {"PreToolUse", "PostToolUse", "UserPromptSubmit"})
+        self.assertEqual(set(hooks), {"PreToolUse", "PostToolUse", "Stop", "UserPromptSubmit"})
         self.assertEqual(hooks["PostToolUse"][0]["matcher"], "Bash|ReportFindings|AskUserQuestion|ArtifactData")
         for tool in ("AskUserQuestion", "Bash", "Edit", "MultiEdit", "Write", "NotebookEdit"):
             self.assertIn(tool, hooks["PreToolUse"][0]["matcher"].split("|"))
@@ -904,12 +904,53 @@ class ReReview(GuardCase):
         self.assertIsNotNone(self.h.pending())
         self.assertRefused(self.h.pre("Bash", self.approved), "not approved")
 
-    def test_a_ready_review_before_the_picks_does_not_clear_unasked_findings(self):
+    def test_a_ready_review_settles_a_round_nobody_was_asked_about(self):
         h = Harness()
         self.addCleanup(h.close)
         h.brief(command=UNIT_BRIEF)
+        self.assertFalse(h.pending()["asked"])
+        h.post("Bash", log_review(), COMPLETED)
+        self.assertIsNone(h.pending())
+
+    def test_a_ready_review_does_not_settle_a_cut_off_brief(self):
+        h = Harness()
+        self.addCleanup(h.close)
+        h.brief(text=fixture("brief-open.txt").split("> R-")[0], command=UNIT_BRIEF)
+        self.assertTrue(h.pending().get("truncated"))
         h.post("Bash", log_review(), COMPLETED)
         self.assertIsNotNone(h.pending())
+
+    def test_a_form_round_with_asked_false_is_settled_by_ready(self):
+        self.h_state(asked=False)
+        self.assertIsNotNone(self.h.pending())
+        self.h.post("Bash", log_review(), COMPLETED)
+        self.assertIsNone(self.h.pending())
+        self.assertAllowed(self.h.pre("Bash", self.approved))
+
+    def test_an_asked_round_is_still_settled(self):
+        self.assertTrue(self.h.pending()["asked"])
+        self.h.post("Bash", log_review(), COMPLETED)
+        self.assertIsNone(self.h.pending())
+
+    def test_the_piped_log_command_settles_it(self):
+        self.h_state(asked=False)
+        cmd = log_review()["command"] + " | head -c 800"
+        self.h.post("Bash", {"command": cmd}, COMPLETED)
+        self.assertIsNone(self.h.pending())
+
+    def test_another_unit_or_a_non_ready_verdict_keeps_a_form_round_with_asked_false(self):
+        self.h_state(asked=False)
+        self.h.post("Bash", log_review(unit="u4-other"), COMPLETED)
+        self.h.post("Bash", log_review(verdict="NEEDS_CHANGES"), COMPLETED)
+        self.assertIsNotNone(self.h.pending())
+
+    def h_state(self, **fields):
+        path = os.path.join(self.h.state, "s1.json")
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        data["pending"].update(fields)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
 
 
 MINOR = fixture("brief-open.txt").replace("| R-02 | Major |", "| R-02 | Minor |")
@@ -1073,13 +1114,90 @@ class TypedAnswer(GuardCase):
         self.h.say("**Review findings \u2014 Domain Design:** 2 open\n**Suggested:** a\n**Suggested:** b")
         _, out, _ = self.h.run("UserPromptSubmit", tool_input="Accept.")
         self.assertEqual(self.h.pending()["answer"], "accept")
-        self.assertIn("typed \"Accept\"", context(out))
+        self.assertIn("The developer answered the findings question in chat: Accept. Do not ask the Findings question; "
+                      "act on Accept.", context(out))
 
     def test_a_longer_prompt_is_left_alone(self):
         self.h.brief(MINOR)
         self.h.say("**Review findings \u2014 Domain Design:** 2 open\n**Suggested:** a\n**Suggested:** b")
         self.assertEqual(self.h.run("UserPromptSubmit", tool_input="accept the first, explain the second")[1], "")
         self.assertFalse(self.h.pending()["asked"])
+
+SUMMARY = "**Review findings \u2014 Domain Design:** 2 open\n**Suggested:** a\n**Suggested:** b"
+REMINDER = "<system-reminder>\nLinked sessions now (status). \n</system-reminder>\n\n"
+
+
+class TypedAnswerInChat(GuardCase):
+    """Reviewdesk 1c2360de, 2026-11-01: the turn ended on the summary, the developer typed "fix", and the agent asked
+    the Findings question anyway."""
+
+    def summarised(self):
+        self.h.brief(MINOR)
+        self.h.say(SUMMARY)
+
+    def test_typed_answers_are_recorded_and_the_agent_is_told(self):
+        for typed, label, key in (("fix", "Fix", "fix"), ("Open in form", "Open in form", "form"), ("Accept", "Accept", "accept")):
+            self.h = Harness()
+            self.addCleanup(self.h.close)
+            self.summarised()
+            _, out, _ = self.h.run("UserPromptSubmit", tool_input=typed)
+            pend = self.h.pending()
+            self.assertEqual((pend["asked"], pend["answer"]), (True, key), typed)
+            self.assertIn(f"The developer answered the findings question in chat: {label}. Do not ask the Findings "
+                          f"question; act on {label}.", context(out))
+
+    def test_system_reminders_before_the_typed_answer_do_not_hide_it(self):
+        self.summarised()
+        self.h.run("UserPromptSubmit", tool_input=REMINDER + "open in form")
+        self.assertEqual(self.h.pending()["answer"], "form")
+
+    def test_a_later_findings_question_is_refused(self):
+        self.summarised()
+        self.h.run("UserPromptSubmit", tool_input="fix")
+        self.assertRefused(self.h.pre("AskUserQuestion", triage_input(accept=True)),
+                           "The developer answered the findings question in chat: Fix", "Do not ask the Findings question")
+
+    def test_an_unrelated_message_is_not_an_answer(self):
+        self.summarised()
+        self.assertEqual(self.h.run("UserPromptSubmit", tool_input="what does R-02 mean?")[1], "")
+        self.assertFalse(self.h.pending()["asked"])
+        self.assertAllowed(self.h.pre("AskUserQuestion", triage_input(accept=True)))
+
+
+class StopOnTheSummary(GuardCase):
+    def stop(self):
+        return self.h.run("Stop")
+
+    def test_a_turn_that_ends_on_the_summary_is_blocked_once(self):
+        self.h.brief(MINOR)
+        self.h.say(SUMMARY)
+        code, out, _ = self.stop()
+        reply = json.loads(out)
+        self.assertEqual(code, 0)
+        self.assertEqual(reply["decision"], "block")
+        self.assertIn("Ask the Findings question now with AskUserQuestion", reply["reason"])
+        self.assertIn("metadata.source review-findings", reply["reason"])
+        self.assertEqual(self.stop()[1], "")  # once per round
+
+    def test_a_turn_that_asked_the_question_is_not_blocked(self):
+        self.h.brief(MINOR)
+        self.h.say(SUMMARY)
+        self.h.triage("Accept", accept=True)
+        self.assertEqual(self.stop()[1], "")
+
+    def test_a_typed_answer_already_recorded_is_not_blocked(self):
+        self.h.brief(MINOR)
+        self.h.say(SUMMARY)
+        self.h.run("UserPromptSubmit", tool_input="fix")
+        self.assertEqual(self.stop()[1], "")
+
+    def test_no_summary_no_block(self):
+        self.h.brief(MINOR)
+        self.h.say("working on it")
+        self.assertEqual(self.stop()[1], "")
+
+    def test_no_pending_round_no_block(self):
+        self.assertEqual(self.stop()[1], "")
 
 
 if __name__ == "__main__":
