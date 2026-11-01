@@ -108,7 +108,16 @@ class TestPlanValidator(unittest.TestCase):
         results["A.2"] = {"result": "fail", "note": " "}
         del results["B.1"]
         found = test_plan.results_problems(plan, results)
-        self.assertEqual(found, ["step A.2 failed with no note", "step B.1 has no Pass or Fail yet"])
+        self.assertEqual(found, ["step A.2 failed with no note", "step B.1 has no Pass or Fail yet (not run)"])
+
+    def test_a_note_without_a_result_is_not_run_and_never_a_pass(self):
+        plan = good_plan()
+        results = {s["id"]: {"result": "pass", "note": ""} for sec in plan["sections"] for s in sec["steps"]}
+        results["A.2"] = {"result": "", "note": "  Looked odd, not tried yet. ", "at": "2026-01-01T10:00:00Z"}
+        self.assertEqual(test_plan.results_problems(plan, results),
+                         ["step A.2 has no Pass or Fail yet (not run, note: Looked odd, not tried yet.)"])
+        results["A.2"]["note"] = " "
+        self.assertEqual(test_plan.results_problems(plan, results), ["step A.2 has no Pass or Fail yet (not run)"])
 
 
 class TestScript(unittest.TestCase):
@@ -441,6 +450,59 @@ process.stdout.write(JSON.stringify({ page: G.render(input.row, input.local), st
         self.assertIn('class="note need"', out["page"])
         self.assertIn("Say what went wrong", out["page"])
         self.assertIn("What went wrong (required)", out["page"])
+
+    PLAY = r"""
+const fs = require("fs"), vm = require("vm");
+const html = fs.readFileSync(process.argv[1], "utf8");
+const src = html.split("/* RENDER-START")[1].split("/* RENDER-END */")[0];
+const ctx = { module: {} }; vm.createContext(ctx); vm.runInContext("/*" + src, ctx);
+const G = ctx.module.exports, input = JSON.parse(fs.readFileSync(0, "utf8"));
+const row = input.row, out = {};
+/* the developer types, the page saves after a pause, the snapshot arrives, more is typed, an old snapshot arrives */
+let local = { "A.1": { result: "", note: "first words " } };
+out.typed = G.stepResult(row, local, "A.1");
+const saved = G.savable(row, local, "T1");
+out.savable = saved;
+const row2 = Object.assign({}, row, { results: saved });
+out.keptAfterSave = G.reconcile(row2, local);
+out.afterSave = G.stepResult(row2, G.reconcile(row2, local), "A.1");
+local = { "A.1": { result: "", note: "first words and more" } };
+out.keptWhileTyping = G.reconcile(row2, local);
+out.stillTyped = G.stepResult(row2, G.reconcile(row2, local), "A.1");
+const row3 = Object.assign({}, row, { results: G.savable(row2, local, "T2") });
+out.droppedWhenHeld = G.reconcile(row3, local);
+out.fail = G.reconcile(row3, { "A.2": { result: "fail", note: "  " } });
+out.failSaved = G.savable(row3, { "A.2": { result: "fail", note: "  " } }, "T3")["A.2"] || null;
+out.passKeepsSpace = G.savable(row, { "A.1": { result: "pass", note: "ok\n" } }, "T4")["A.1"];
+out.count = G.tally(row2, {});
+process.stdout.write(JSON.stringify(out));
+"""
+
+    def play(self, row):
+        done = subprocess.run([NODE, "-e", self.PLAY, PLAN_PAGE], input=json.dumps({"row": row}), capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout)
+
+    def test_a_note_typed_before_a_result_is_saved_and_survives_the_snapshot(self):
+        out = self.play(self.row(agentDone=["A"]))
+        self.assertEqual(out["typed"], {"result": "", "note": "first words ", "saved": False})
+        self.assertEqual(out["savable"], {"A.1": {"result": "", "note": "first words ", "at": "T1"}})  # untrimmed, not a pass
+        self.assertEqual(out["keptAfterSave"], {})  # the row holds exactly that text
+        self.assertEqual(out["afterSave"], {"result": "", "note": "first words ", "saved": True})
+        self.assertEqual(out["count"], {"pass": 0, "fail": 0, "total": 3})  # a note alone does not count
+
+    def test_text_typed_after_the_save_is_kept_when_the_older_snapshot_arrives(self):
+        out = self.play(self.row(agentDone=["A"]))
+        self.assertEqual(out["keptWhileTyping"], {"A.1": {"result": "", "note": "first words and more"}})
+        self.assertEqual(out["stillTyped"]["note"], "first words and more")
+        self.assertFalse(out["stillTyped"]["saved"])
+        self.assertEqual(out["droppedWhenHeld"], {})
+
+    def test_a_fail_without_a_note_is_not_saved_and_stays_local_and_a_pass_note_keeps_its_whitespace(self):
+        out = self.play(self.row(agentDone=["A"]))
+        self.assertEqual(out["fail"], {"A.2": {"result": "fail", "note": "  "}})
+        self.assertIsNone(out["failSaved"])
+        self.assertEqual(out["passKeepsSpace"]["note"], "ok\n")
 
     def test_the_list_shows_progress(self):
         self.assertIn("0/3", self.render(self.row())["list"])
