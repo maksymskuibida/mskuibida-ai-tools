@@ -43,6 +43,11 @@ and an answer of Accept or Reject is not asked again ("Already answered: R-07 (a
 is still New is asked again. When nothing is left to ask, no question is asked. The memory is cleared when the
 stage's approved report runs, when the Unit is released and by /review-findings:release.
 
+Stop: a turn that ends on the findings summary without the Findings question (the summary was written, nothing asked)
+is blocked once per round, so the developer is not made to answer twice. A Findings question for a round that already
+has an answer (typed in chat or clicked) is refused: "The developer answered the findings question in chat: X."
+The prompt hook ignores <system-reminder> blocks the harness puts in front of a typed answer.
+
 A typed answer: when the Findings question comes back as "the user sent a message instead" and that message (or a
 prompt sent while the question waits) is just one option ("accept", "fix all", "open in form", "form", ...), it is
 recorded as that answer.
@@ -855,6 +860,10 @@ def guard(event, tool, ti, command, pend):
                     f"\"{F.question_text(total, blocking)}\", options Fix"
                     f"{'' if blocking else ', Accept'}, Open in form. Nothing else comes before it.")
             return
+        if any(is_triage(q) for q in qs) and pend.get("answer") in ("fix", "accept", "form"):
+            word = {"fix": "Fix", "accept": "Accept", "form": "Open in form"}[pend["answer"]]
+            raise Refusal(f"The developer answered the findings question in chat: {word}. Do not ask the Findings "
+                          f"question; act on {word}.")
         why = form_wait(pend) or summary_wait(pend)
         if why and any(is_gate(q) for q in qs):
             raise Refusal(why)
@@ -1167,9 +1176,14 @@ TYPED_ANSWERS = {"accept": "Accept", "accept all": "Accept", "accept them": "Acc
 NOT_ANSWERED = "[user did not answer"
 
 
+REMINDERS = re.compile(r"<system-reminder>.*?</system-reminder>", re.S)
+
+
 def typed_choice(text):
-    """The option a short message names ("Accept all." -> Accept), or None for anything longer or ambiguous."""
-    return TYPED_ANSWERS.get(re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", str(text or "").lower())).strip())
+    """The option a short message names ("Accept all." -> Accept), or None for anything longer or ambiguous. The
+    harness may put <system-reminder> blocks in front of what the developer typed: they are not part of the answer."""
+    text = REMINDERS.sub(" ", str(text or ""))
+    return TYPED_ANSWERS.get(re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", text.lower())).strip())
 
 
 def last_prompt(event):
@@ -1368,8 +1382,30 @@ def prompt(event):
                 note = on_triage(event, state, pend, typed)
                 if pend.get("asked"):
                     save(event, state)
-                    say("UserPromptSubmit", f"the developer typed \"{typed}\" in chat in answer to the Findings question; "
-                                            f"recorded as {typed}. {note}")
+                    say("UserPromptSubmit", f"The developer answered the findings question in chat: {typed}. Do not ask "
+                                            f"the Findings question; act on {typed}. {note}")
+    return 0
+
+
+def stop(event):
+    """A turn that ends on the findings summary without the Findings question makes the developer answer twice
+    (the typed answer comes after the turn ended). Block the end of such a turn once per round."""
+    if not os.path.exists(state_path(event)) or not event.get("transcript_path"):
+        return 0
+    with state_lock(event):
+        try:
+            state = load(event)
+        except Refusal:
+            return 0
+        pend = pending_of(state)
+        if not pend or pend.get("truncated") or pend.get("asked") or pend.get("stop_blocked") \
+                or not summary_sent(event, pend):
+            return 0
+        pend["stop_blocked"] = True
+        save(event, state)
+    print(json.dumps({"decision": "block", "reason": "review-findings: Ask the Findings question now with "
+                      "AskUserQuestion (metadata.source review-findings), in this same turn: the summary alone ends "
+                      "the turn and the developer has to answer twice."}))
     return 0
 
 
@@ -1388,6 +1424,8 @@ def main():
             return post(event)
         if name == "UserPromptSubmit":
             return prompt(event)
+        if name == "Stop":
+            return stop(event)
     except Refusal as why:
         return refuse(str(why)) if name == "PreToolUse" else 0
     except Exception as exc:  # fail closed on a guarded call that reached the checks
