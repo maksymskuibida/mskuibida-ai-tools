@@ -19,6 +19,8 @@ HOOK = os.path.join(PLUGIN, "hooks", "claim_guard.py")
 SCRIPT = os.path.join(PLUGIN, "scripts", "claim_choice.py")
 sys.path.insert(0, os.path.join(PLUGIN, "scripts"))
 import claim_choice as cc  # noqa: E402
+sys.path.insert(0, os.path.join(PLUGIN, "hooks"))
+import claim_guard as guard  # noqa: E402
 
 UNIT = "u4-day-navigation"
 # What the engine prints when a claim goes through.
@@ -375,6 +377,30 @@ class TestHelpIsAClaim(Case):
         for cmd in ("aidlc unit claim --help", "aidlc unit claim -h | head", "aidlc unit --help", "aidlc --help"):
             code, _out, err = self.pre("Bash", {"command": cmd})
             self.assertEqual(code, 0, cmd + err)
+
+
+class TestReadingTheUnit(unittest.TestCase):
+    """The Unit is read from the claim's own arguments: redirections and value options are not the Unit."""
+
+    def units(self, cmd):
+        return [c[0] for c in guard.claims(cmd)]
+
+    def test_redirections_are_not_arguments(self):
+        for cmd in (f"aidlc unit claim api-shell --reopen --rhythm unit-end --user-input 'reason text' 2>&1",
+                    "aidlc unit claim api-shell > /tmp/out 2>/dev/null", "aidlc unit claim api-shell &>log",
+                    "aidlc unit claim api-shell >>log 2>&1 | head", "aidlc unit claim api-shell 2>&1 | tail -3",
+                    "aidlc unit claim 2>&1 api-shell", "aidlc unit claim api-shell < /dev/null"):
+            self.assertEqual(self.units(cmd), ["api-shell"], cmd)
+
+    def test_a_redirect_does_not_start_a_second_command(self):
+        self.assertEqual(len(guard.segments("aidlc unit claim api-shell 2>&1")), 1)
+        self.assertEqual(len(guard.segments("aidlc unit claim api-shell &>log; echo done")), 2)
+
+    def test_help_with_a_redirect_is_help(self):
+        self.assertEqual(self.units("aidlc unit claim --help 2>&1"), [])
+
+    def test_user_input_value_is_not_the_unit(self):
+        self.assertEqual(self.units("aidlc unit claim --reopen --user-input 'why' api-shell"), ["api-shell"])
 
 
 class TestMismatchedClaim(Case):
