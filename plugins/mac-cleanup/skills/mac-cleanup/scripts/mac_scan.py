@@ -15,17 +15,24 @@
       {"id", "writes", "batches", "items", "suggestedBytes", "unverifiedBytes"}.
 
   mac_scan.py remove --scan OUT/scan.json --picks picks.json [--live-paths FILE]
-                     [--quiet-minutes 30] [--execute]
+                     [--quiet-minutes 30] [--include-keep] [--execute]
       Re-checks every item picked "remove" against the disk as it is now, then (only with --execute)
       deletes the plain folders and files that pass. Worktrees, tool commands and manual steps are
       never run here: they are printed for the agent, which runs them through their own gates.
+      Picks of items the page marked Keep are held until the owner says yes again (--include-keep).
       Dry run by default. Exit codes: 0 done, 1 a removal failed, 2 refused to start.
+
+  mac_scan.py check [--live-paths FILE] [--quiet-minutes 30] PATH...
+      The same re-check for the folders a tool command clears (`npm cache clean` clears ~/.npm/_cacache),
+      run right before the command. Prints one line per path: ok or held, its size now, and why it is
+      held. Run it again after the command to measure what was freed. Exit codes: 0 all ok, 3 any held.
 
 Python 3 stdlib only. Nothing here writes outside --out / --dir except `remove --execute`.
 """
 
 import argparse
 import datetime as dt
+import errno
 import hashlib
 import json
 import os
@@ -247,12 +254,42 @@ def recent_growth(path, limit=12):
     return {"bytes": total, "top": [{"path": k, "bytes": v} for k, v in top]}
 
 
+# Where installed tools live. A node_modules or venv in here is the tool itself (npm, global packages, a
+# Python), not build output, so a sweep of them breaks every version of the tool.
+TOOL_INSTALLS = ("~/.nvm", "~/.volta", "~/.fnm", "~/.local/share/fnm", "~/.bun/install/global", "~/.npm-global",
+                 "~/.pyenv", "~/.local/pipx", "/opt/homebrew/lib", "/usr/local/lib")
+SWEEP = re.compile(r"node_modules|\bvenv\b|\.venv")
+
+
+def vet_action(item):
+    """Investigators write the commands; some are wrong in ways seen on a real disk. Fix them before the owner
+    picks from them: a sweep of an installed tool's own packages, commands that need an argument they lack, and
+    "commands" that only say to keep it."""
+    action = (item.get("action") or "").strip()
+    quoted = '"' + item["path"].replace('"', '\\"') + '"'
+    if any(under(item["path"], os.path.expanduser(t)) for t in TOOL_INSTALLS) and SWEEP.search(action + item["path"]):
+        item["risk"] = "keep"
+        item["action"] = ""
+        item["notes"] = ("The node_modules and venv folders here are installed tools (npm itself, global packages, "
+                         "a Python), not build output. Remove an old version with its manager, for example "
+                         "`nvm uninstall <version>`. " + (item.get("notes") or "")).strip()
+    elif re.match(r"^pnpm cache delete\s*$", action) and not item.get("virtual"):
+        item["action"] = f"rm -rf {quoted}"       # pnpm cache delete needs a package pattern
+    elif re.match(r"^npx\s+playwright\s+uninstall", action) and item["path"].endswith("/ms-playwright"):
+        item["action"] = f"rm -rf {quoted}"       # npx would first download Playwright into the cache just cleared
+    elif re.match(r"^(none|nothing|keep|do not|don't)\b", action, re.I):
+        item["action"] = ""
+        if action:
+            item["notes"] = (action + " " + (item.get("notes") or "")).strip()
+    return item
+
+
 def kind_of(item):
     if item.get("category") == "worktrees":
         return "worktree"
-    if item.get("virtual"):
-        return item.get("kind") or "command"
     action = (item.get("action") or "").strip()
+    if item.get("virtual"):
+        return item.get("kind") or ("command" if action else "manual")
     m = re.match(r"^rm -rf ['\"]?(.+?)['\"]?$", action)
     if m and os.path.normpath(os.path.expanduser(m.group(1))) == os.path.normpath(item["path"]):
         return "path"
@@ -449,6 +486,8 @@ def cmd_build(args):
         it["category"] = it.get("category") if it.get("category") in CATEGORY_GROUP else "other"
         it["group"] = CATEGORY_GROUP[it["category"]]
         it["risk"] = it.get("risk") if it.get("risk") in ("safe", "review", "keep") else "review"
+        if it["category"] != "worktrees":
+            vet_action(it)
         it["kind"] = kind_of(it)
         users = [l for l in live if under(l, it["path"]) or (it.get("label", "").startswith("/") and under(l, it["label"]))]
         if users:
@@ -576,12 +615,60 @@ def open_files_under(paths):
     return held
 
 
+def read_live(path):
+    live = [l.strip() for l in open(path)] if path else []
+    return [l for l in live if l and not l.startswith("#")]
+
+
+def in_use(p, live, held, quiet_minutes):
+    """Why p must not be cleared right now, or None: a session works in it, a process has a file open in it, or
+    something wrote to it within quiet_minutes."""
+    if any(under(l, p) for l in live):
+        return "a running session works inside it"
+    if p in held:
+        return f"a running process has a file open in it ({held[p]})"
+    recent = written_within(p, quiet_minutes)
+    if recent:
+        return f"written to in the last {quiet_minutes} minutes ({recent})"
+    return None
+
+
+def delete_path(p):
+    """Delete a folder or file. Finder rewrites .DS_Store into a folder it is showing while the folder is emptied,
+    which fails the last rmdir; a second pass gets it. Returns None, or why it failed."""
+    for attempt in range(3):
+        try:
+            if os.path.isdir(p) and not os.path.islink(p):
+                shutil.rmtree(p)
+            else:
+                os.remove(p)
+            return None
+        except OSError as exc:
+            if exc.errno == errno.ENOTEMPTY and attempt < 2:
+                time.sleep(0.5)
+                continue
+            # rmtree names the file relative to its folder, so look for the bundle rather than parse the name
+            app = app_bundle_in(p) if exc.errno in (errno.EPERM, errno.EACCES) else None
+            if app:
+                return ("macOS refused to delete inside an app bundle (App Management protects them): drag it to "
+                        f"the Trash in Finder ({app})")
+            return str(exc)
+
+
+def app_bundle_in(p):
+    m = re.search(r"^.*?\.app(?=/|$)", p)
+    if m:
+        return m.group(0)
+    r = subprocess.run(["find", p, "-xdev", "-name", "*.app", "-type", "d", "-print", "-quit"],
+                       capture_output=True, text=True)
+    return r.stdout.strip() or None
+
+
 def cmd_remove(args):
     scan = json.load(open(args.scan))
     picks = json.load(open(args.picks))
     picks = picks.get("picks", picks)
-    live = [l.strip() for l in open(args.live_paths)] if args.live_paths else []
-    live = [l for l in live if l and not l.startswith("#")]
+    live = read_live(args.live_paths)
     by_id = {it["id"]: it for it in scan["items"]}
     chosen = [by_id[i] for i, p in picks.items() if isinstance(p, dict) and p.get("pick") == "remove" and i in by_id]
     unknown = [i for i, p in picks.items() if isinstance(p, dict) and p.get("pick") == "remove" and i not in by_id]
@@ -591,14 +678,17 @@ def cmd_remove(args):
     chosen = top_level(chosen)
     paths = [it["path"] for it in chosen if it["kind"] == "path"]
     held = open_files_under(paths) if paths else {}
-    plan = {"remove": [], "held": [], "worktrees": [], "commands": [], "manual": []}
+    plan = {"remove": [], "held": [], "keep": [], "worktrees": [], "commands": [], "owner": [], "manual": []}
     for it in chosen:
         p = it["path"]
         if it["kind"] == "worktree":
-            plan["worktrees"].append(it)
+            plan["worktrees"].append(it)       # the worktree gates decide, whatever the page said
+            continue
+        if it.get("risk") == "keep" and not args.include_keep:
+            plan["keep"].append(it)
             continue
         if it["kind"] == "command":
-            plan["commands"].append(it)
+            plan["owner" if re.search(r"(^|[\s;&|(])sudo\s", it.get("action") or "") else "commands"].append(it)
             continue
         if it["kind"] == "manual":
             plan["manual"].append(it)
@@ -610,14 +700,8 @@ def cmd_remove(args):
             why = "outside the folders this tool deletes from; do it by hand if you mean it"
         elif p.rstrip("/") in (os.path.expanduser("~"), "/Users", "/private/tmp"):
             why = "a top-level folder; refusing"
-        elif any(under(l, p) for l in live):
-            why = "a running session works inside it"
-        elif p in held:
-            why = f"a running process has a file open in it ({held[p]})"
         else:
-            recent = written_within(p, args.quiet_minutes)
-            if recent:
-                why = f"written to in the last {args.quiet_minutes} minutes ({recent})"
+            why = in_use(p, live, held, args.quiet_minutes)
         if why:
             plan["held"].append(dict(it, heldBecause=why))
         else:
@@ -626,21 +710,23 @@ def cmd_remove(args):
     freed, failed = 0, []
     if args.execute:
         for it in plan["remove"]:
-            try:
-                if os.path.isdir(it["path"]) and not os.path.islink(it["path"]):
-                    shutil.rmtree(it["path"])
-                else:
-                    os.remove(it["path"])
-                it["result"] = "removed"
-                freed += it["bytesNow"]
-            except Exception as exc:
-                it["result"] = f"failed: {exc}"
+            error = delete_path(it["path"])
+            # what a failed removal still freed counts too, measured; nothing is counted that is still there
+            gone = it["bytesNow"] - (du_bytes(it["path"]) if os.path.lexists(it["path"]) else 0)
+            it["freed"] = max(0, gone)
+            freed += it["freed"]
+            it["result"] = f"failed: {error}" if error else "removed"
+            if error:
                 failed.append(it)
 
     def gb(b):
         return f"{b / GB:6.2f} GB"
-    verb = "Removed" if args.execute else "Would remove"
-    print(f"{verb}: {len(plan['remove'])} item(s), {gb(sum(i['bytesNow'] for i in plan['remove'])).strip()}")
+    if args.execute:
+        done = [i for i in plan["remove"] if i not in failed]
+        print(f"Removed: {len(done)} of {len(plan['remove'])} item(s), {gb(freed).strip()} freed"
+              + (f"; {len(failed)} failed" if failed else ""))
+    else:
+        print(f"Would remove: {len(plan['remove'])} item(s), {gb(sum(i['bytesNow'] for i in plan['remove'])).strip()}")
     for it in plan["remove"]:
         print(f"  {'✗' if it.get('result', '').startswith('failed') else '✓'} {gb(it['bytesNow'])}  {it['path']}"
               + (f"  [{it['result']}]" if it.get("result") else ""))
@@ -648,24 +734,50 @@ def cmd_remove(args):
         print(f"\nHeld back on re-check: {len(plan['held'])}")
         for it in plan["held"]:
             print(f"  ⊘ {gb(it['bytes'])}  {it['path']}\n      {it['heldBecause']}")
+    if plan["keep"]:
+        print(f"\nMarked Keep on the page, picked anyway ({len(plan['keep'])}): ask the owner again, naming what each "
+              "one costs; only then re-run with --include-keep:")
+        for it in plan["keep"]:
+            print(f"  {gb(it['bytes'])}  {it['path']}\n      {it.get('notes') or it.get('regenerates') or ''}".rstrip())
     if plan["worktrees"]:
         print(f"\nWorktrees ({len(plan['worktrees'])}): remove with remove_worktrees.py --only, after fresh liveness:")
         for it in plan["worktrees"]:
             print(f"  {gb(it['bytes'])}  {it['path']}")
     if plan["commands"]:
-        print(f"\nTool commands ({len(plan['commands'])}): run each yourself, one at a time, after reading it:")
+        print(f"\nTool commands ({len(plan['commands'])}): the agent runs these one at a time, each shown first, "
+              "with `mac_scan.py check` on what it clears before and after:")
         for it in plan["commands"]:
+            print(f"  {gb(it['bytes'])}  {it['path']}\n      $ {it['action']}")
+    if plan["owner"]:
+        print(f"\nNeed sudo ({len(plan['owner'])}): for the owner to run:")
+        for it in plan["owner"]:
             print(f"  {gb(it['bytes'])}  {it['path']}\n      $ {it['action']}")
     if plan["manual"]:
         print(f"\nManual steps ({len(plan['manual'])}): for the owner to do:")
         for it in plan["manual"]:
-            print(f"  {gb(it['bytes'])}  {it['path']}\n      {it.get('action') or it.get('regenerates')}")
+            print(f"  {gb(it['bytes'])}  {it['path']}\n      {it.get('action') or it.get('notes') or it.get('regenerates')}")
     if not args.execute:
         print("\n(dry run — nothing was deleted; re-run with --execute)")
     if args.execute:
-        print(f"\nFreed by this run: {gb(freed).strip()} (measured before each removal).")
+        print(f"\nFreed by this run: {gb(freed).strip()} (measured before and after each removal).")
     write_json(os.path.splitext(args.picks)[0] + "-result.json", plan)
     return 1 if failed else 0
+
+
+def cmd_check(args):
+    live = read_live(args.live_paths)
+    paths = [os.path.abspath(os.path.expanduser(p)) for p in args.paths]
+    present = [p for p in paths if os.path.lexists(p)]
+    held = open_files_under(present) if present else {}
+    any_held = False
+    for p in paths:
+        if not os.path.lexists(p):
+            print(f"gone\t0\t{p}")
+            continue
+        why = in_use(p, live, held, args.quiet_minutes)
+        any_held = any_held or bool(why)
+        print(f"{'held' if why else 'ok'}\t{du_bytes(p)}\t{p}" + (f"\t{why}" if why else ""))
+    return 3 if any_held else 0
 
 
 def main():
@@ -688,9 +800,15 @@ def main():
     r.add_argument("--picks", required=True, help="the scan row's picks, as saved from ArtifactData")
     r.add_argument("--live-paths")
     r.add_argument("--quiet-minutes", type=int, default=30)
+    r.add_argument("--include-keep", action="store_true",
+                   help="also act on picks the page marked Keep; only after the owner said yes to them again")
     r.add_argument("--execute", action="store_true")
+    c = sub.add_parser("check")
+    c.add_argument("--live-paths")
+    c.add_argument("--quiet-minutes", type=int, default=30)
+    c.add_argument("paths", nargs="+")
     args = ap.parse_args()
-    return {"walk": cmd_walk, "build": cmd_build, "remove": cmd_remove}[args.cmd](args)
+    return {"walk": cmd_walk, "build": cmd_build, "remove": cmd_remove, "check": cmd_check}[args.cmd](args)
 
 
 if __name__ == "__main__":

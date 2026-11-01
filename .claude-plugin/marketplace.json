@@ -4,7 +4,7 @@
     "name": "Maksym Skuibida"
   },
   "description": "Maksym Skuibida's personal Claude Code tooling — small, opinionated plugins.",
-  "version": "1.34.5",
+  "version": "1.35.1",
   "plugins": [
     {
       "name": "response-format",
@@ -16,7 +16,7 @@
       "name": "mac-cleanup",
       "source": "./plugins/mac-cleanup",
       "description": "Find what fills a Mac's disk and reclaim it safely: one walk of the whole volume, six read-only investigators (builds, simulators, Docker and models, caches, projects, personal files, system), the amount it could not verify and the folders that need Full Disk Access, and a page in your private \"Mac cleanup\" artifact to pick Remove or Keep per item; picked items are re-checked at the moment of removal. Orphaned git worktrees go through their own gates (unpushed work, live sessions, recent activity). Formerly worktree-cleanup.",
-      "version": "3.0.0"
+      "version": "3.1.0"
     },
     {
       "name": "model-fit",

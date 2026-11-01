@@ -18,7 +18,9 @@ whose worktree gates it keeps unchanged.
    which folders need Full Disk Access, then every item grouped, with Remove / Keep per item and a note for Claude.
 4. **Removal re-checked at the moment it happens** (`scripts/mac_scan.py remove`): only what you picked, each
    still there, no session working inside, no file open in it, nothing written to it in the last 30 minutes.
-   Worktrees go through their own gates below; tool commands and manual steps are shown, never run blind.
+   A pick of something the page marked Keep waits for a second yes. Worktrees go through their own gates below;
+   tool commands are shown, run one at a time with the same re-check on what they clear (`mac_scan.py check`),
+   and measured before and after; anything needing sudo and the manual steps are left to you.
 
 Every size comes from `du`. A size the walk contradicts (a mounted image's contents, a sparse file's apparent
 size) is left out rather than shown; what the walk could not read is reported as a number (the Data volume's
