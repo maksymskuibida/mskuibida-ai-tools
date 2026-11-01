@@ -20,8 +20,10 @@
 
   What the page writes (the developer's, never the agent's):
 
-    plans/<id>.results[<step id>] = {result: "pass"|"fail", note, at}
+    plans/<id>.results[<step id>] = {result: "pass"|"fail"|"", note, at}
       A Pass may carry a note. A Fail is never saved without a note; the page asks for it.
+      A note written before Pass or Fail is picked is saved as {result: "", note, at}: the step is NOT RUN, never a pass.
+      Notes are stored exactly as typed (no trimming); whoever uses a result trims it.
 
   The agent reads the results with ArtifactData when the developer says a section (or the plan) is completed.
   The render functions between RENDER-START and RENDER-END use no DOM, so tests render a plan under Node.
@@ -146,8 +148,40 @@ var PlanView = (function () {
   /* The saved result of a step, with what the viewer typed and has not saved: {result, note, saved}. */
   function stepResult(row, local, id) {
     var l = local && local[id], s = (row.results || {})[id];
-    if (l) return { result: l.result || "", note: l.note == null ? ((s && s.note) || "") : l.note, saved: !!(s && s.result === l.result && !blank(l.result) && (l.result !== "fail" || !blank(l.note))) };
+    if (l) {
+      var note = l.note == null ? ((s && s.note) || "") : l.note, e = entryOf(l.result || "", note);
+      return { result: l.result || "", note: note, saved: !!(e && s && s.result === e.result && s.note === e.note) };
+    }
     return s ? { result: s.result || "", note: s.note || "", saved: true } : { result: "", note: "", saved: false };
+  }
+  /* What is stored for a result and a note, exactly as typed; null when nothing is stored: a Fail needs a note, and a
+     step with neither result nor note is not stored at all. A note alone ({result: ""}) is stored: it is not a pass. */
+  function entryOf(result, note) {
+    if (result === "fail") return blank(note) ? null : { result: "fail", note: note };
+    if (result === "pass") return { result: "pass", note: note };
+    return note ? { result: "", note: note } : null;
+  }
+  /* The results map to save: one entry per step that has something to store. `at` is kept while the entry is unchanged. */
+  function savable(row, local, now) {
+    var out = {};
+    ((row.plan || {}).sections || []).forEach(function (sec) { sec.steps.forEach(function (st) {
+      var r = stepResult(row, local, st.id), e = entryOf(r.result, r.note);
+      if (!e) return;
+      var old = (row.results || {})[st.id];
+      out[st.id] = { result: e.result, note: e.note, at: old && old.result === e.result && old.note === e.note ? old.at : now };
+    }); });
+    return out;
+  }
+  /* The viewer's local text after a snapshot of the row: what the row now holds exactly is dropped, everything else
+     stays (a Fail still waiting for its note, text typed since the save, a save not yet landed). */
+  function reconcile(row, local) {
+    var keep = {};
+    Object.keys(local || {}).forEach(function (id) {
+      var l = local[id], s = (row.results || {})[id], note = l.note == null ? ((s && s.note) || "") : l.note, e = entryOf(l.result || "", note);
+      var held = e ? !!(s && s.result === e.result && s.note === note) : !s;
+      if (!held || (l.result === "fail" && blank(note))) keep[id] = l;
+    });
+    return keep;
   }
   function counted(r) { return r.result === "pass" || (r.result === "fail" && !blank(r.note)); }
 
@@ -242,7 +276,7 @@ var PlanView = (function () {
       }).join("");
   }
 
-  return { render: render, listHtml: listHtml, states: states, tally: tally, stepResult: stepResult, counted: counted, esc: esc };
+  return { savable: savable, reconcile: reconcile, entryOf: entryOf, render: render, listHtml: listHtml, states: states, tally: tally, stepResult: stepResult, counted: counted, esc: esc };
 })();
 if (typeof module !== "undefined") module.exports = PlanView;
 /* RENDER-END */
@@ -263,24 +297,29 @@ if (typeof module !== "undefined") module.exports = PlanView;
   function pageId() { var h = decodeURIComponent(location.hash.slice(1)); return /-test-v\d+-\d{8}T\d{4}$/.test(h) ? h : ""; }
   function paint() {
     if (!view.row) return;
-    var y = window.scrollY, a = document.activeElement, key = a && a.dataset ? a.dataset.note : null;
-    app.innerHTML = PlanView.render(view.row, view.local);
+    var y = window.scrollY, a = document.activeElement, key = a && a.dataset && app.contains(a) ? a.dataset.note : null;
+    var fresh = document.createElement("div");
+    fresh.innerHTML = PlanView.render(view.row, view.local);
+    if (key) {  /* the textarea being typed in is moved into the new page as it is: its text and caret are never rewritten */
+      var t = fresh.querySelector('textarea[data-note="' + CSS.escape(key) + '"]');
+      if (t) {
+        ["aria-label", "placeholder", "rows"].forEach(function (n) { a.setAttribute(n, t.getAttribute(n)); });
+        a.disabled = t.disabled;
+        var from = a.selectionStart, to = a.selectionEnd, dir = a.selectionDirection;
+        t.replaceWith(a);
+        app.replaceChildren.apply(app, Array.prototype.slice.call(fresh.childNodes));
+        a.focus(); a.setSelectionRange(from, to, dir);
+        window.scrollTo(0, y);
+        return;
+      }
+    }
+    app.replaceChildren.apply(app, Array.prototype.slice.call(fresh.childNodes));
     window.scrollTo(0, y);
-    if (key) { var t = document.getElementById("step-" + key); t = t && t.querySelector("textarea"); if (t) { t.focus(); t.selectionStart = t.selectionEnd = t.value.length; } }
   }
 
-  /* what is saved: every Pass, and every Fail that has its note; a Fail without a note stays on this page only */
-  function savable() {
-    var out = {}, now = new Date().toISOString();
-    ((view.row.plan || {}).sections || []).forEach(function (sec) { sec.steps.forEach(function (st) {
-      var r = PlanView.stepResult(view.row, view.local, st.id);
-      if (r.result === "pass" || (r.result === "fail" && r.note.trim())) {
-        var old = (view.row.results || {})[st.id];
-        out[st.id] = { result: r.result, note: r.note.trim(), at: old && old.result === r.result && old.note === r.note.trim() ? old.at : now };
-      }
-    }); });
-    return out;
-  }
+  /* what is saved: every Pass, every Fail that has its note, and a note written before a result (result ""); a Fail
+     without a note stays on this page only */
+  function savable() { return PlanView.savable(view.row, view.local, new Date().toISOString()); }
   function queueSave() { view.unsaved = true; clearTimeout(view.timer); view.timer = setTimeout(flush, 600); }
   async function flush() {
     clearTimeout(view.timer);
@@ -335,11 +374,7 @@ if (typeof module !== "undefined") module.exports = PlanView;
       var row = Object.assign({ id: id }, snap.data());
       if (!row.plan || row.plan.schema !== "aidlc-test-plan/1") { app.innerHTML = '<div class="card msg"><b>This plan is newer than this view.</b><p>Ask the agent to republish the test plans page from the plugin.</p></div>'; return; }
       view.row = row;
-      if (!view.unsaved && !view.saving) {  /* keep a Fail whose note is still being typed; everything else comes from the row */
-        var keep = {};
-        Object.keys(view.local).forEach(function (k) { var l = view.local[k]; if (l.result === "fail" && !(l.note || "").trim()) keep[k] = l; });
-        view.local = keep;
-      }
+      view.local = PlanView.reconcile(row, view.local);  /* local text is kept until the row holds exactly that text */
       document.title = (row.title || "Test plan") + " · AI-DLC test plans";
       paint();
       var cur = PlanView.states(row, view.local).current, el = cur && document.getElementById("sec-" + cur);

@@ -21,6 +21,9 @@ The plan (`aidlc-test-plan/1`): {schema, id, intent, unit, bundle, title, create
 {key: "A", title, agent, steps[] {id: "A.1", do, criteria[], verifies[]}}}.
 A step's `criteria` are short checkable sentences (at least one); the page and test-plan.md number them under the step
 (A.1.1, A.1.2 …). `expect` is optional; plans published before criteria existed carry only `expect` and still render.
+The developer passes or fails a step as a whole; a step may hold only a note (`{"result": "", "note": …}`: written before
+Pass or Fail was picked). It is not run, never a pass: `finish` refuses it and reports "not run, note: …". Notes are stored
+untrimmed; `finish` trims them when it uses them.
 The developer passes or fails a step as a whole; results may carry `failed: ["A.1.2"]` to name the criteria. The script never touches the artifact.
 Standard library only.
 """
@@ -188,7 +191,8 @@ def results_problems(plan, results):
     for st in step_list(plan):
         r = results.get(st["id"])
         if not isinstance(r, dict) or r.get("result") not in ("pass", "fail"):
-            out.append(f"step {st['id']} has no Pass or Fail yet")
+            note = r.get("note") if isinstance(r, dict) else None
+            out.append(f"step {st['id']} has no Pass or Fail yet (not run" + (f", note: {note.strip()}" if not blank(note) else "") + ")")
         elif r["result"] == "fail" and blank(r.get("note")):
             out.append(f"step {st['id']} failed with no note")
         elif r["result"] == "fail" and r.get("failed") is not None:
