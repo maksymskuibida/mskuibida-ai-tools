@@ -43,7 +43,11 @@ is the **shared part** below followed by its **area**. Replace `<OUT>` with the 
 > - `regenerates`: how it comes back, or what is lost.
 > - `action`: the exact command that would reclaim it, preferring the owning tool's own (`xcrun simctl
 >   runtime delete <id>`, `docker volume rm <name>`, `npm cache clean --force`, `rm -rf <path>`), or the step
->   in an app ("Telegram › Settings › Data and Storage › Clear cache"). You do NOT run it.
+>   in an app ("Telegram › Settings › Data and Storage › Clear cache"). You do NOT run it. Empty when nothing
+>   should be done (never "none" or "keep"). Never a sweep of `node_modules` or `venv` under a tool install
+>   (`~/.nvm`, `~/.volta`, `~/.fnm`, `~/.pyenv`, `/opt/homebrew/lib`): those are the tools themselves. `pnpm
+>   cache delete` needs a package name and `npx playwright uninstall` downloads Playwright first: for those
+>   caches write `rm -rf <the folder>`.
 > - `modified`: newest date you can see (YYYY-MM-DD); `recent`: true if something in it changed in the last
 >   30 days.
 >
