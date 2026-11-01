@@ -463,3 +463,73 @@ class TestPerStageStaysAsItWas(UnitCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLinkMustBeVisibleText(UnitCase):
+    """The u26 session: the unit-end bundle was written, the response with the link died, and the agent asked anyway.
+    The second ask had the link only in a thinking block. Only a text block of the assistant counts as sending it."""
+
+    def end_ask(self):
+        return self.pre("AskUserQuestion", gate_question("Approve the unit?", labels=("Approve", "Request Changes", "Test first")))
+
+    def written(self):
+        self.write_bundle(self.end_id)  # no gate open in the state: the claimed Unit's unit-end page counts
+        self.assertIsNone(self.state_of()["pending"])
+        return f"{URL}#{self.end_id}"
+
+    def test_a_bundle_with_no_text_after_it_refuses_the_ask(self):
+        link = self.written()
+        code, _out, err = self.end_ask()
+        self.assertEqual(code, 2)
+        self.assertIn(link, err)
+
+    def test_the_refusal_names_the_link_and_how_to_send_it(self):
+        link = self.written()
+        _code, _out, err = self.end_ask()
+        self.assertIn(f"`**Read:** {link}`", err)
+        self.assertIn("plain text", err)
+        self.assertIn("message of its own", err)
+        self.assertIn("thinking does not count", err.lower())
+
+    def test_the_link_only_in_thinking_is_refused(self):
+        link = self.written()
+        self.said(f"show the page: {link}", block="thinking")
+        self.assertEqual(self.end_ask()[0], 2)
+
+    def test_the_link_only_in_a_tool_call_is_refused(self):
+        link = self.written()
+        self.said(link, block="tool_use")
+        self.assertEqual(self.end_ask()[0], 2)
+
+    def test_the_link_in_a_text_block_is_allowed(self):
+        link = self.written()
+        self.said(f"**Read:** {link}")
+        code, _out, err = self.end_ask()
+        self.assertEqual(code, 0, err)
+
+    def test_artifact_open_is_not_the_link(self):
+        self.written()
+        self.said("open", block="tool_use")
+        self.said(f"Opened {URL} for you.")
+        self.assertEqual(self.end_ask()[0], 2)
+
+    def test_a_link_without_the_id_is_not_the_link(self):
+        self.written()
+        self.said(f"The page: {URL}")
+        self.assertEqual(self.end_ask()[0], 2)
+
+    def test_asked_twice_the_link_in_thinking_is_still_refused(self):
+        link = self.written()
+        self.said(f"**Read:** {link}")
+        self.assertEqual(self.end_ask()[0], 0)
+        self.post("AskUserQuestion", gate_question("Approve the unit?", labels=("Approve", "Request Changes", "Test first")),
+                  {"answers": {"Approve the unit?": "show me the approvalpage"}})
+        self.assertEqual(self.end_ask()[0], 0)  # sent before: a plain repeat of the ask is fine
+
+    def test_show_me_the_page_gets_the_link_back(self):
+        link = self.written()
+        code, out, err = self.prompt("show me the approval page")
+        self.assertEqual(code, 0, err)
+        said = self.context(out)
+        self.assertIn(link, said)
+        self.assertIn("text", said)
