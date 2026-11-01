@@ -817,12 +817,50 @@ def guard_plan_links(event, state):
                       "call. (A plan written again needs its link again.)")
 
 
+def unit_end_page(state, project):
+    """The unit-end page recorded for a gate the state has not opened: the claimed Unit's, else the latest one written.
+    A session whose gate came without a `report --result awaiting-approval` it saw has no pending gate and may have no
+    stage the engine names, yet the page it wrote is the one its Approval question is about."""
+    unit = claimed_unit(project)
+    if unit and unit_rhythm(project, unit, UNIT_END_STAGE) == "unit-end":
+        pub = state["published"].get(make_key(UNIT_END_STAGE, unit) + "@unit-end")
+        if pub:
+            return pub
+    pages = [p for k, p in state["published"].items() if k.endswith("@unit-end")]
+    return max(pages, key=lambda p: p.get("at", 0), default=None)
+
+
+def link_refusal(pub, counts):
+    link = link_of(pub)
+    return ("The developer gets the page's link before the question, and no text message of yours carries "
+            f"it yet. Since {pub.get('id', '')} was published, your transcript holds "
+            f"{counts['thinking']} thinking, {counts['tool_use']} tool-call and {counts['text']} text "
+            "block(s), none with the link. Only visible text counts: thinking does not count (the developer never sees it), "
+            "a tool call is not a message, and `Artifact open` does not show the page. "
+            f"Write exactly `**Read:** {link}` as plain text in a message of its own, then ask the engine's "
+            "question as it is, with no link in it. Do both in this ONE response: the text block with the full link "
+            "(with its `#id` part) first, then the AskUserQuestion call; never end the turn on the link alone. A response "
+            "with only the link ends your turn and the developer has no question to answer. Your next response must hold "
+            "both: the link text block AND this AskUserQuestion call.")
+
+
 def guard_question(event, state, project, questions):
     for q in questions:
         stage, unit, opened = target_of(state, project)
+        pub = None
+        if not state["pending"]:
+            fallback = None if "approve plan" in labels(q) else unit_end_page(state, project)  # a plan question is about the plan page
+            if not stage and fallback:
+                stage, unit, pub = UNIT_END_STAGE, claimed_unit(project), fallback
+            elif stage and fallback:
+                try:
+                    require_published(state, project, stage, unit, opened)
+                except Refusal:
+                    stage, unit, pub = UNIT_END_STAGE, claimed_unit(project), fallback
         if not stage:
             continue
-        pub = require_published(state, project, stage, unit, opened)
+        if not pub:
+            pub = require_published(state, project, stage, unit, opened)
         tested_first(pub, stage, unit)  # only the question: the rejected report (fixes picked after the test) still goes
         text = str(q.get("question", ""))
         url = str(pub.get("url", "")).strip()
@@ -832,15 +870,7 @@ def guard_question(event, state, project, questions):
                           f"{link_of(pub)} as a message, then ask the engine's question as it is.")
         sent, counts = wait_for_link(event, pub)
         if not sent:
-            raise Refusal("The developer gets the page's link before the question, and no message of yours carries "
-                          f"it yet. Since {pub.get('id', '')} was published, your transcript holds "
-                          f"{counts['thinking']} thinking, {counts['tool_use']} tool-call and {counts['text']} text "
-                          "block(s), none with the link. Thinking is not output and a tool call is not a message: "
-                          f"write `**Read:** {link_of(pub)}` as the text of your message, then ask the engine's "
-                          "question as it is, with no link in it. Do both in this ONE response: the text block with the link first, "
-                          "then the AskUserQuestion call; never end the turn on the link alone. A response with only the link "
-                          "ends your turn and the developer has no question to answer. Your next response must hold both: the "
-                          "link text block AND this AskUserQuestion call.")
+            raise Refusal(link_refusal(pub, counts))
 
 
 def guard_report(state, project, call):
@@ -1244,9 +1274,32 @@ def post(event, project):
             save(event, state)
 
 
+SHOW_PAGE = re.compile(r"\b(show|send|open|give|where)\b.*\b(approval|page|link|gate|bundle)|\b(approval ?page|the link)\b", re.I)
+
+
+def show_page_hint(event):
+    """The developer asks to see the page: say which link to write, as text. Nothing is said when no page is waiting."""
+    try:
+        project = project_dir(event)
+        if not os.path.isdir(os.path.join(project, "aidlc", "spaces")) or not os.path.exists(state_path(event)):
+            return
+        with state_lock(event):
+            state = load(event)
+            sync_pending(state, project)
+            pub = pending_page(state, project) if state["pending"] else unit_end_page(state, project)
+        if pub and pub.get("id"):
+            say("UserPromptSubmit", f"the developer asks to see the approval page. Write `**Read:** {link_of(pub)}` as plain "
+                                    "text in a message of its own now (thinking does not count and `Artifact open` does not "
+                                    "show it to them), then ask the question again if the gate is still open.")
+    except Exception:
+        return
+
+
 def prompt(event):
     match = RELEASE_PROMPT.match(str(event.get("prompt") or ""))
     if not match:
+        if SHOW_PAGE.search(str(event.get("prompt") or "")):
+            show_page_hint(event)
         return
     existed = os.path.exists(state_path(event))
     if not match.group(1) and not existed:
