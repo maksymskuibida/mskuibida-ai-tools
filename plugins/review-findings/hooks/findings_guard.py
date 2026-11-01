@@ -25,7 +25,11 @@ What it enforces (PreToolUse, exit code 2 and the reason on stderr)
   * A done form with cards in Fix (a stage review) is Request Changes: the Approval question and an approved report
     are refused, and the rejected report's --reason names every Fix card. Fixing the cards in place and getting a
     later review pass of the same stage (and Unit) back READY settles them: the PostToolUse of
-    `aidlc engine log review … --verdict READY` that emitted REVIEW_COMPLETED clears the round.
+    `aidlc engine log review … --verdict READY` that emitted REVIEW_COMPLETED (also when the log command is
+    piped, `| head -c 800`) clears the round. That holds whatever the round's state: asked or not, opened
+    as a form or never put to the developer, with an answer or without. A READY pass from the engine's reviewer
+    means nothing is open any more. A round whose brief was cut off (truncated) is the exception, and so is a
+    round from another source (a code review).
   * The review brief is printed unpiped and in full: a Bash call that pipes `aidlc engine review-brief`
     (`| head`, `| tail`, `| grep`, …) or redirects its output is refused, and a brief whose table lists
     open findings without their `> R-NN Finding:` lines (a cut-off output) is not recorded as findings:
@@ -1099,7 +1103,7 @@ def on_bash(event, state, ti, resp):
     if "REVIEW_COMPLETED" in text:
         for log in review_logs_of(command):
             pend = pending_of(state)
-            if pend and not pend.get("truncated") and pend.get("asked") and log["verdict"] == "ready" \
+            if pend and not pend.get("truncated") and log["verdict"] == "ready" \
                     and pend.get("source") == "aidlc" and pend.get("stage") == log["stage"] \
                     and (pend.get("unit") or "") == log["unit"]:
                 state["pending"] = None  # the findings were fixed in place and a later pass of this review came back READY

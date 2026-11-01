@@ -904,12 +904,53 @@ class ReReview(GuardCase):
         self.assertIsNotNone(self.h.pending())
         self.assertRefused(self.h.pre("Bash", self.approved), "not approved")
 
-    def test_a_ready_review_before_the_picks_does_not_clear_unasked_findings(self):
+    def test_a_ready_review_settles_a_round_nobody_was_asked_about(self):
         h = Harness()
         self.addCleanup(h.close)
         h.brief(command=UNIT_BRIEF)
+        self.assertFalse(h.pending()["asked"])
+        h.post("Bash", log_review(), COMPLETED)
+        self.assertIsNone(h.pending())
+
+    def test_a_ready_review_does_not_settle_a_cut_off_brief(self):
+        h = Harness()
+        self.addCleanup(h.close)
+        h.brief(text=fixture("brief-open.txt").split("> R-")[0], command=UNIT_BRIEF)
+        self.assertTrue(h.pending().get("truncated"))
         h.post("Bash", log_review(), COMPLETED)
         self.assertIsNotNone(h.pending())
+
+    def test_a_form_round_with_asked_false_is_settled_by_ready(self):
+        self.h_state(asked=False)
+        self.assertIsNotNone(self.h.pending())
+        self.h.post("Bash", log_review(), COMPLETED)
+        self.assertIsNone(self.h.pending())
+        self.assertAllowed(self.h.pre("Bash", self.approved))
+
+    def test_an_asked_round_is_still_settled(self):
+        self.assertTrue(self.h.pending()["asked"])
+        self.h.post("Bash", log_review(), COMPLETED)
+        self.assertIsNone(self.h.pending())
+
+    def test_the_piped_log_command_settles_it(self):
+        self.h_state(asked=False)
+        cmd = log_review()["command"] + " | head -c 800"
+        self.h.post("Bash", {"command": cmd}, COMPLETED)
+        self.assertIsNone(self.h.pending())
+
+    def test_another_unit_or_a_non_ready_verdict_keeps_a_form_round_with_asked_false(self):
+        self.h_state(asked=False)
+        self.h.post("Bash", log_review(unit="u4-other"), COMPLETED)
+        self.h.post("Bash", log_review(verdict="NEEDS_CHANGES"), COMPLETED)
+        self.assertIsNotNone(self.h.pending())
+
+    def h_state(self, **fields):
+        path = os.path.join(self.h.state, "s1.json")
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        data["pending"].update(fields)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
 
 
 MINOR = fixture("brief-open.txt").replace("| R-02 | Major |", "| R-02 | Minor |")
