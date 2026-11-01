@@ -35,6 +35,8 @@ import claim_choice as cc  # noqa: E402
 
 SCRIPT = os.path.join(os.path.dirname(HERE), "scripts", "claim_choice.py")
 OPS = re.compile(r"^[();<>|&]+$")
+REDIRECT = re.compile(r"^[();|&]*[<>]")  # `>`, `>>`, `>&`, `<`, `&>`, `&>>`, `<&`, `>|`: takes the next token as its target
+GLUED_REDIRECT = re.compile(r"^(\d*|&)[<>]")  # `2>&1`, `&>log` that the lexer could not split
 HINT = "(Refused by the unit-claim plugin.)"
 HELP_NOTE = ("The engine claims despite `--help`/`-h` on `unit claim <unit>`: this is a real claim. To read the help, run "
              "`aidlc unit claim --help` without a Unit (or `aidlc unit --help`).")
@@ -62,10 +64,21 @@ def segments(command):
         try:
             toks = tokens_of(line)
         except ValueError:
-            toks = line.split()
+            toks = [t for t in line.split() if not GLUED_REDIRECT.match(t)]
         seg = []
+        target = False  # the next token is a redirection's target
         for tok in toks + [";"]:
+            if target:
+                target = False
+                if not OPS.match(tok):
+                    continue
             if OPS.match(tok):
+                if REDIRECT.match(tok):
+                    # A redirection is not a new command: drop it, the fd number before it and its target.
+                    if seg and seg[-1].isdigit():
+                        seg.pop()
+                    target = True
+                    continue
                 if seg:
                     out.append(seg)
                 seg = []
@@ -83,7 +96,7 @@ def option(seg, name):
     return None
 
 
-VALUE_OPTIONS = {"--team", "--rhythm", "--skip-stages", "--space", "--intent", "--owner", "--label"}
+VALUE_OPTIONS = {"--team", "--rhythm", "--skip-stages", "--space", "--intent", "--owner", "--label", "--user-input"}
 
 
 def positional(tokens):
