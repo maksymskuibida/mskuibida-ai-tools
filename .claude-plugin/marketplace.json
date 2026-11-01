@@ -58,7 +58,7 @@
       "name": "review-findings",
       "source": "./plugins/review-findings",
       "description": "Whenever review findings reach the developer (an AI-DLC stage review brief at a gate, or /code-review's findings), each open finding is shown in plain words with a suggested action, in chat and above one question: Fix, Accept (only when nothing is blocking) or Open in form, where each finding is sorted into fix, accept or reject with a reason. A hook enforces the order.",
-      "version": "1.9.0"
+      "version": "1.9.1"
     },
     {
       "name": "aidlc-session-titles",
