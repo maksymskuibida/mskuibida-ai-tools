@@ -100,3 +100,5 @@ The first covers the hook and the script, with the Python 3 standard library onl
 (`tests/dialog.test.ts`) against the engine, with the dialog, the processes and the two models stood in for.
 
 The engine ignores `--help`/`-h` on `unit claim <unit>` and claims for real, so the hook checks such a command like any claim; read the help with `aidlc unit claim --help` (no Unit). A claim that went through with a rhythm or skipped stages other than the chosen ones is flagged after the fact.
+
+The Unit is read from the claim's own arguments: shell redirections (`2>&1`, `> file`, `&>log`) are dropped before the command is read, and `--user-input <text>` (the reason for `--reopen`) is a value option, so its text is never taken for the Unit.
