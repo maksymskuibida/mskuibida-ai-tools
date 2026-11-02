@@ -11,7 +11,7 @@ The developer wants to test the unit-end page's "Not verified yet" points before
 1. Find the Unit's newest unit-end page (the `bundles/<id>` row in **AI-DLC unit approvals**; its bundle file is in the
    bundle store, `unit-end-latest.json`, or in the scratch folder of the page you built). Read its `picks`
    (`test_plan.py now`): the rows picked **Test now**, or all of them (say so) when none is.
-2. Write the plan: sections A, B, C … (a new section wherever you must do something first), each with your agent step
+2. Write the plan: sections A, B, C … (a new section wherever you must do something first). Sections are split by what you do first, never by not-verified point; one section may verify several V-points. A section after A whose agent step does nothing ("nothing to prepare", "app stays open") is refused: put its steps at the end of A. Each with your agent step
    and the developer's steps (`do`, `criteria` — at least one short checkable sentence, numbered A.1.1, A.1.2 … on the page — and the V rows it `verifies`). `test_plan.py publish` validates it.
 3. Publish the plan in the **AI-DLC test plans** artifact (once per developer, `test-plan.html`, `capabilities:
    {db: {}, user: {}}`), send its link as a text block in a message of its own (a hook refuses every question until it is sent) and, in the same response, ask **Do the agent step for A** /

@@ -46,6 +46,31 @@ class TestPlanValidator(unittest.TestCase):
     def test_a_good_plan_holds(self):
         self.assertEqual(self.problems(), [])
 
+    def test_a_section_after_a_with_an_idle_agent_step_is_refused(self):
+        plan = good_plan()
+        plan["sections"][0]["agent"] = "I build the app from this Unit's branch and open it."
+        plan["sections"][1]["agent"] = "Nothing to prepare; the app stays open from section A."
+        found = self.problems(plan)
+        self.assertEqual(len(found), 1)
+        self.assertIn("section B: its agent step does nothing (\"Nothing to prepare; the app stays open from section A.\")", found[0])
+        self.assertIn("move its steps to the end of section A (as A.3, …), keeping their verifies", found[0])
+        for idle in ("-", "  ", "No preparation needed.", "The app is already open.", "Nothing to set up"):
+            plan["sections"][1]["agent"] = idle
+            self.assertTrue(any("section B:" in p and ("does nothing" in p or "agent is required" in p) for p in self.problems(plan)), idle)
+
+    def test_the_same_plan_with_b_folded_into_a_holds(self):
+        plan = good_plan()
+        plan["sections"][0]["agent"] = "The app is already open from the last run."
+        b = plan["sections"].pop()["steps"][0]
+        b.update(id="A.3")
+        plan["sections"][0]["steps"].append(b)
+        self.assertEqual(self.problems(plan), [])
+
+    def test_a_later_section_with_a_real_agent_step_holds(self):
+        plan = good_plan()
+        plan["sections"][1]["agent"] = "I reset the seed data and restart the app."
+        self.assertEqual(self.problems(plan), [])
+
     def test_every_test_now_row_must_be_covered(self):
         plan = good_plan()
         plan["sections"][1]["steps"][0]["verifies"] = ["V-2"]
