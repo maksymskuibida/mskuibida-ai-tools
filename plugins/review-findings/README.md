@@ -90,7 +90,8 @@ And always:
   refused and the rejected report names every Fix card (answers from the form need no summary);
 - once Fix or Accept is answered in chat, the gate, the reports and, in a code review, edits and
   commits until the summary of the answers has been printed with `findings.py answers` ("## Review Findings: User Answer", one `### <id>: Fix|Accept|Reject` per finding, with
-  `#### Action items:` and `#### User Note:` where they apply) and matches the recorded answers;
+  `#### Action items:` and `#### User Note:` where they apply) and matches the recorded answers
+  (not with the `answerSummary` option off, see Options);
 - an agent writing `status: "done"` on a findings form (only your press on Done does that).
 
 A refusal ends with how to release it. Type `/review-findings:release` to clear the guard for the
@@ -145,6 +146,19 @@ and picks each id's definition nearest the reviewed document. The page draws eve
 with a tooltip; an id no document defines is shown as not defined. Outside an AI-DLC project the form
 has no `ids`, and the output's `ids_note` says why. The form id is
 `<intent>-<stage>[-<unit>]-findings-<YYYYMMDDTHHMM>`, or `code-review-<YYYYMMDDTHHMM>`.
+
+## Options
+
+Set in the plugin's options (`pluginConfigs` / `options` for `review-findings@mskuibida-tooling` in
+`~/.claude/settings.json`):
+
+- `suggestModel` (string, default `claude-haiku-5-5`): the model that writes suggested actions; `off` keeps a fixed line.
+- `answerSummary` (boolean, default `true`, "Summary of the answers"): after Fix or Accept the agent prints
+  `findings.py answers` before it acts. `false` drops that step: the guard no longer waits for the summary, edits,
+  commits and the gate are free at once, and the answered round settles as it would after the summary. The findings
+  summary before the question, the single question and the Accept-only-when-nothing-blocks check stay.
+  The hook reads it from the `CLAUDE_PLUGIN_OPTION_answerSummary` environment variable that Claude Code sets for
+  plugin hook commands (`false`, `0`, `off` or `no` turn it off).
 
 ## Install
 

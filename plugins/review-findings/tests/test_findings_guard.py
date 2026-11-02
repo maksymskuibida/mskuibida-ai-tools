@@ -83,6 +83,8 @@ class Harness:
     def close(self):
         self.tmp.cleanup()
 
+    extra_env = None  # e.g. {"CLAUDE_PLUGIN_OPTION_answerSummary": "false"}
+
     def run(self, event_name, tool=None, tool_input=None, response=None, session="s1", raw=None):
         event = {"hook_event_name": event_name, "session_id": session, "cwd": self.project}
         if self.transcript:
@@ -93,7 +95,7 @@ class Harness:
             event["tool_response"] = response
         if event_name == "UserPromptSubmit":
             event["prompt"] = tool_input
-        env = dict(os.environ, REVIEW_FINDINGS_DIR=self.state, CLAUDE_PROJECT_DIR=self.project)
+        env = dict(os.environ, REVIEW_FINDINGS_DIR=self.state, CLAUDE_PROJECT_DIR=self.project, **(self.extra_env or {}))
         done = subprocess.run([sys.executable, HOOK], input=raw if raw is not None else json.dumps(event),
                               capture_output=True, text=True, env=env, check=False)
         return done.returncode, done.stdout, done.stderr
@@ -696,6 +698,76 @@ class CodeReview(GuardCase):
 
     def test_aidlc_reports_are_not_this_source(self):
         self.assertAllowed(self.h.pre("Bash", {"command": report_command("approved")}))
+
+
+OFF = {"CLAUDE_PLUGIN_OPTION_answerSummary": "false"}
+
+
+class AnswerSummaryOption(GuardCase):
+    EDIT = {"file_path": "x", "old_string": "a", "new_string": "b"}
+
+    def test_on_by_default_and_explicitly_true(self):
+        for env in (None, {"CLAUDE_PLUGIN_OPTION_answerSummary": "true"}):
+            h = Harness(project=False)
+            self.addCleanup(h.close)
+            h.extra_env = env
+            h.report_findings()
+            h.triage("Fix")
+            edit = dict(self.EDIT, file_path=os.path.join(h.project, "src", "cart.py"))
+            self.assertRefused(h.pre("Edit", edit), "Send the summary")
+
+    def test_off_code_review_typed_answer_settles_at_once(self):
+        h = Harness(project=False)
+        self.addCleanup(h.close)
+        h.extra_env = OFF
+        h.report_findings()
+        edit = dict(self.EDIT, file_path=os.path.join(h.project, "src", "cart.py"))
+        self.assertRefused(h.pre("Edit", edit), "")  # still held until the question is answered
+        _, out, _ = h.triage("Fix")
+        self.assertNotIn("answers --findings", context(out))
+        self.assertIsNone(h.pending())
+        self.assertAllowed(h.pre("Edit", edit))
+        self.assertAllowed(h.pre("Bash", {"command": "git commit -m fix"}))
+
+    def test_off_stage_review_typed_answer_needs_no_summary(self):
+        h = Harness()
+        self.addCleanup(h.close)
+        h.extra_env = OFF
+        h.brief()
+        h.triage("Fix")
+        self.assertTrue(h.pending()["summarized"])
+        self.assertAllowed(h.pre("AskUserQuestion", gate_input()))
+        self.assertRefused(h.pre("Bash", {"command": report_command("rejected", reason="needs work")}), "R-02")  # ids still required
+
+    def test_off_still_requires_the_question_first(self):
+        h = Harness()
+        self.addCleanup(h.close)
+        h.extra_env = OFF
+        h.brief()
+        self.assertRefused(h.pre("AskUserQuestion", gate_input()), "")
+
+    def test_off_form_answer_settles_as_before(self):
+        h = Harness()
+        self.addCleanup(h.close)
+        h.extra_env = OFF
+        h.brief()
+        h.triage("Open in form")
+        h.write_form()
+        h.read_form("done", answers={"R-02": {"k": ["accept"], "note": ""}, "R-03": {"k": ["reject"], "note": "ok"}})
+        self.assertAllowed(h.pre("AskUserQuestion", gate_input()))
+        self.assertAllowed(h.pre("Bash", {"command": report_command("approved")}))
+
+    def test_off_form_answer_for_a_code_review(self):
+        h = Harness(project=False)
+        self.addCleanup(h.close)
+        h.extra_env = OFF
+        h.report_findings()
+        h.triage("Open in form")
+        edit = dict(self.EDIT, file_path=os.path.join(h.project, "src", "cart.py"))
+        self.assertRefused(h.pre("Edit", edit), "")
+        h.write_form()
+        h.read_form("done", answers={"F-01": {"k": ["accept"], "note": ""}, "F-02": {"k": ["accept"], "note": ""}})
+        self.assertAllowed(h.pre("Edit", edit))
 
 
 class Release(GuardCase):

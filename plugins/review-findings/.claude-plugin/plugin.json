@@ -1,7 +1,7 @@
 {
   "name": "review-findings",
   "displayName": "Review findings",
-  "version": "1.9.1",
+  "version": "1.10.0",
   "description": "When review findings reach the developer (an AI-DLC stage review at its approval gate, or a code review), shows each open finding in plain words with a suggested action, above one question: Fix, Accept (only when nothing blocks) or Open in form. A hook keeps the order.",
   "author": {
     "name": "Maksym Skuibida"
@@ -12,6 +12,12 @@
       "title": "Suggestion model",
       "description": "Full model id that writes a one-sentence suggested action for each finding whose reviewer named none (a code review's findings, mostly). \"off\" leaves the fixed line.",
       "default": "claude-haiku-5-5"
+    },
+    "answerSummary": {
+      "type": "boolean",
+      "title": "Summary of the answers",
+      "description": "After you answer Fix or Accept, the agent prints a summary of your answers before it acts. Set to false to skip it: the agent acts on your answer straight away.",
+      "default": true
     }
   }
 }

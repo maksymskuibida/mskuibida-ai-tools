@@ -97,7 +97,7 @@ approved and rejected reports and, for a code review, edits and `git commit|push
 
 ## 3. What each answer means
 
-**First, the summary of the answers.** As soon as Fix or Accept is answered here, run `FINDINGS answers --findings <file>` with no other arguments. It
+**First, the summary of the answers.** (When the hook's message after the answer says the `answerSummary` option is off, skip this: print no summary, do not run `answers`, and go straight to acting on the answer below.) As soon as Fix or Accept is answered here, run `FINDINGS answers --findings <file>` with no other arguments. It
 prints the developer's answers, finding by finding, from what the hook recorded:
 
 ```
