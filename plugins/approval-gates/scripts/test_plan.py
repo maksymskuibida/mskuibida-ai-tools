@@ -46,6 +46,11 @@ ROW_ID = re.compile(r"^V-\d+$")
 PLAN_ID = re.compile(r"^[a-z0-9][a-z0-9._-]*-test-v\d+-\d{8}T\d{4}$")
 LINE_MAX = 160
 TEXT_MAX = 1500
+# A section after A exists only where the agent must do something first. An agent step that says it does nothing
+# (or is empty / "-") means the section was split by not-verified point; its steps belong at the end of section A.
+IDLE_AGENT = re.compile(
+    r"nothing to (prepare|do|set ?up)|no (preparation|agent step|setup)|stays open from (section|the)|already open|^[\s\-–—.]*$",
+    re.IGNORECASE)
 
 
 class PlanError(Exception):
@@ -123,6 +128,10 @@ def problems_of(plan, bundle):
                 out.append(f"section {key}: title is one line of at most {size} characters")
             elif len(v) > size:
                 out.append(f"section {key}: {field} is over {size} characters")
+        agent = sec.get("agent")
+        if i > 0 and isinstance(agent, str) and IDLE_AGENT.search(agent):
+            out.append(f"section {key}: its agent step does nothing (\"{agent.strip()}\"). A new section starts only where you must do something first; "
+                       f"move its steps to the end of section A (as A.{len(sections[0].get('steps') or []) + 1}, …), keeping their verifies.")
         steps = sec.get("steps")
         if not isinstance(steps, list) or not steps:
             out.append(f"section {key}: needs at least one developer step")
