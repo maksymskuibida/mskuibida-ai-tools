@@ -21,7 +21,8 @@ What it enforces (PreToolUse, exit code 2 and the reason on stderr)
   * An agent never writes status done on a findings form.
   * Once Fix or Accept is answered in chat, the gate, the reports and (code review) edits and commits wait until
     `findings.py answers` printed the summary of the answers and it matches what was recorded. Answers from a done
-    form need no summary.
+    form need no summary. With the plugin option `answerSummary` false (env CLAUDE_PLUGIN_OPTION_answerSummary) no
+    summary is required: the answer settles at once.
   * A done form with cards in Fix (a stage review) is Request Changes: the Approval question and an approved report
     are refused, and the rejected report's --reason names every Fix card. Fixing the cards in place and getting a
     later review pass of the same stage (and Unit) back READY settles them: the PostToolUse of
@@ -721,11 +722,23 @@ def form_wait(pend):
     return None
 
 
+def answer_summary_on():
+    """The plugin option `answerSummary` (userConfig, default true). Claude Code hands a plugin's options to its hook
+    commands as CLAUDE_PLUGIN_OPTION_<name> environment variables; false/0/off/no turns the summary of the answers
+    off, anything else (or unset) keeps it."""
+    for name in ("CLAUDE_PLUGIN_OPTION_answerSummary", "CLAUDE_PLUGIN_OPTION_ANSWERSUMMARY",
+                 "CLAUDE_PLUGIN_OPTION_ANSWER_SUMMARY"):
+        value = os.environ.get(name)
+        if value is not None:
+            return value.strip().lower() not in ("false", "0", "off", "no")
+    return True
+
+
 def summary_wait(pend):
     """Why the next step waits for the summary of the developer's answers, or None: once Fix or Accept is answered in
     chat the agent prints it with `findings.py answers` and sends it as written. Answers from a done form need no
     summary: the developer wrote them in the form themselves."""
-    if not pend.get("asked") or pend.get("summarized") or pend.get("answer") == "form":
+    if not pend.get("asked") or pend.get("summarized") or pend.get("answer") == "form" or not answer_summary_on():
         return None
     return ("Send the summary of the developer's answers first: run `python3 "
             f"{os.path.join(SCRIPTS, 'findings.py')} answers --findings {pend.get('file') or '<the saved findings file>'}` "
@@ -1265,6 +1278,12 @@ def on_triage(event, state, pend, answer):
     if choice in ("fix", "accept"):
         remember(event, pend, {f["id"]: (choice, "") for f in pend.get("findings") or []})
     first = (summary_wait(pend) or "") + " "
+    if choice in ("fix", "accept") and not answer_summary_on():
+        # answerSummary is off: the answer settles as it would after the summary, with nothing printed first
+        pend["summarized"] = True
+        first = "No summary of the answers is sent (the answerSummary option is off): act on the answer now."
+        if code:
+            state["pending"] = None
     if choice == "fix":
         if code:
             return (f"the developer chose Fix. {first}Then apply the fixes (the --fix flow) and say what changed, finding "
