@@ -19,6 +19,8 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from bundle_helpers import JUDGED  # noqa: E402
 
+import registry_isolation  # noqa: F401  (the hook writes the artifact-links registry: to a temporary folder)
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 PLUGIN = os.path.dirname(HERE)
 HOOK = os.path.join(PLUGIN, "hooks", "gate_guard.py")

@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import unittest
+from unittest import mock
 
 from test_gate_guard import INTENT, URL, Case
 from test_unit_rhythm_guard import UNIT, UnitCase
@@ -17,8 +18,9 @@ import aidlc_links  # noqa: E402
 class Registry:
     def use_registry(self):
         self.links_dir = os.path.join(self.tmp, "links-data")
-        os.environ["AIDLC_ARTIFACTS_DIR"] = self.links_dir
-        self.addCleanup(os.environ.pop, "AIDLC_ARTIFACTS_DIR", None)
+        patch = mock.patch.dict(os.environ, {"AIDLC_ARTIFACTS_DIR": self.links_dir})
+        patch.start()
+        self.addCleanup(patch.stop)
 
     def entries(self):
         return aidlc_links.entries(self.project, "default", INTENT)
