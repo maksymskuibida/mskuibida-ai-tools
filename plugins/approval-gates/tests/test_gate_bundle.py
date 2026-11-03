@@ -502,3 +502,25 @@ class TestFindingsOnThePage(Case):
         code, _out, err = self.run_script("--stage", "user-stories", "--no-brief", "--findings", self.findings_file(False))
         self.assertEqual(code, 1)
         self.assertIn("no suggested action for R-03", err)
+
+
+class TestDigest(Case):
+    def test_the_gate_row_carries_the_stages_items_and_trace(self):
+        self.summary("--stage", "user-stories", "--no-brief")
+        d = self.gate()["digest"]
+        self.assertIn("US1.1", [i["id"] for i in d["items"]])
+        self.assertEqual(d["trace"][0], {"from": "FR1", "to": "US1.1", "ok": True})
+
+    def test_an_uncovered_trace_row_is_refused_with_how_to_handle_it(self):
+        path = os.path.join(self.project, "aidlc", "spaces", "default", "intents", "260101-bakery-preorder", "inception",
+                            "user-stories", "traceability.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"coverage": [{"id": "FR3", "status": "MISSING"}]}, f)
+        code, _out, err = self.run_script("--stage", "user-stories", "--no-brief")
+        self.assertEqual(code, 1)
+        self.assertIn("FR3", err)
+        self.assertIn("--handling", err)
+        handling = os.path.join(self.tmp, "handling.json")
+        with open(handling, "w", encoding="utf-8") as f:
+            json.dump({"FR3": {"acceptanceReason": {"text": "Out of scope for this intent.", "by": "agent"}}}, f)
+        self.summary("--stage", "user-stories", "--no-brief", "--handling", handling)
