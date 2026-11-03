@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ -d \"${CLAUDE_PROJECT_DIR:-.}/aidlc/spaces\" ] || [ -d ./aidlc/spaces ] || exit 0; command -v python3 >/dev/null 2>&1 || { if ls \"${APPROVAL_GATES_DIR:-$HOME/.claude/approval-gates}\"/*.json >/dev/null 2>&1; then echo 'Refused by the approval-gates plugin: python3 is not installed, so an open approval gate cannot be checked. Install Python 3 or disable the plugin.' >&2; exit 2; fi; exit 0; }; python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/gate_guard.py\""
+            "command": "[ -d \"${CLAUDE_PROJECT_DIR:-.}/aidlc/spaces\" ] || [ -d ./aidlc/spaces ] || exit 0; command -v python3 >/dev/null 2>&1 || { if ls \"${APPROVAL_GATES_DIR:-$HOME/.claude/approval-gates}\"/*.json >/dev/null 2>&1; then printf '%s\\n' 'Refused: this call, because python3 is not installed, so an open approval gate cannot be checked.' 'Do this:' '1. Tell the developer in one line: \"approval-gates needs Python 3: install it (https://www.python.org/downloads/), or disable the approval-gates plugin.\"' '2. End your turn and wait for their message, then make the same call again.' 'It worked when: the same call goes through.' '(Blocked by the approval-gates plugin. The developer can release it by typing /approval-gates:release.)' >&2; exit 2; fi; exit 0; }; python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/gate_guard.py\""
           }
         ]
       }

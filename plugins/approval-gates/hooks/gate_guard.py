@@ -73,10 +73,37 @@ OPENING = {"awaiting-approval", "revised"}
 RELEASE_PROMPT = re.compile(r"^\s*/(?:(approval-gates):)?release\b")
 OPS = re.compile(r"^[();<>|&]+$")
 RELEASE_HINT = "(Blocked by the approval-gates plugin. The developer can release it by typing /approval-gates:release.)"
+SCRATCH = "<your scratchpad folder>"
+
+
+def one_line(text):
+    return re.sub(r"\s+", " ", str(text)).strip()
+
+
+def shaped(what, steps, check):
+    """The one shape of every refusal: what was refused and why on one line, numbered steps to follow word for word,
+    and how to tell they worked."""
+    return "\n".join(["Refused: " + one_line(what), "Do this:"]
+                     + [f"{n}. {one_line(step)}" for n, step in enumerate(steps, 1)]
+                     + ["It worked when: " + one_line(check)])
 
 
 class Refusal(Exception):
-    pass
+    """A refused call. str() is the shaped message the hook prints."""
+
+    def __init__(self, what, steps, check):
+        self.what, self.steps, self.check = what, list(steps), check
+        super().__init__(shaped(what, self.steps, check))
+
+
+def retry_steps(problem):
+    """The steps when the guard itself cannot check: try once more, then hand the developer the release."""
+    return ["Make the same call once more, unchanged.",
+            f"If it is refused again, tell the developer in one line: \"The approval-gates check failed ({one_line(problem)}); "
+            "please type /approval-gates:release.\" Then end your turn and wait for their message."]
+
+
+RETRY_CHECK = "the same call goes through, or, after the developer typed /approval-gates:release, it goes through then."
 
 
 # ---------------------------------------------------------------- state
@@ -116,7 +143,8 @@ def load(event):
     except FileNotFoundError:
         return blank()
     except (OSError, ValueError) as exc:
-        raise Refusal(f"the approval-gates state of this session cannot be read ({exc}).") from None
+        raise Refusal(f"this call, because the approval-gates record of this session ({state_path(event)}) cannot be read.",
+                      retry_steps(f"its record {state_path(event)} cannot be read: {exc}"), RETRY_CHECK) from None
 
 
 def save(event, state):
@@ -537,6 +565,40 @@ def publish_instruction(stage, unit, page=None):
             "AskUserQuestion call (never inside the question, and never end the turn on the link alone)")
 
 
+LINK_THEN_ASK = ("In ONE response, write a text message whose first line is the link `<artifact url>#<id>` (the artifact's "
+                 "URL, `#`, the id you wrote), then call AskUserQuestion with the engine's question as it is, with no link in "
+                 "it. Do not end the turn on the link alone.")
+
+
+def publish_steps(stage, unit, page=None):
+    """The numbered steps that publish the page a gate needs: the unit-end bundle of `page` ("plan" or "unit-end"), or,
+    with no page, the per-stage gates row."""
+    if page:
+        script = os.path.join(PLUGIN_ROOT, "scripts", "unit_bundle.py")
+        return [f"Run `python3 \"{script}\" draft --page {page} --unit {unit} --out {SCRATCH}/bundle.json`.",
+                f"Do every item the draft lists under `todo` in {SCRATCH}/bundle.json.",
+                f"Run `python3 \"{script}\" finalize --bundle {SCRATCH}/bundle.json --out {SCRATCH}/out`; when it prints "
+                "problems, fix them in bundle.json and run it again until it prints none.",
+                f"Send the `writes` array of {SCRATCH}/out/writes.json, as it is, with one ArtifactData batch to the "
+                "\"AI-DLC unit approvals\" artifact (its URL: Artifact `action: \"list\"`). It is a `bundles/<id>` row: never a "
+                "`gates/` row, never the \"AI-DLC approval gates\" artifact.",
+                LINK_THEN_ASK]
+    script = os.path.join(PLUGIN_ROOT, "scripts", "gate_bundle.py")
+    cmd = f'python3 "{script}" --stage {stage}' + (f" --unit {unit}" if unit else "")
+    return [f"Write your summary of the stage, in Markdown, to {SCRATCH}/summary.md.",
+            f"Run `{cmd} --why first --summary-file {SCRATCH}/summary.md --out {SCRATCH}/gate` (`--why revision` after a "
+            "Request Changes round).",
+            f"Send the `writes` array of {SCRATCH}/gate/writes.json, as it is, with one ArtifactData batch to the "
+            "\"AI-DLC approval gates\" artifact (its URL: Artifact `action: \"list\"`); when the script names `batches`, send "
+            "those files in order.",
+            LINK_THEN_ASK]
+
+
+def published_check(page=None):
+    row = "bundles/<id>" if page else "gates/<id>"
+    return f"the hook answers your batch with `{row} is published`, and the question after the link goes through."
+
+
 def target_of(state, project, call_stage=None, call_unit=None):
     """(stage, unit, opened_at or None) the gate in hand is about."""
     pending = state["pending"]
@@ -566,14 +628,23 @@ def tested_first(pub, stage, unit):
     """The developer answered Test first on this page: the gate is asked again only after the test plan, about a page
     republished with its outcome (unit_bundle.py draft --tested)."""
     if pub.get("test_first"):
-        raise Refusal("The developer answered Test first on this unit-end page, so the gate is not asked again until the "
-                      "test plan is done and the page is republished with its outcome: run test_plan.py finish, then "
-                      f"`unit_bundle.py draft --page unit-end --unit {unit} --tested <test-plan.json> ...`, finalize, write the "
-                      "new bundle row and send its link. (If the developer does not want to test after all, they type "
-                      "/approval-gates:release.)")
+        plan_script = os.path.join(PLUGIN_ROOT, "scripts", "test_plan.py")
+        bundle_script = os.path.join(PLUGIN_ROOT, "scripts", "unit_bundle.py")
+        raise Refusal(f"the unit-end Approval question for {unit}, because the developer answered Test first: the gate is "
+                      "asked again only after the test plan is done and the unit-end page is rebuilt with its outcome.",
+                      [f"Finish the test plan as the skill approval-gates:test-plan says; its last command is `python3 "
+                       f"\"{plan_script}\" finish --plan <plan file> --results <results file> --bundle <unit-end bundle.json>`.",
+                       f"Run `python3 \"{bundle_script}\" draft --page unit-end --unit {unit} --tested <the Unit's "
+                       f"code-generation stage folder>/test-plan.json --out {SCRATCH}/bundle.json`, do its `todo` list, then run "
+                       f"`python3 \"{bundle_script}\" finalize --bundle {SCRATCH}/bundle.json --out {SCRATCH}/out`.",
+                       f"Send the `writes` array of {SCRATCH}/out/writes.json with one ArtifactData batch to the \"AI-DLC unit "
+                       "approvals\" artifact.",
+                       LINK_THEN_ASK,
+                       "If the developer says they do not want to test after all, ask them to type /approval-gates:release."],
+                      published_check("unit-end"))
 
 
-def require_published(state, project, stage, unit, opened):
+def require_published(state, project, stage, unit, opened, call="the Approval question"):
     """The record of this stage's gate page, or a Refusal when it was not published since the gate opened. A row
     recorded by its id alone (the stage was unknown when it was written) counts when its id names this stage. Under the
     unit-end rhythm the page is the Unit's bundle of the page the gate needs."""
@@ -582,8 +653,9 @@ def require_published(state, project, stage, unit, opened):
         page = page_of(pending)
         pub = state["published"].get(make_key(stage, unit) + "@" + page)
         if not pub or (isinstance(opened, (int, float)) and pub.get("at", 0) < opened):
-            raise Refusal(f"The developer reads the Unit's {'plan' if page == 'plan' else 'unit-end'} page before being asked. "
-                          f"Publish it first: {publish_instruction(stage, unit, page)}.")
+            raise Refusal(f"{call} for {unit}, because the developer reads the Unit's {page} page before being asked, and it "
+                          "was not published since the gate opened. Publish it first.",
+                          publish_steps(stage, unit, page), published_check(page))
         return pub
     if not (pending and pending.get("stage") == stage and (pending.get("unit") or None) == (unit or None)) \
             and unit_rhythm(project, unit, stage) == "unit-end":
@@ -591,15 +663,18 @@ def require_published(state, project, stage, unit, opened):
         # own directive): the Unit's claim still says its gate is the unit-end page.
         pub = state["published"].get(make_key(stage, unit) + "@unit-end")
         if not pub:
-            raise Refusal("The developer reads the Unit's unit-end page before being asked. "
-                          f"Publish it first: {publish_instruction(stage, unit, 'unit-end')}.")
+            raise Refusal(f"{call} for {unit}, because the developer reads the Unit's unit-end page before being asked, and "
+                          "this session has not published it. Publish it first.",
+                          publish_steps(stage, unit, "unit-end"), published_check("unit-end"))
         return pub
     pub = state["published"].get(make_key(stage, unit))
     if not pub:
         pub = next((p for p in state["published"].values() if id_matches(p.get("id"), None, stage, unit)), None)
     if not pub or (isinstance(opened, (int, float)) and pub.get("at", 0) < opened):
-        raise Refusal("The developer reads the stage's documents in the AI-DLC approval gates page before being "
-                      f"asked. Publish them first: {publish_instruction(stage, unit)}.")
+        raise Refusal(f"{call} for {stage}{(' (' + unit + ')') if unit else ''}, because the developer reads the stage's "
+                      "documents in the AI-DLC approval gates page before being asked, and no page was published since the "
+                      "gate opened. Publish them first.",
+                      publish_steps(stage, unit), published_check())
     return pub
 
 
@@ -628,41 +703,74 @@ def wrong_flow_message(doc_id, stage, unit):
             f"flow: {publish_instruction(stage, unit, 'plan')} (page `unit-end` at the unit-end gate)")
 
 
+def wrong_flow_refusal(doc_id, stage, unit):
+    return Refusal(f"the write to gates/{doc_id}, because it is the wrong page: {unit} was claimed with the unit-end rhythm, so "
+                   f"its {stage} plan approval and its unit-end gate are `bundles/<id>` rows in the \"AI-DLC unit approvals\" "
+                   "artifact, built by unit_bundle.py, not `gates/` rows in the \"AI-DLC approval gates\" artifact. Nothing "
+                   "was written.",
+                   ["Use `--page plan` below at the plan approval (Approve Plan), `--page unit-end` at the unit-end gate."]
+                   + publish_steps(stage, unit, "plan"), published_check("plan"))
+
+
+NO_DEVELOPER_FIELDS = "Never update a row you wrote: a new presentation is a new row with a new id."
+
+
+def unreadable_write(collection, doc_id, maker):
+    return Refusal(f"the write to {collection}/{doc_id}, because its data file cannot be read, so it cannot be checked.",
+                   [f"Check that the `file_path` of that write is a file {maker} wrote, and that it exists (`ls -l <that path>`).",
+                    f"Send the `writes` array of the writes.json {maker} wrote again, as it is, with one ArtifactData batch."],
+                   "the batch goes through with no approval-gates refusal.")
+
+
 def check_gate_rows(tool_input):
     """The developer's fields of a gate row are written by the page only."""
     for op, collection, doc_id, data, _url in writes_of(tool_input):
         if collection == "bundles":
             if op != "set":
-                raise Refusal(f"bundles/{doc_id}: a bundle row is written once, whole, with `set`; the developer's notes "
-                              "and picks live on it. Never update, edit or delete it: a new presentation is a new bundle.")
+                raise Refusal(f"the `{op}` of bundles/{doc_id}, because a bundle row is written once, whole, with `set`: the "
+                              "developer's notes and picks live on it.",
+                              [f"Leave bundles/{doc_id} as it is.",
+                               "If the page must change, build a new presentation: run unit_bundle.py draft, do its todo "
+                               "list, run finalize, and write the new writes.json with one ArtifactData batch (a new id)."],
+                              "the hook answers the new batch with `bundles/<id> is published`.")
             if data is None:
-                raise Refusal(f"The write to bundles/{doc_id} cannot be read, so it cannot be checked. Write the row "
-                              "from the file unit_bundle.py made.")
+                raise unreadable_write("bundles", doc_id, "`unit_bundle.py finalize`")
             if any(str(k).split(".")[0] in ("notes", "picks", "decision") for k in data):
-                raise Refusal(f"bundles/{doc_id}: `notes` and `picks` are written by the developer in the page. Never "
-                              "write them, and never update a row you wrote: a new presentation is a new bundle.")
+                raise Refusal(f"the write to bundles/{doc_id}, because `notes`, `picks` and `decision` are written by the "
+                              "developer in the page.",
+                              ["Remove `notes`, `picks` and `decision` from the row's data.",
+                               "Write the row once, with `set`, from the writes.json `unit_bundle.py finalize` made. "
+                               + NO_DEVELOPER_FIELDS],
+                              "the batch goes through with no approval-gates refusal.")
             continue
         if collection == "plans":
             if op == "delete":
                 continue
             if data is None:
-                raise Refusal(f"The write to plans/{doc_id} cannot be read, so it cannot be checked. Write the row from the "
-                              "file test_plan.py made, or give the data inline.")
+                raise unreadable_write("plans", doc_id, "`test_plan.py publish`")
             if op != "set" and any(str(k).split(".")[0] == "results" for k in data):
-                raise Refusal(f"plans/{doc_id}: `results` are the developer's Pass and Fail in the page. Never write them; "
-                              "read them with ArtifactData get.")
+                raise Refusal(f"the `{op}` of plans/{doc_id}, because `results` are the developer's Pass and Fail, written "
+                              "by the page.",
+                              ["Leave `results` out of the write: to mark an agent step done, update only `agentDone`.",
+                               f"Read the developer's results with ArtifactData `get` of plans/{doc_id}."],
+                              "the update goes through with no approval-gates refusal.")
             if op == "set" and data.get("results"):
-                raise Refusal(f"plans/{doc_id}: a plan row starts with no `results`; the developer's Pass and Fail "
-                              "are written by the page.")
+                raise Refusal(f"the write to plans/{doc_id}, because a plan row starts with no `results`: the developer's "
+                              "Pass and Fail are written by the page.",
+                              ["Write the plan row from the writes.json `test_plan.py publish` made, as it is, with no "
+                               "`results`."],
+                              "the batch goes through with no approval-gates refusal.")
             continue
         if collection != "gates" or op == "delete":
             continue
         if data is None:
-            raise Refusal(f"The write to gates/{doc_id} cannot be read, so it cannot be checked. Write the row "
-                          "from the file gate_bundle.py made, or with data given inline.")
+            raise unreadable_write("gates", doc_id, "`gate_bundle.py`")
         if str(data.get("status", "")).lower() == "decided" or "decision" in data or "notes" in data:
-            raise Refusal(f"gates/{doc_id}: `status: \"decided\"`, `decision` and `notes` are written by the "
-                          "developer in the page. Never write them, and never update a row you wrote.")
+            raise Refusal(f"the write to gates/{doc_id}, because `status: \"decided\"`, `decision` and `notes` are written "
+                          "by the developer in the page.",
+                          ["Remove `status: \"decided\"`, `decision` and `notes` from the row's data.",
+                           "Write the row from the writes.json gate_bundle.py made, as it is. " + NO_DEVELOPER_FIELDS],
+                          "the batch goes through with no approval-gates refusal.")
 
 
 def link_of(pub):
@@ -686,8 +794,7 @@ def link_sent(event, pub, after=False):
     gate_id, needle, since = str(pub.get("id", "")), link_of(pub), pub.get("at")
     path = event.get("transcript_path")
     if not path or not gate_id:
-        raise Refusal("the session transcript is not given, so whether the developer got the page's link cannot "
-                      "be checked.")
+        raise transcript_refusal("the session transcript is not given")
     counts = {"text": 0, "thinking": 0, "tool_use": 0}
     try:
         with open(path, encoding="utf-8") as f:
@@ -712,9 +819,13 @@ def link_sent(event, pub, after=False):
                     if recent and block.get("type") in counts:
                         counts[block["type"]] += 1
     except OSError as exc:
-        raise Refusal(f"the session transcript cannot be read ({exc}), so whether the developer got the page's "
-                      "link cannot be checked.") from None
+        raise transcript_refusal(f"the session transcript cannot be read ({exc})") from None
     return False, counts
+
+
+def transcript_refusal(problem):
+    return Refusal(f"this question, because {problem}, so whether the developer got the page's link cannot be checked.",
+                   retry_steps(problem), RETRY_CHECK)
 
 
 def link_then_ask(event, pub):
@@ -815,14 +926,17 @@ def guard_plan_links(event, state):
     found = unsent_plans(event, state)
     if found:
         plan, counts = found[0]
-        raise Refusal(f"The developer gets the test plan's link before any test-plan question, and no message of yours written "
-                      f"since plans/{plan.get('id', '')} was published carries it. Since then your transcript holds "
+        raise Refusal(f"this question, because the developer gets the test plan's link before any question, and no message of "
+                      f"yours written since plans/{plan.get('id', '')} was published carries it (since then: "
                       f"{counts['thinking']} thinking, {counts['tool_use']} tool-call and {counts['text']} text block(s), none "
-                      "with the link. Thinking is not output and a tool call is not a message: write "
-                      f"`**Read:** {link_of(plan)}` as the text of your message, then make the AskUserQuestion call in this ONE "
-                      "response; never end the turn on the link alone. A response with only the link ends your turn and the developer has "
-                      "no question to answer. Your next response must hold both: the link text block AND this AskUserQuestion "
-                      "call. (A plan written again needs its link again.)")
+                      "with the link; thinking is not output and a tool call is not a message).",
+                      [f"In ONE response, write a text message whose first line is `**Read:** {link_of(plan)}`.",
+                       "In that same response, make the AskUserQuestion call (header \"Test plan\": **Do the agent step for "
+                       "A** / **Change the plan**).",
+                       "Do not end the turn on the link alone: a response with only the link ends your turn and the developer "
+                       "has no question to answer. Your next response must hold both: the link text block AND this "
+                       "AskUserQuestion call."],
+                      "the question goes through. A plan written again needs its link again.")
 
 
 def unit_end_page(state, project):
@@ -869,9 +983,12 @@ def guard_question(event, state, project, questions):
         text = str(q.get("question", ""))
         url = str(pub.get("url", "")).strip()
         if (url and url in text) or re.search(r"claude\.ai/artifact/|#[0-9]{6}-[a-z0-9.-]+-\d{8}T\d{4}\b", text, re.I):
-            raise Refusal("The page's link goes to the developer in a message of its own, before the question; the "
-                          "question text carries no link. Send the link "
-                          f"{link_of(pub)} as a message, then ask the engine's question as it is.")
+            raise Refusal("this Approval question, because its text carries a link: the page's link goes to the developer in "
+                          "a message of its own, before the question, so the dialog stays readable.",
+                          ["Remove every link, URL and gate id from the question text.",
+                           f"In ONE response, write a text message whose first line is exactly this link: {link_of(pub)}",
+                           "Then, in the same response, call AskUserQuestion with the engine's question as it is."],
+                          "the question goes through.")
         pubs[id(q)] = pub
     return pubs
 
@@ -939,7 +1056,7 @@ def genuine_user(entry):
 def read_transcript(event):
     path = event.get("transcript_path")
     if not path:
-        raise Refusal("the session transcript is not given, so whether the developer got the page's link cannot be checked.")
+        raise transcript_refusal("the session transcript is not given")
     entries = []
     try:
         with open(path, encoding="utf-8") as f:
@@ -951,8 +1068,7 @@ def read_transcript(event):
                 if isinstance(entry, dict) and entry.get("type") in ("assistant", "user") and not entry.get("isSidechain"):
                     entries.append(entry)
     except OSError as exc:
-        raise Refusal(f"the session transcript cannot be read ({exc}), so whether the developer got the page's "
-                      "link cannot be checked.") from None
+        raise transcript_refusal(f"the session transcript cannot be read ({exc})") from None
     return entries
 
 
@@ -1130,15 +1246,15 @@ def visible_refusal(case, link, urls, tokens, session_lost):
     else:
         first = ("a link to the page, `<artifact url>#<the row id you wrote>` (find the artifact with Artifact `action: \"list\"`: "
                  "AI-DLC unit approvals, or AI-DLC approval gates), the whole link, nothing else on that line")
-    lost = (" The session was restarted or its record of the page was lost, so this is the link as it is found again, not "
+    lost = (" The session was restarted or its record of the page was lost, so the link below is found again, not "
             "as it was recorded." if session_lost else "")
-    return (f"Refused: this is an AI-DLC Approval question and {WHY[case]}. Thinking is not output, and tool calls and "
-            f"tool results are not shown to the developer; text written after a question box is not shown either.{lost} Do exactly this, "
-            "in ONE response, in this order:\n"
-            f"1. Write a text message whose first line is {first}\n"
-            "2. Put nothing after the question: no text and no link after the AskUserQuestion call.\n"
-            "3. Then call AskUserQuestion with the engine's question as it is, with no link in it.\n"
-            "Do not end the turn on the link alone.")
+    return Refusal(f"this AI-DLC Approval question, because {WHY[case]}. Thinking is not output, and tool calls, tool results "
+                   f"and text written after a question box are not shown to the developer.{lost}",
+                   [f"Write a text message whose first line is {first}",
+                    "Put nothing after the question: no text and no link after the AskUserQuestion call.",
+                    "Then call AskUserQuestion with the engine's question as it is, with no link in it. Do steps 1 to 3 in "
+                    "ONE response, in this order. Do not end the turn on the link alone."],
+                   "the question goes through.")
 
 
 def guard_visible_link(event, state, project, questions, pubs):
@@ -1161,14 +1277,14 @@ def guard_visible_link(event, state, project, questions, pubs):
             time.sleep(0.2)
         if not ok:
             case = where_it_went(items, link, urls) or "none"
-            raise Refusal(visible_refusal(case, link, urls, tokens, not pub))
+            raise visible_refusal(case, link, urls, tokens, not pub)
 
 
 def guard_report(state, project, call):
     stage, unit, opened = target_of(state, project, call.get("stage") or (current_stage(project) or (None,))[0],
                                     call.get("unit"))
     if stage:
-        require_published(state, project, stage, unit, opened)
+        require_published(state, project, stage, unit, opened, f"`aidlc engine orchestrate report --result {call['result']}`")
 
 
 def pre(event, project):
@@ -1184,7 +1300,7 @@ def pre(event, project):
             if collection == "gates" and doc_id:
                 wrong = unit_end_flow_for(state, project, doc_id)
                 if wrong:
-                    raise Refusal(wrong_flow_message(doc_id, *wrong))
+                    raise wrong_flow_refusal(doc_id, *wrong)
         return
     if tool == "AskUserQuestion":
         state = load(event)
@@ -1217,7 +1333,8 @@ def guarded_pre(event, project):
     except Exception as exc:  # a guarded call that cannot be checked is refused
         if tool == "Bash" and "aidlc" not in str((event.get("tool_input") or {}).get("command", "")):
             return
-        raise Refusal(f"The approval gate could not be checked ({type(exc).__name__}: {exc}).") from None
+        raise Refusal(f"this {tool} call, because the approval gate could not be checked.",
+                      retry_steps(f"{type(exc).__name__}: {exc}"), RETRY_CHECK) from None
 
 
 # ---------------------------------------------------------------- recording
@@ -1499,10 +1616,13 @@ def stop(event, project):
                 plan["stop_blocked"] = time.time()
             save(event, state)
             links = " and ".join(link_of(p) for p in unsent)
-            print(json.dumps({"decision": "block", "reason": f"approval-gates: the test plan {unsent[0].get('id', '')} is "
-                              f"published but its link was never sent, so the developer cannot open it. In ONE response write "
-                              f"`**Read:** {links}` as text, then ask the test-plan question with AskUserQuestion "
-                              f"(**Do the agent step for A** / **Change the plan**). {RELEASE_HINT}"}))
+            print(json.dumps({"decision": "block", "reason": stop_reason(
+                f"ending the turn, because the test plan {unsent[0].get('id', '')} is published but its link was never sent, "
+                "so the developer cannot open it.",
+                [f"In ONE response, write a text message whose first line is `**Read:** {links}`.",
+                 "In that same response, ask the test-plan question with AskUserQuestion (**Do the agent step for A** / "
+                 "**Change the plan**)."],
+                "the question box is shown to the developer.")}))
             return
         pub = pending_page(state, project)
         if pub and not pub.get("asked_at"):
@@ -1514,10 +1634,12 @@ def stop(event, project):
                     sent = False
                 if not sent:
                     pub["stop_blocked"] = time.time()
-                    reason = (f"approval-gates: the gate for {pub.get('id', 'this page')} is published but its question was "
-                              f"never asked, so the developer cannot answer it. The page's link {link_of(pub)} is not sent "
-                              f"yet: in ONE response write `**Read:** {link_of(pub)}` as text, then ask the engine's Approval "
-                              f"question with AskUserQuestion. {RELEASE_HINT}")
+                    reason = stop_reason(
+                        f"ending the turn, because the gate for {pub.get('id', 'this page')} is published but its question "
+                        "was never asked and its link was never sent, so the developer cannot answer it.",
+                        [f"In ONE response, write a text message whose first line is `**Read:** {link_of(pub)}`.",
+                         "In that same response, ask the engine's Approval question with AskUserQuestion, with no link in it."],
+                        "the question box is shown to the developer.")
             if reason is None:
                 reason = bare_link(event, pub, "the engine's Approval question")
             if reason:
@@ -1539,8 +1661,16 @@ def bare_link(event, pub, question):
     if not key or asked or pub.get("bare_blocked") == key:
         return None
     pub["bare_blocked"] = key
-    return (f"approval-gates: The link is sent; now ask {question} with AskUserQuestion — it will be allowed. "
-            f"Do not write the link again. {RELEASE_HINT}")
+    return stop_reason(f"ending the turn here. The link is sent; now ask {question} with AskUserQuestion — it will be "
+                       "allowed.",
+                       ["Do not write the link again.",
+                        f"Call AskUserQuestion with {question}, with no link in it."],
+                       "the question box is shown to the developer.")
+
+
+def stop_reason(what, steps, check):
+    """A blocked stop has the shape of a refusal too."""
+    return "approval-gates: " + shaped(what, steps, check) + "\n" + RELEASE_HINT
 
 
 def post(event, project):
@@ -1627,7 +1757,7 @@ def main():
         elif name == "Stop":
             stop(event, project)
     except Refusal as why:
-        print(f"{why} {RELEASE_HINT}", file=sys.stderr)
+        print(f"{why}\n{RELEASE_HINT}", file=sys.stderr)
         return 2
     except Exception:  # never break the call the engine's own hooks sit beside
         return 0

@@ -232,6 +232,10 @@ record and from your ArtifactData writes in the transcript) and names it in the 
 word for word. If the developer says they do not see the form or the page, write the link again as text before anything else.
 The test-plan flow (§ 7) is the same: the unit-end question asked again after the test plan needs the new page's link as text.
 
+**A refusal is a recipe.** Every refusal of the guard starts `Refused: <what>, because <why>`, lists `Do this:` steps
+1, 2, 3 …, and ends `It worked when: …`. Follow the steps in order, word for word (the paths and links in them are exact;
+`<your scratchpad folder>` is yours to fill in), then check the last line.
+
 `hooks/gate_guard.py` refuses the Approval question and the approved, rejected or accepted report until
 a `gates` row for the stage (under the unit-end rhythm: the `bundles` row of the page the gate needs) was written in this session after the gate was opened and a message of yours
 (in the session's transcript) carries its link `<artifact url>#<id>`, and refuses a question that carries

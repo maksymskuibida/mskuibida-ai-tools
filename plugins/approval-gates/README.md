@@ -173,6 +173,11 @@ the `--reason` of the rejected report. It never writes your notes, and never upd
 - `aidlc engine orchestrate report … --result approved|rejected|accepted` before that row exists.
 - A write to `gates/<id>` that carries `notes` (or a decision field: the page records none).
 
+Every refusal (1.20.0) has one shape: a first line `Refused: <what>, because <why>`, then `Do this:` with numbered
+steps the agent can follow word for word (exact commands, script paths and links where they are known), then `It worked
+when: <how to tell>`, then how the developer releases the guard. A blocked stop has the same shape. The tests hold every
+refusal they meet to it.
+
 It does nothing outside an AI-DLC project (no `aidlc/spaces`), on input it cannot read, and in the
 after-call and prompt hooks it never fails. The project is the working directory's (or its nearest parent's)
 when that holds one, before `CLAUDE_PROJECT_DIR`: in a git worktree the latter is the main checkout, whose
