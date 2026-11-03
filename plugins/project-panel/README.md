@@ -398,6 +398,25 @@ Until Units Generation has finished and produced Units, Construction's seven sta
 is listed with its stages but carries no count or ring (its row says `not included yet`, in `local only`'s amber), and the plan counts only the other phases. Once the Units exist
 (or when Units Generation is skipped), Construction counts again, as below.
 
+### Links to a stage's pages (0.27.0)
+
+Under a stage's row (and under a Unit's, when its stages are not rows of their own) the panel lists the artifact pages
+and forms made for it: gate pages (`Gate page · round 2`), the unit plan and unit-end pages (`Unit-end page v6`), test
+plans (`Test plan v2`) and questions forms. They are read from the registry the publishing plugins write
+(`~/.claude/plugins/data/aidlc-artifacts/links/…`, `$AIDLC_ARTIFACTS_DIR` moves it; see `shared/aidlc-links/` in the
+repository): approval-gates and question-forms record each page at the moment they publish it.
+
+- **Newest first**, each an underlined accent link (`↗`). Older rounds of a kind fold behind `n older`.
+- **Open or folded.** A stage in progress, awaiting approval, revising or reopened shows its links; a finished or later
+  stage shows `▸ Links (n)`. A press on the toggle is the person's own choice and is kept like a section's fold.
+- **Checked before shown.** An entry shows only when its intent, its stage (in the phase it names) and its Unit exist in
+  `aidlc-state.md` and the Unit list. A Unit's plan, unit-end and test-plan pages belong to code-generation only; a
+  `unit-end` Unit has no gate page of a design stage, so one recorded for it is dropped. A Unit's questions forms sit
+  under their own stage.
+- **Units.** The claimed Unit's stage rows carry that stage's links; a Unit nobody here claimed carries all of its pages
+  on its row in Units, each named with its stage.
+- **Copy.** Every word is in `src/strings/en.ts`.
+
 ### Construction by Unit (0.10.0)
 
 Once Units Generation has cut the intent into Units, Construction is not seven stages. Five of them

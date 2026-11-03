@@ -80,6 +80,11 @@ export type ProviderContext = {
   /** Epoch ms. */
   now: number
   options: PanelOptions
+  /**
+   * The folder every plugin's copy of scripts/aidlc_links.py writes the registry of published AI-DLC pages to
+   * (`~/.claude/plugins/data/aidlc-artifacts`, or $AIDLC_ARTIFACTS_DIR). Absent = no links are shown.
+   */
+  linksDir?: string
 }
 
 export type PanelOptions = {
@@ -189,6 +194,15 @@ export type Chip = {
   href?: string
 }
 
+/** One page or form made for an AI-DLC stage (or Unit): a link the item draws under its row. Display text, resolved by the provider. */
+export type ItemLink = {
+  /** The published page's link: `<artifact url>#<row id>`. */
+  href: string
+  label: string
+  /** A newer one of the same kind exists: drawn behind the item's "n older" row. */
+  isOlder: boolean
+}
+
 export type Item = {
   id: string
   /** One line. */
@@ -233,6 +247,10 @@ export type Item = {
   group?: string
   /** What the item weighs in the plan (`1 pt`), drawn after its chips (a grey pill on the desktop); display text. */
   points?: string
+  /** The artifact pages and forms made for the item, newest first (the AI-DLC provider reads them from the links registry). */
+  links?: ItemLink[]
+  /** Default fold of `links`: open for a stage in progress or awaiting approval; the person's own choice wins. */
+  isLinksOpen?: boolean
 }
 
 export type Section = {

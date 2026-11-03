@@ -58,3 +58,7 @@ claude plugin install question-forms@mskuibida-tooling
 plugin — its `review-pr`, `address-review` and `self-review` skills and its `review_flow` hook.
 That plugin is not in this marketplace. Without it, questions files and text questions work as
 described; the board-form procedure is there for whichever skill opens a board.
+
+## Registry of published forms (1.9.0)
+
+A form row whose `file` is a questions file under a stage's folder is also written, by the hook, to the shared registry of AI-DLC artifact links (`scripts/aidlc_links.py`; see `shared/aidlc-links/`), so the project panel can list it under its stage.

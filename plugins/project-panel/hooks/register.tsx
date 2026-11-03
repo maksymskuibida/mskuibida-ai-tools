@@ -98,13 +98,20 @@ function pollSeconds(value: unknown, fallback: number, min: number): number {
 }
 
 async function contextOf($: EngineInterface, settings: Settings, tally?: FsTally): Promise<ProviderContext> {
-  const [startDir, sessionId, now] = await Promise.all([$.session.root(), $.session.id(), $.clock.now()])
+  const [startDir, sessionId, now, home, linksDir] = await Promise.all([
+    $.session.root(),
+    $.session.id(),
+    $.clock.now(),
+    $.env.get('HOME').catch(() => undefined),
+    $.env.get('AIDLC_ARTIFACTS_DIR').catch(() => undefined),
+  ])
   return {
     fsx: fsxOf($, tally),
     host: hostOf($),
     startDir,
     sessionId,
     now,
+    ...(linksDir ? { linksDir } : home ? { linksDir: `${home}/.claude/plugins/data/aidlc-artifacts` } : {}),
     options: {
       stageBranchPattern: settings.stageBranchPattern,
       foldSeparator: settings.foldSeparator,

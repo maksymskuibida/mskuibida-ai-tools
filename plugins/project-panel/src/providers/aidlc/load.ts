@@ -39,6 +39,7 @@ import { POINTS_FILE, isUncommitted, resolvePoints } from './points'
 import type { UnitPoints } from './points'
 import type { Unit, UnitCell, UnitProgress } from './units'
 import { reviewNext } from '../review/view'
+import { attachLinks, readLinks } from './links'
 import type { ParsedPhase, ParsedStage, ParsedState, PhaseStatus, Selection, Workspace } from './types'
 
 const SLUG = /^[a-z0-9][a-z0-9-]*$/
@@ -81,6 +82,17 @@ export async function loadAidlc(ctx: ProviderContext, detection: Detection): Pro
       ? NO_STAGE_POINTS
       : parseStagePoints(await fsx.read(stagePointsPath), parsed.phases.flatMap(phase => phase.stages.map(stage => stage.slug)))
   const sections = text === null ? [] : sectionsOf(parsed, step.stage, view, two, units, stagePoints)
+  // The pages and forms the publishing plugins registered for this intent's stages, each shown where its stage is.
+  if (ctx.linksDir !== undefined && ctx.linksDir !== '' && selection.intent !== null && sections.length > 0) {
+    const { path, entries } = await readLinks(fsx, ctx.linksDir, workspace.root, selection.space, selection.intent)
+    watch.push(path)
+    attachLinks(sections, entries, {
+      intent: selection.intent,
+      stages: new Map(parsed.phases.flatMap(phase => phase.stages.map(stage => [stage.slug, phase.key.toLowerCase()] as const))),
+      units: new Set(units?.units.map(unit => unit.name) ?? []),
+      claimed: units?.claimed ?? '',
+    })
+  }
   // A park the engine left behind after work resumed (the audit has a later start) holds nothing.
   const isParked = text !== null && (await isStillParked(fsx, parent(selection.statePath) ?? '', parsed.fields['Parked'] ?? ''))
   const gates = collectGates(parsed, sections, view, mode === 'side-job', isParked)
