@@ -299,7 +299,7 @@ class TestTestFirstAtTheGuard(UnitCase):
         call = {"action": "update", "url": URL, "collection": "plans", "doc_id": "x-test-v1-20260101T1000", "data": {"results": {"A.1": {"result": "pass"}}}}
         code, _out, err = self.pre("ArtifactData", call)
         self.assertEqual(code, 2)
-        self.assertIn("Never write them", err)
+        self.assertIn("Leave `results` out of the write", err)
         call["data"] = {"agentDone": ["A"]}
         self.assertEqual(self.pre("ArtifactData", call)[0], 0)
 

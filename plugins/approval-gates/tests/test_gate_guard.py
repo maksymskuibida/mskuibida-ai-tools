@@ -9,6 +9,7 @@ import datetime
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -45,6 +46,17 @@ def gate_question(text, header="Approval", labels=("Approve", "Request Changes")
                            "options": [{"label": label, "description": "x"} for label in labels]}]}
 
 
+REFUSAL_SHAPE = re.compile(r"Refused: [^\n]+\nDo this:\n(?:\d+\. [^\n]+\n)+It worked when: [^\n]+\n"
+                           r"\(Blocked by the approval-gates plugin\.[^\n]*\)\n?$")
+
+
+def assert_refusal_shape(test, text):
+    """What was refused and why on one line, numbered steps (1, 2, 3 ...), how to tell it worked, then the release hint."""
+    test.assertRegex(text, REFUSAL_SHAPE)
+    numbers = [int(n) for n in re.findall(r"(?m)^(\d+)\. ", text)]
+    test.assertEqual(numbers, list(range(1, len(numbers) + 1)), text)
+
+
 class Case(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -67,6 +79,12 @@ class Case(unittest.TestCase):
             event["cwd"] = cwd
         done = subprocess.run([sys.executable, HOOK], input=raw if raw is not None else json.dumps(event),
                               capture_output=True, text=True, env=env, timeout=30)
+        if done.returncode == 2:
+            assert_refusal_shape(self, done.stderr)  # every refusal any test meets has the one shape
+        if event.get("hook_event_name") == "Stop" and done.stdout.strip():
+            reason = json.loads(done.stdout).get("reason", "")
+            self.assertTrue(reason.startswith("approval-gates: "), reason)
+            assert_refusal_shape(self, reason[len("approval-gates: "):])
         return done.returncode, done.stdout, done.stderr
 
     def pre(self, tool, tool_input, **kw):
@@ -225,7 +243,7 @@ class TestTheQuestion(Case):
         self.open_gate()
         code, _out, err = self.ask("User Stories complete. How would you like to proceed?")
         self.assertEqual(code, 2)
-        self.assertIn("The developer reads the stage's documents in the AI-DLC approval gates page", err)
+        self.assertIn("the developer reads the stage's documents in the AI-DLC approval gates page", err)
         self.assertIn("Publish them first", err)
         self.assertIn("--stage user-stories", err)
         self.assertIn(os.path.join(PLUGIN, "scripts", "gate_bundle.py"), err)
@@ -815,6 +833,7 @@ class TestHooksJson(unittest.TestCase):
         done = subprocess.run([sh, "-c", command], capture_output=True, text=True, env=env)
         self.assertEqual(done.returncode, 2)
         self.assertIn("python3 is not installed", done.stderr)
+        assert_refusal_shape(self, done.stderr)
 
 
 class TestStopNet(Case):
@@ -919,3 +938,24 @@ class TestStopNet(Case):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRefusalShape(unittest.TestCase):
+    """Every refusal of the guard has one shape: what was refused and why in one line, numbered steps the agent can
+    follow word for word, and how to tell it worked. The runs above check each refusal a test meets; this checks the
+    shape itself and that no refusal is built any other way."""
+
+    def test_shaped(self):
+        text = guard.shaped("the  thing,\nbecause why.", ["Do one.", "Do two."], "it went.")
+        self.assertEqual(text, "Refused: the thing, because why.\nDo this:\n1. Do one.\n2. Do two.\nIt worked when: it went.")
+        assert_refusal_shape(self, text + "\n" + guard.RELEASE_HINT)
+
+    def test_every_refusal_is_built_with_what_steps_and_check(self):
+        import ast
+        with open(HOOK, encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "Refusal"]
+        self.assertGreater(len(calls), 15)
+        for call in calls:
+            self.assertEqual(len(call.args), 3, f"line {call.lineno}: Refusal(what, steps, check)")
+            self.assertFalse(call.keywords, f"line {call.lineno}")

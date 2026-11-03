@@ -133,7 +133,7 @@ class TestPlanLink(Case):
     def test_the_refusal_says_a_link_only_response_ends_the_turn(self):
         self.publish_plan()
         err = self.ask_plan()[2]
-        self.assertIn("A response with only the link ends your turn and the developer has no question to answer", err)
+        self.assertIn("a response with only the link ends your turn and the developer has no question to answer", err)
         self.assertIn("the link text block AND this AskUserQuestion call", err)
 
     def test_a_link_only_ending_is_blocked_once_per_link_message_and_again_in_a_later_turn(self):
