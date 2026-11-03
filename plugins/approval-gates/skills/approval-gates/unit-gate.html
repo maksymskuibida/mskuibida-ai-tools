@@ -190,6 +190,15 @@ a.aidlc-id:hover { color: var(--accent-strong); }
 /* the one tooltip: every reference and every id link, on hover and on keyboard focus */
 #tip { position: fixed; z-index: 30; max-width: min(360px, calc(100vw - 24px)); padding: 8px 10px; border-radius: 6px; background: var(--tip-bg); color: var(--tip-fg); border: 1px solid var(--tip-line); font: 12px/1.45 var(--body); pointer-events: none; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
 .covered { font-size: 12px; padding: 2px 8px; border-radius: 4px; }
+.handled { flex: none; display: inline-flex; align-items: center; gap: 4px; max-width: 190px; font-size: 12px; font-weight: 500; padding: 2px 8px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-decoration: none; }
+.handled.ok { background: var(--ok-bg); color: var(--ok-fg); }
+.handled.accepted { background: var(--warn-bg); color: var(--warn-fg); }
+.handled.open { background: var(--crit-bg); color: var(--crit-fg); }
+.reason { margin: 0; padding: 6px 16px 10px 114px; font-size: 13px; line-height: 1.5; color: var(--fg); }
+.reason b { color: var(--warn-fg); font-weight: 600; }
+.reason q { font-style: italic; }
+.reason .msg { color: var(--muted); font-size: 12px; }
+@media (max-width: 640px) { .reason { padding-left: 16px; } .handled { max-width: 120px; } }
 .notebox { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
 .notebox label { flex: 1 1 300px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
 .notebox textarea { width: 100%; resize: vertical; padding: 8px 10px; border: 1px solid var(--control); border-radius: 6px; font: inherit; font-size: 13px; color: var(--fg); background: var(--surface); }
@@ -593,6 +602,27 @@ var GateView = (function () {
     return '<span class="testpick" role="group" aria-label="Test this point"><button type="button" data-act="pick" data-key="' + esc(key) + '" data-val="now" aria-pressed="' + (pick === "now") + '">Test now</button><button type="button" data-act="pick" data-key="' + esc(key) + '" data-val="later" aria-pressed="' + (pick === "later") + '">Later</button></span>';
   }
 
+  /* Where a finding, requirement or NFR is handled: a linked row passes (a green chip that opens where), an accepted
+     one carries its reason in a line under the row, folded or not, and a row with neither says it is not handled. */
+  function handledChip(r, bundle) {
+    var c = r.coveredBy;
+    if (!c) return "";
+    var link = c.link || null, label = (link && link.label) || c.text;
+    if (link && link.target) {
+      var t = String(link.target);
+      if (t.indexOf("unit:") === 0) return '<span class="handled ok" title="Handled in ' + esc(t.slice(5)) + '">&#10003; ' + esc(label) + "</span>";
+      return refHtml({ label: "\u2713 " + label, tip: c.text, target: t }, bundle).replace('class="ref"', 'class="handled ok"');
+    }
+    if (c.acceptanceReason) return '<span class="handled accepted" title="' + esc(c.acceptanceReason.text) + '">Accepted, reason below</span>';
+    return '<span class="handled open" title="Nothing links to where this is handled">Not handled</span>';
+  }
+  function reasonLine(r) {
+    var a = r.coveredBy && r.coveredBy.acceptanceReason;
+    if (!a) return "";
+    return '<p class="reason"><b>' + (a.by === "developer" ? "Your reason" : "The agent's reason") + ":</b> " + esc(a.text) +
+      (a.quote ? " <q>" + esc(a.quote) + "</q>" : "") + (a.message ? ' <span class="msg">(' + esc(a.message) + ")</span>" : "") + "</p>";
+  }
+
   function rowHtml(st, bundle, sec, r) {
     var key = anchor(r.id), read = isRead(st, key, r), open = isOpen(st, key, read);
     var t = r.rev ? revTone(r.rev) : null;
@@ -601,7 +631,7 @@ var GateView = (function () {
       '<button type="button" class="twist" data-act="row" data-key="' + esc(key) + '" aria-expanded="' + open + '" aria-label="' + (open ? "Collapse " : "Expand ") + esc(r.id) + '">' + CHEVRON + "</button>" +
       '<span class="rid" title="' + esc(r.id) + '">' + esc(r.id) + "</span>" +
       '<button type="button" class="rtitle" data-act="row" data-key="' + esc(key) + '" title="' + esc(r.title) + '">' + esc(r.title) + "</button>" +
-      revBadge(r) + (r.lookFirst ? '<span class="look">look first</span>' : "") +
+      revBadge(r) + (r.lookFirst ? '<span class="look">look first</span>' : "") + handledChip(r, bundle) +
       (r.where ? '<span class="where' + (r.whereIsPath ? " path" : "") + '" title="' + esc(r.where) + '">' + esc(r.where) + "</span>" : "") +
       (sec.kind === "unverified" ? testPick(st, key) : "") +
       '<span class="lab" style="' + tone(LABEL_TONE[r.label] || "low") + '">' + esc(r.label) + "</span>" +
@@ -609,14 +639,14 @@ var GateView = (function () {
     var body = "";
     if (open) {
       var refs = (r.refs || []).map(function (x) { return refHtml(x, bundle); }).join("");
-      var cov = r.coveredBy ? '<span class="covered" style="' + tone(r.coveredBy.settled ? "ok" : "warn") + '">' + esc(r.coveredBy.text) + "</span>" : "";
+      var cov = r.coveredBy && !r.coveredBy.link && !r.coveredBy.acceptanceReason ? '<span class="covered" style="' + tone(r.coveredBy.settled ? "ok" : "warn") + '">' + esc(r.coveredBy.text) + "</span>" : "";
       body = '<div class="rowbody">' +
         (r.rev && r.revNote ? '<p class="revnote" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">' + esc(r.revNote) + "</p>" : "") +
         "<p>" + esc(r.body) + "</p>" +
         (refs || cov ? '<div class="refs">' + (refs && sec.refsLabel ? "<span>" + esc(sec.refsLabel) + "</span>" : "") + refs + cov + "</div>" : "") +
         noteBox(st, key, "Only if something should change", r.suggestion) + "</div>";
     }
-    return '<div class="row' + (read ? " read" : "") + '" id="' + esc(key) + '"' + idAttr(definedIds(bundle), key) + ' style="' + bg + '">' + head + body + "</div>";
+    return '<div class="row' + (read ? " read" : "") + '" id="' + esc(key) + '"' + idAttr(definedIds(bundle), key) + ' style="' + bg + '">' + head + reasonLine(r) + body + "</div>";
   }
 
   function sectionHead(key, title, hint, open, right) {

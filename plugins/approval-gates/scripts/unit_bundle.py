@@ -57,6 +57,7 @@ sys.path.insert(0, HERE)
 
 import aidlc_ids  # noqa: E402  (the shared copy: the id map of the bundle's `ids`)
 import gate_bundle  # noqa: E402  (same folder: record_root, load_graph, state_field, slugify)
+import handling  # noqa: E402
 import validate_bundle  # noqa: E402
 
 DESIGN_STAGES = ("functional-design", "nfr-requirements", "nfr-design", "infrastructure-design")
@@ -407,16 +408,21 @@ def review_findings(path):
 
 
 def covered_by(steps_raw, finding_id, stage):
-    """'Step 7 settles it' when a code-plan sub-step names the finding with its stage, else None."""
+    """'Step 7 settles it', linked to the first such step of the page, when a code-plan sub-step names the finding with
+    its stage, else None. A step's number on the page is its place in the plan (`step-<n>`)."""
     word = {"functional-design": "functional", "nfr-requirements": "nfr requirements", "nfr-design": "nfr design",
             "infrastructure-design": "infrastructure"}.get(stage, stage)
-    hits = [st["n"] for st in steps_raw for sub in st["subs"]
+    hits = [i for i, st in enumerate(steps_raw, 1) for sub in st["subs"]
             if re.search(r"\b" + re.escape(finding_id) + r"\b", sub) and word in sub.lower()]
     if not hits:
         return None
     hits = sorted(set(hits))
     names = f"Step {hits[0]}" if len(hits) == 1 else "Steps " + ", ".join(map(str, hits[:-1])) + f" and {hits[-1]}"
-    return {"text": f"{names} {'settles' if len(hits) == 1 else 'settle'} it", "settled": True}
+    return {"text": f"{names} {'settles' if len(hits) == 1 else 'settle'} it", "settled": True,
+            "link": {"kind": "step", "target": f"#step-{hits[0]}", "label": names}}
+
+
+NOT_HANDLED = "not handled yet"
 
 
 def findings(unit, stages, defs, questions, steps_raw):
@@ -444,9 +450,13 @@ def findings(unit, stages, defs, questions, steps_raw):
             if cover:
                 row["coveredBy"] = cover
             elif WAIVED.match(status):
-                row["coveredBy"] = {"text": "waived by the reviewer", "settled": True}
+                row["coveredBy"] = {"text": "waived by the reviewer", "settled": True,
+                                    "link": {"kind": "doc", "target": f"path:{rel(path, unit.project)}#{f['id']}",
+                                             "label": "the review"}}
             else:
-                row["coveredBy"] = {"text": "not in the plan", "settled": False}
+                # Nothing in the plan names it: the agent links it to where it is handled or writes why not
+                # (draft's todo says so, finalize refuses the bundle until then).
+                row["coveredBy"] = {"text": NOT_HANDLED, "settled": False}
             rows.append(row)
     return rows
 
@@ -815,6 +825,15 @@ def draft(args):
         todo.insert(0, "write header.lede: what the Unit does, in plain words")
     else:
         todo.insert(0, "check header.lede reads as plain words")
+    unhandled = [r["id"] for s, r in validate_bundle.all_rows(bundle)
+                 if handling.must_be_handled(s.get("kind"), r) and not (handling.linked(r.get("coveredBy"))
+                                                                        or handling.reasoned(r.get("coveredBy")))]
+    if unhandled:
+        todo.insert(0, f"handle {len(unhandled)} row(s) nothing links to ({', '.join(unhandled[:12])}"
+                       f"{' …' if len(unhandled) > 12 else ''}): set coveredBy.link to where each is handled (kind step, "
+                       "doc, code, test or unit; target #step-<n>, path:<file>[#<id>] or unit:<Unit>) and coveredBy.settled "
+                       "true, or write coveredBy.acceptanceReason {text, by: \"agent\"}, or {text, by: \"developer\", quote: "
+                       "<their words>, message: <where they said it>}. finalize refuses the bundle until every one is")
     if revision > 1:
         todo.append(f"header.revisions: say in one line what v{revision} changes")
     todo.append("rewrite every title and body the script took from the records in plain words (titles one line)")

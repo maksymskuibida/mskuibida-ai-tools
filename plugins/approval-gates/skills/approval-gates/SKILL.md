@@ -129,6 +129,12 @@ republish from this file to the same URL after a plugin update.
      `visible` (what people see, stored data, API/MCP shape, security, dependencies), `tests` (grouped, one row per
      group); on the unit-end page an empty `changes` section with `asApproved: true` when the design stays as approved,
      and a `map` of how the built pieces connect.
+   - **Nothing unhandled in silence**: every finding row, and every requirement or NFR row, says where it is handled
+     or why not. The draft links a finding a plan sub-step names (`#step-<n>`) and one the review waived; the `todo`
+     lists the rest. For each: set `coveredBy.link` `{kind: step|doc|code|test|unit, target: #step-<n> |
+     path:<file>[#<id>] | unit:<Unit>}` with `settled: true`, or write `coveredBy.acceptanceReason`. A reason that is the
+     developer's quotes them: `{text, by: "developer", quote: "<their words>", message: "<where: chat answer and date,
+     questions file and Q id, page note>"}`; your own is `{text, by: "agent"}`. Never write "not in the plan" and leave it.
    - **References**: every id you mention gets a `{label, tip, target}`: `#<anchor>` inside the bundle,
      `path:<record>#<id>` for a record. The tip says what the reference says. Ids in any text (a title, a body, a
      sub-step) become links with tooltips on the page by themselves; write them where a reader needs them, plain words
