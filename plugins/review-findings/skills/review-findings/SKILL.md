@@ -1,9 +1,13 @@
 ---
 name: review-findings
-description: Use whenever review findings reach the developer — the review brief printed at an AI-DLC approval gate (`aidlc engine review-brief review --stage …`) with open findings, or the result of a code review (`/code-review`, the ReportFindings tool). Show each open finding in plain words with a suggested action, ask one question first (Fix / Accept / Open in form), and act on the answer; Open in form sorts each finding in a board form in the developer's "AI-DLC question forms" artifact. A hook holds back everything else until the question is answered.
+description: Use when the result of a code review reaches the developer (`/code-review`, the ReportFindings tool): show each open finding in plain words with a suggested action, ask one question first (Fix / Accept / Open in form), and act on the answer; Open in form sorts each finding in a board form in the developer's "AI-DLC question forms" artifact. Not for AI-DLC stage review briefs: with approval-gates 1.22.0 or later those findings go on the gate page (approval-gates skill § 2a) and this plugin's hook steps aside.
 ---
 
 # Review findings
+
+> **Deprecated for AI-DLC stage reviews.** When the approval-gates plugin (1.22.0 or later) is installed, an AI-DLC
+> review brief's findings go on the gate page instead (the approval-gates skill, § 2a): do not ask a Findings question
+> for them. This skill is for code review findings (ReportFindings).
 
 Findings are decisions, not a wall of text. When they reach the developer, the developer first
 says what happens to them: fix them, accept them, or sort them one by one in a form. The

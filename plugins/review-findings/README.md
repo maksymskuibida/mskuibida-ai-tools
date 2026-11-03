@@ -1,5 +1,11 @@
 # review-findings
 
+> **Deprecated for AI-DLC (1.11.0).** Stage review findings now go on the approval gate's page: `approval-gates` 1.22.0
+> fixes what is certain, puts the rest on the page as cards you sort (Fix, Accept, Reject) and reads them back. While
+> approval-gates runs (its hook keeps `~/.claude/approval-gates/findings-owner.json` fresh; `APPROVAL_GATES_DIR` moves
+> it), this plugin does nothing for an AI-DLC brief, review pass or report, and drops a round of them it still holds.
+> It still handles `/code-review` findings (ReportFindings). It leaves the marketplace once nothing depends on it.
+
 When review findings reach you, you decide what happens to them before anything else does. The
 agent shows each open finding in plain words, with a suggested action, and asks one question: **Fix**, **Accept** (only
 when nothing blocks) or **Open in form**. A hook keeps that order.

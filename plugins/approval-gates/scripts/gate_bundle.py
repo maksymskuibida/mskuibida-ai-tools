@@ -2,7 +2,7 @@
 """Build the rows for one AI-DLC approval gate.
 
     gate_bundle.py --stage <slug> [--unit <u>] [--why first|revision|stale] [--summary-file <path>]
-                   [--project-dir <dir>] [--no-brief] --out <dir>
+                   [--project-dir <dir>] [--no-brief] [--findings <file>] --out <dir>
 
 Writes into <dir>:
     gate.json               the `gates/<id>` row
@@ -46,6 +46,10 @@ data for the page's results view: `commands` (every `Check | Command | Result` r
 the Unit from its `###` heading) and `evidence` (the legend of evidence codes). Columns are found by header name;
 what a file does not have is left out, and when nothing is found the field is left out and the page shows the
 stage as any other. Its contract is `contract/build-test.schema.json`.
+Findings: with --findings (the findings file the guard saved when the review brief was printed, after the agent fixed
+what it could fix for certain and recorded the model's suggestions) the gate row carries `findings`, the cards the
+developer sorts on the page (Fix, Accept, Reject with a note); `findings.py cards` is its shape. The script refuses a file
+whose findings lack a suggested action or a finding text. The page writes the developer's sort as `findingPicks`.
 Standard library only.
 """
 
@@ -59,6 +63,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import aidlc_ids  # noqa: E402  (the shared copy, next to this file)
+import findings  # noqa: E402  (the review findings that go on the page as cards)
 import validate_bundle  # noqa: E402
 
 MAX_DOC_BYTES = 200_000
@@ -611,7 +616,14 @@ def build(args):
             print("approval-gates: the Build and Test tables were left out of the row (" + "; ".join(problems[:3]) + ")", file=sys.stderr)
         elif found:
             gate["buildTest"] = found
-    ids = id_map(root, [gate.get("summary", ""), gate.get("brief", "")] + [row["text"] for row, _index, _path in docs],
+    if args.findings:
+        try:
+            gate["findings"] = findings.cards(findings.load_findings(args.findings))
+        except (OSError, ValueError) as why_not:
+            raise BundleError(f"the findings in {args.findings} cannot go on the page: {why_not}") from None
+    card_texts = [" ".join(str(c.get(k, "")) for k in ("title", "plain", "action", "where"))
+                  for c in (gate.get("findings") or {}).get("items", [])]
+    ids = id_map(root, [gate.get("summary", ""), gate.get("brief", "")] + card_texts + [row["text"] for row, _index, _path in docs],
                  sorted({path for _row, _index, path in docs}))
     if ids:
         gate["ids"] = ids
@@ -649,6 +661,7 @@ def main(argv=None):
     ap.add_argument("--summary-file")
     ap.add_argument("--project-dir")
     ap.add_argument("--no-brief", action="store_true")
+    ap.add_argument("--findings", help="the findings file the guard saved: its open findings become cards on the page")
     ap.add_argument("--out", required=True)
     args = ap.parse_args(argv)
     try:

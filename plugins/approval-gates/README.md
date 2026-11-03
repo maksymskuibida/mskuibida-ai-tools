@@ -153,6 +153,27 @@ and pressing it says it is not in this page. Badges explain themselves the same 
 priority, verdicts, statuses, source tags such as `[Q3]` or `[assumption]`, and the change marks. A document whose
 shape is not recognised is Markdown with every H2 a collapsible section.
 
+## Review findings at the gate (1.22.0)
+
+There is no separate Findings question (the `review-findings` plugin is deprecated for AI-DLC). When the review brief
+lists open findings, the agent fixes the ones it can fix for certain and asks the reviewer again; a READY review settles
+them. Every finding left goes on the gate page as a card in a **Findings to sort** block, above the review:
+
+- the title, what it means, the suggested action in bold (the reviewer's, or one sentence a cheap model wrote: a Haiku
+  subagent, recorded with `scripts/findings.py suggest`), where it is, and its severity;
+- **Fix** (goes back with Request Changes), **Accept** (carried as a known risk; not offered on a blocking finding) or
+  **Reject** (not applicable; a reason is required), with a note; saved as you click, as `findingPicks` on the row;
+- findings you sorted Accept or Reject in an earlier round of the same stage are listed once, not asked again.
+
+You answer the gate in chat as before. The agent then reads your sort: Fix cards go into Request Changes by id with
+their action, Reject cards go on the rejected report as `--reject-finding`, Accept cards are carried. A message that is
+just one choice for every card ("fix all", "accept all") counts as your sort.
+
+The hook refuses: a piped or redirected review brief; the gate while a brief was cut off; a gate row that leaves an open
+finding off the page; the Approval question until such a page went out; every closing report until your sort was read;
+Approve while a card is Fix or a blocking card is not Rejected; a rejected report whose `--reason` misses a Fix card or
+that leaves a Reject card out of `--reject-finding`. The page's `findingPicks` are never written by the agent.
+
 ## What the agent does
 
 After `aidlc engine orchestrate report --result awaiting-approval` (or `revised`), it runs

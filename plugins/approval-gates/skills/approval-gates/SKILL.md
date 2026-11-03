@@ -1,6 +1,6 @@
 ---
 name: approval-gates
-description: Use at every AI-DLC approval gate (and, at a unit-end gate answered Test first, for the test plan of its not-verified points: § 7). First read aidlc/.aidlc-unit-scope.json: for the Code Generation plan approval and the unit-end gate of a Unit claimed with gate_rhythm "unit-end" go straight to the unit-end flow (unit_bundle.py, a bundles/ row in "AI-DLC unit approvals"); every other gate follows the per-stage flow. Per-stage flow: right after `aidlc engine orchestrate report --result awaiting-approval` (or `--result revised`) and before the Approval question — publish the stage's documents as a page in the developer's "AI-DLC approval gates" artifact and send its link in a message of its own before the gate question. Also when the developer answered, to read the notes they left in the page.
+description: Use at every AI-DLC approval gate (and, at a unit-end gate answered Test first, for the test plan of its not-verified points: § 7). First read aidlc/.aidlc-unit-scope.json: for the Code Generation plan approval and the unit-end gate of a Unit claimed with gate_rhythm "unit-end" go straight to the unit-end flow (unit_bundle.py, a bundles/ row in "AI-DLC unit approvals"); every other gate follows the per-stage flow. Per-stage flow: right after `aidlc engine orchestrate report --result awaiting-approval` (or `--result revised`) and before the Approval question — publish the stage's documents as a page in the developer's "AI-DLC approval gates" artifact and send its link in a message of its own before the gate question. Also when the review brief is printed with open findings (no Findings question: fix what is certain, put the rest on the gate page as cards the developer sorts), and when the developer answered, to read the notes and the finding sort they left in the page.
 ---
 
 # Approval gates
@@ -75,8 +75,40 @@ stage has a reviewer:
 The plan checkpoint of Code Generation (Approve Plan) is a gate too: the same steps, with its
 `code-generation-plan.md`.
 
+## 2a. Review findings: fix what is certain, the rest goes on the page
+
+There is no Findings question any more (the `review-findings` plugin is deprecated for AI-DLC). When the review brief
+(`aidlc engine review-brief review --stage …`, printed **unpiped and in full**: the hook refuses a pipe or a redirect,
+and a cut-off brief holds the gate) lists open findings, the hook's message names them and the findings file it saved
+(`<state dir>/<session>.findings.json`). Then:
+
+1. **Fix what you can fix for certain**: a clear, local change with one obvious result. Leave anything that needs a
+   judgment, touches another stage or Unit, or that you are not sure of. Ask nothing in chat for these.
+2. **Ask the reviewer again** when you fixed any: `aidlc engine log review --stage <s> [--unit <u>] --reviewer <r>
+   --iteration <N+1>`, dispatch the reviewer, log its verdict, then print the brief again. READY settles every finding
+   (nothing goes on the page); otherwise the new brief is the new list. If the engine's review freeze refuses an edit,
+   leave that finding for the page.
+3. **Suggested actions from a cheap model.** For each finding left with no reviewer action, dispatch a Haiku subagent
+   (`Agent`, `model: "haiku"`) with the finding texts: one plain sentence each, starting with a verb, no ids or paths,
+   `"none"` when nothing needs to change. Record them: `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/findings.py" suggest
+   --findings <file> --set '{"R-03": "…"}'`. Short titles the same way with `titles` (optional).
+4. **Cards on the page**: add `--findings <file>` to the `gate_bundle.py` call of § 2. Every open finding becomes a
+   card the developer sorts on the page: **Fix**, **Accept** (never on a blocking finding) or **Reject** (with a
+   reason). The hook refuses a gate row without them, and the Approval question until such a page went out. Findings
+   sorted Accept or Reject in an earlier round of the same stage are not shown again ("Already answered").
+
+Under the unit-end rhythm the findings you leave go on the Unit's bundle page as rows of its findings section, each with
+`coveredBy` saying where it is handled or why not (§ 5).
+
 ## 3. After the answer
 
+- **When the page has finding cards: read the sort first**, whatever the answer: `get` `gates/<id>`, field
+  `findingPicks` (`{<finding id>: {pick: fix|accept|reject, note}}`); the hook tells you what it holds and refuses every
+  closing report until you read it. **Fix** cards are Request Changes: name each in `--reason` with its action and
+  the developer's note. **Reject** cards go on the rejected report as `--reject-finding "<review artifact>#R-NN=<note>"`
+  (with nothing to fix, carry them like an Accept and quote the note in chat). **Accept** cards are carried. A blocking
+  card that is neither Fix nor Reject holds Approve: say so in one line and ask the developer to sort it. A typed answer
+  that is just one choice for every card ("fix all", "accept all") counts as the sort; Accept never covers a blocking card.
 - `Approve`: the engine's approved report, as usual.
 - **Build and Test only: the target picks.** Whatever the answer, `get` `gates/<id>` and read `targetPicks`
   (`{<target id>: {pick, note?}}`, written by the page: `accept`, `followup` or `fix`). Act on them with the answer:
@@ -94,7 +126,7 @@ The plan checkpoint of Code Generation (Approve Plan) is a gate too: the same st
 
 ## 4. Never
 
-Never write `notes` or `targetPicks` (they are the developer's) or any decision field (the decision is given in chat),
+Never write `notes`, `targetPicks` or `findingPicks` (they are the developer's) or any decision field (the decision is given in chat),
 and never update a row: each presentation is a fresh id.
 
 ## 5. Unit-end flow: a Unit with the unit-end rhythm

@@ -49,6 +49,10 @@
       a block's read dot. Block keys: "summary", "review", or a document key. A mark holds the hash of the
       text read, so on a new round only the blocks whose text changed turn unread.
 
+    gates/<id>.findingPicks[<finding id>] = {pick: "fix"|"accept"|"reject", note?, at}   when the row carries `findings`
+      (gate_bundle.py --findings: {stage, open, blocking, items[] {id, title, plain?, action, actionBy, where?, severity,
+      blocking, proposed, why, refs}, carried[]}): the developer's sort of each review finding Claude could not fix for
+      certain. Accept is never offered on a blocking finding; Reject needs a note. Saved with the same debounce as the notes.
     gates/<id>.targetPicks[<target id>] = {pick: "accept"|"followup"|"fix", note?}   Build and Test only: the developer's
       decision on a Not Met or Unverified target, saved with the same debounce as the notes.
   Build and Test: when gates/<id> carries `buildTest` (gate_bundle.py writes it for the build-and-test stage; shape in
@@ -688,6 +692,17 @@ figure.screen > details.sub { margin: 0; padding: 4px 12px 6px; border-top: 1px 
 .dfoot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .dfoot .stat { margin-left: auto; font-size: 12px; color: var(--muted); }
 .dfoot .stat.ok { color: var(--ok-fg); } .dfoot .stat.warn { color: var(--crit-fg); }
+/* review findings the agent left for you: one card each, Fix / Accept / Reject with a note */
+.dcard.fcard.blocking { border-left-color: var(--crit-fg); } .dcard.fcard.carried { border-left-color: var(--warn-dot); }
+.fcard h3 { margin: 0; font-size: 15px; line-height: 1.4; font-weight: 600; overflow-wrap: anywhere; }
+.fcard .fplain { margin: 0; font-size: 13px; color: var(--fg-2); line-height: 1.5; }
+.fcard .faction { margin: 0; padding: 8px 10px; border-radius: 6px; background: var(--accent-tint); font-size: 13px; line-height: 1.5; }
+.fcard .faction b { color: var(--accent); margin-right: 6px; }
+.fcard .fwhere { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.fcard .fsugg { font-size: 12px; color: var(--muted); }
+.dpick button:disabled { opacity: .45; cursor: not-allowed; }
+.fcard .need { font-size: 12px; color: var(--crit-fg); }
+.fcarried { margin: 10px 0 0; font-size: 13px; color: var(--muted); }
 .refgrp > .body { display: grid; gap: 12px; padding-left: 12px; }
 @media (max-width: 767px) {
   .bt-strip { grid-template-columns: minmax(0, 1fr); }
@@ -767,7 +782,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
 
   let db = null, uid = null, tipOn = null;
   const fresh = () => ({ unsub: [], gate: null, docs: new Map(), docsLoaded: false, notes: {}, dirty: new Set(), noteStat: {}, unsaved: false, saving: false, failed: false,
-    noteTimer: null, painted: "", openNotes: new Set(), railSig: "", mode: {}, picks: {}, bt: { v: new Set(), u: new Set(), q: "", rows: new Set() }, refs: new Map(), ids: {}, railOpen: {},
+    noteTimer: null, painted: "", openNotes: new Set(), railSig: "", mode: {}, picks: {}, fpicks: {}, bt: { v: new Set(), u: new Set(), q: "", rows: new Set() }, refs: new Map(), ids: {}, railOpen: {},
     reads: {}, readKey: "", hashes: {}, filter: "all", prev: null, prevDocs: null, changed: {}, changedSecs: {} });
   const view = Object.assign({ id: "", diagrams: 0 }, fresh());
   const hasMd = () => typeof marked !== "undefined" && typeof DOMPurify !== "undefined";
@@ -954,7 +969,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     el.crumbs.innerHTML = `<a href="#">All gates</a><span aria-hidden="true">/</span><span>${esc(g.intent || "")}</span>${g.phase ? `<span aria-hidden="true">/</span><span>${esc(upper(g.phase))}</span>` : ""}` +
       `<span class="status" tabindex="0" data-tip="The page holds no decision: Claude asks the gate question in chat, and a note you leave here goes with your answer"><i aria-hidden="true"></i>Answer in chat</span>`;
     setStatus(g.project || "");
-    if (!view.unsaved && !view.saving) { view.notes = Object.assign({}, g.notes || {}); view.picks = JSON.parse(JSON.stringify(g.targetPicks || {})); }
+    if (!view.unsaved && !view.saving) { view.notes = Object.assign({}, g.notes || {}); view.picks = JSON.parse(JSON.stringify(g.targetPicks || {})); view.fpicks = JSON.parse(JSON.stringify(g.findingPicks || {})); }
     paintAll();
   }
 
@@ -984,15 +999,17 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
   function paintAll() {
     if (!view.gate) return;
     const g = view.gate; const docs = docList();
-    const sig = JSON.stringify([view.id, g.summary, g.brief, g.review, docs.map((d) => [d.key, d.title, d.kind, d.text, !!d.pending, !!d.partial]), g.buildTest || null, isDark(), view.mode, view.changed]);
+    const sig = JSON.stringify([view.id, g.summary, g.brief, g.review, docs.map((d) => [d.key, d.title, d.kind, d.text, !!d.pending, !!d.partial]), g.buildTest || null, g.findings || null, isDark(), view.mode, view.changed]);
     if (sig === view.painted) { paintChrome(docs); return; }
     view.painted = sig; view.refs = new Map();
     view.hashes = {}; if (g.summary) view.hashes.summary = hash(g.summary); if (g.brief) view.hashes.review = hash(g.brief);
     docs.forEach((d) => { if (!d.pending) view.hashes[d.key] = hash(d.text); });
+    const FN = fnd(); if (FN) view.hashes.findings = hash(JSON.stringify(FN.items));
     const B = bt(); if (B && B.targets) { view.hashes["bt-matrix"] = hash(JSON.stringify(B.targets)); if (openTargets(B).length) view.hashes["bt-decide"] = hash(JSON.stringify(openTargets(B))); }
     const frag = [];
     if (B) frag.push(btStrip(B));
     if (g.summary) frag.push(`<details class="block sum" open id="b-summary" data-block="summary"><summary>${CARET}<h2>Summary</h2><span class="hint wide">what Claude did in this stage</span><span class="end">${rdot("summary")}</span></summary><div class="body md" id="summarymd"></div></details>`);
+    if (FN) frag.push(findingsBlock(FN));
     if (g.brief) frag.push(briefBlock(g));
     if (B && B.targets && B.targets.length) { frag.push(btMatrixBlock(B)); frag.push(btDecideBlock(B)); }
     if (!docs.length) frag.push(view.docsLoaded ? '<div class="card0 msg"><b>No documents yet.</b><p>Claude writes them with the gate; they appear here as soon as they land.</p></div>' : '<p class="hint">Loading documents…</p>');
@@ -1003,6 +1020,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     if (g.summary) renderMarkdown($("summarymd"), g.summary);
     if (g.brief) fillBrief(g);
     docs.forEach((d, i) => fillDoc(d, i));
+    findingsCount(); Object.keys(view.fpicks).forEach((id) => { const st = view.noteStat["fpick:" + id]; if (st) setNoteStat("fpick:" + id, st[0], st[1]); });
     btRender(); btDecideCount(); { const q = $("bt-q"); if (q) q.value = view.bt.q; }
     Object.keys(view.picks).forEach((id) => { const st = view.noteStat["pick:" + id]; if (st) setNoteStat("pick:" + id, st[0], st[1]); });
     openAll();
@@ -1037,6 +1055,10 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
       out.push({ key: "review", go: "b-brief", short: "Review", count: b ? (open.length ? open.length + " open" : "settled") : "", extra: hi ? `<span class="tag" style="background:var(--crit-bg);color:var(--crit-fg)">${hi} blocking</span>` : "",
         tip: b ? (open.length ? `${plural(open.length, "finding")} the reviewer still wants fixed${hi ? `, ${hi} of them blocking` : ""}` : "The reviewer left no open finding") : "The review brief" });
     }
+    const FN = fnd();
+    if (FN) out.push({ key: "findings", go: "b-findings", short: "Findings", count: fpickedCount(FN) + "/" + FN.items.length,
+      extra: FN.blocking ? `<span class="tag" style="background:var(--crit-bg);color:var(--crit-fg)">${FN.blocking} blocking</span>` : "",
+      tip: "The review findings Claude could not fix for certain: sort each one Fix, Accept or Reject" });
     const B = bt();
     if (B && B.targets && B.targets.length) {
       out.push({ key: "bt-matrix", go: "b-bt-matrix", short: "Matrix", count: String(B.targets.length), tip: "The target matrix: every quality target and how it ended" });
@@ -2782,6 +2804,60 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     }
   });
 
+  /* ---------- review findings: what Claude could not fix for certain, sorted here ---------- */
+  const fnd = () => (view.gate && view.gate.findings && (view.gate.findings.items || []).length) ? view.gate.findings : null;
+  const FPICKS = [["fix", "Fix", "Goes into Request Changes; fixed, then reviewed again"], ["accept", "Accept", "Carried as a known risk; no change"], ["reject", "Reject", "Not applicable; your note says why"]];
+  const fpickedCount = (F) => F.items.filter((f) => fpickDone(f)).length;
+  const fpickDone = (f) => { const p = view.fpicks[f.id] || {}; return !!p.pick && (p.pick !== "reject" || !!(p.note || "").trim()); };
+  function findingCard(f) {
+    const p = view.fpicks[f.id] || {}; const note = (p.note || "").trim(); const id = esc(f.id);
+    const sev = `<span class="tag" style="background:var(--${f.blocking ? "crit" : "warn"}-bg);color:var(--${f.blocking ? "crit" : "warn"}-fg)" data-tip="${esc(f.why || "")}">${esc(f.severity)}${f.blocking ? " · blocks approval" : ""}</span>`;
+    const by = f.actionBy === "model" ? "suggested by a model" : f.actionBy === "reviewer" ? "the reviewer's action" : "";
+    return `<div class="dcard fcard ${f.blocking ? "blocking" : "carried"}${p.pick ? " chosen" : ""}" data-fid="${id}"><div class="dtop">${sev}<span class="mono">${id}</span>${f.proposed ? `<span class="hint" data-tip="${esc(f.why || "")}">suggested: ${esc(f.proposed)}</span>` : ""}</div>` +
+      `<h3>${inline(f.title)}</h3>${f.plain ? `<p class="fplain">${inline(f.plain)}</p>` : ""}` +
+      `<p class="faction"><b>Suggested</b>${inline(f.action || "")}${by ? ` <span class="fsugg">(${esc(by)})</span>` : ""}</p>` +
+      (f.where ? `<span class="fwhere">${esc(f.where)}</span>` : "") +
+      `<div class="dpick" role="radiogroup" aria-label="What to do with ${id}">${FPICKS.map(([k, l, tip]) => {
+        const off = k === "accept" && f.blocking;
+        return `<button type="button" role="radio" aria-checked="${p.pick === k}" data-fpick="${k}" data-fid="${id}"${off ? ' disabled data-tip="A blocking finding is never accepted: fix it, or reject it with a reason"' : ` data-tip="${esc(tip)}"`}>${l}</button>`;
+      }).join("")}</div>` +
+      `<div class="dfoot"><button type="button" class="notebtn" data-fnote="${id}" aria-pressed="${!!note}">${note ? "Your note" : "Add a note"}</button>${p.pick === "reject" && !note ? '<span class="need">Reject needs a reason</span>' : ""}<span class="stat" id="ns-fpick:${id}" aria-live="polite"></span></div>` +
+      `<textarea rows="2" class="dnote fnote" data-fid="${id}" aria-label="Note on ${id}" placeholder="${p.pick === "reject" ? "Why it does not apply (required)" : "Optional: what to keep in mind"}"${note || p.pick === "reject" || view.openNotes.has("fpick:" + f.id) ? "" : " hidden"}>${esc(p.note || "")}</textarea></div>`;
+  }
+  function findingsBlock(F) {
+    const carried = (F.carried || []).map((c) => `${esc(c.id)} (${esc(c.answer === "reject" ? "rejected" : "accepted")})`).join(", ");
+    return `<details class="block fnd" open id="b-findings" data-block="findings"><summary>${CARET}<h2>Findings to sort</h2><span class="hint wide">review findings Claude could not fix for certain</span><span class="end"><span class="pill quiet num" id="f-dcount"></span>${rdot("findings")}</span></summary>` +
+      `<div class="body"><p class="dsum">Sort each one: <b>Fix</b> goes back with Request Changes, <b>Accept</b> carries it as a known risk (not possible for a finding that blocks), <b>Reject</b> says it does not apply and needs your reason. Then answer the gate in chat; Claude reads your sort with it.</p>` +
+      `<div class="dcards">${F.items.map(findingCard).join("")}</div>${carried ? `<p class="fcarried">Already answered in an earlier round: ${carried}.</p>` : ""}</div></details>`;
+  }
+  function findingsCount() { const F = fnd(); const c = $("f-dcount"); if (F && c) c.textContent = fpickedCount(F) + " of " + F.items.length + " sorted"; }
+  function fpickEdited(id, change) {
+    const cur = Object.assign({}, view.fpicks[id] || {}, change);
+    if (cur.pick === undefined) delete cur.pick;
+    if (!cur.pick && !(cur.note || "").trim()) delete view.fpicks[id]; else view.fpicks[id] = Object.assign(cur, { at: new Date().toISOString() });
+    view.dirty.add("fpick:" + id); view.unsaved = true; setNoteStat("fpick:" + id, "Not saved yet");
+    paintSave(); clearTimeout(view.noteTimer); view.noteTimer = setTimeout(flushNotes, 700);
+  }
+  function repaintCard(id) {
+    const F = fnd(); const f = F && F.items.find((x) => x.id === id); const old = el.col.querySelector(`.fcard[data-fid="${CSS.escape(id)}"]`);
+    if (!f || !old) return; const fresh = node(findingCard(f)); old.replaceWith(fresh); linkRefs(fresh); tipTerms(fresh);
+    const st = view.noteStat["fpick:" + id]; if (st) setNoteStat("fpick:" + id, st[0], st[1]);
+    findingsCount(); paintChrome(docList());
+  }
+  el.col.addEventListener("click", (e) => {
+    const pk = e.target.closest("[data-fpick]");
+    if (pk && !pk.disabled) { e.preventDefault(); const id = pk.dataset.fid; const same = (view.fpicks[id] || {}).pick === pk.dataset.fpick; fpickEdited(id, { pick: same ? undefined : pk.dataset.fpick }); repaintCard(id); const ta = el.col.querySelector(`.fnote[data-fid="${CSS.escape(id)}"]`); if (ta && !ta.hidden && (view.fpicks[id] || {}).pick === "reject") ta.focus(); return; }
+    const pn = e.target.closest("[data-fnote]");
+    if (pn) { e.preventDefault(); const card = pn.closest(".fcard"), ta = card.querySelector(".fnote"), id = pn.dataset.fnote; ta.hidden = !ta.hidden; if (ta.hidden) view.openNotes.delete("fpick:" + id); else { view.openNotes.add("fpick:" + id); ta.focus(); } pn.setAttribute("aria-pressed", String(!ta.hidden || !!(ta.value || "").trim())); }
+  });
+  el.col.addEventListener("input", (e) => {
+    if (!e.target.classList || !e.target.classList.contains("fnote")) return;
+    const id = e.target.dataset.fid; fpickEdited(id, { note: e.target.value });
+    const card = e.target.closest(".fcard"); const nb = card.querySelector("[data-fnote]"); if (nb) nb.textContent = e.target.value.trim() ? "Your note" : "Add a note";
+    const need = card.querySelector(".need"); if (need) need.hidden = !!e.target.value.trim();
+    findingsCount(); paintChrome(docList());
+  });
+
   /* ---------- notes: saved as you type; a failed save says so and is sent again ---------- */
   function noteEdited(key, text) {
     view.notes[key] = text; view.dirty.add(key); view.unsaved = true; setNoteStat(key, "Not saved yet");
@@ -2796,7 +2872,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     view.saving = true; view.unsaved = false; view.dirty = new Set();
     keys.forEach((k) => setNoteStat(k, "Saving…")); paintSave();
     let err = null;
-    try { await db.doc("gates/" + id).update(Object.assign({ notes: Object.assign({}, view.notes) }, bt() ? { targetPicks: JSON.parse(JSON.stringify(view.picks)) } : {})); } catch (e) { err = e || {}; }
+    try { await db.doc("gates/" + id).update(Object.assign({ notes: Object.assign({}, view.notes) }, bt() ? { targetPicks: JSON.parse(JSON.stringify(view.picks)) } : {}, fnd() ? { findingPicks: JSON.parse(JSON.stringify(view.fpicks)) } : {})); } catch (e) { err = e || {}; }
     if (view.id !== id) return;
     view.saving = false;
     if (!err) {
