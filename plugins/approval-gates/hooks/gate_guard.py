@@ -32,6 +32,14 @@ The plan approval is also opened by the engine's own ask: when the active direct
 even though no command of the assistant named it. Any question offering Approve Plan, Approve or Accept as-is while a
 gate is open is the gate's question, whatever its header.
 
+Every Approval question (header Approval or Unit-end, or options Approve and Request Changes) needs the page's link in
+visible assistant text since the developer's last message: a text block before the call, in this response or an earlier
+one. Thinking, tool calls, tool results and text written after a question box are not shown, so they do not count; a
+markdown link counts only by its target. It holds with no recorded publication too (a restarted session has a new id and
+an empty state): the link is then found again, as the newest page for the intent, the stage and the Unit in the state of
+any session of this machine and in the bundles and gates rows written in the transcript; with no exact link, a link to
+one of the artifacts that names the Unit or stage is needed. The refusal is three numbered steps to follow word for word.
+
 The state lives in ~/.claude/approval-gates/<session>.json (APPROVAL_GATES_DIR overrides the folder) and is
 changed by this hook only. The developer clears it by typing /approval-gates:release.
 
@@ -699,7 +707,7 @@ def link_sent(event, pub, after=False):
                 for block in blocks:
                     if not isinstance(block, dict):
                         continue
-                    if block.get("type") == "text" and needle in str(block.get("text", "")) and (recent or not after):
+                    if block.get("type") == "text" and has_link(str(block.get("text", "")), needle) and (recent or not after):
                         return True, counts
                     if recent and block.get("type") in counts:
                         counts[block["type"]] += 1
@@ -830,21 +838,10 @@ def unit_end_page(state, project):
     return max(pages, key=lambda p: p.get("at", 0), default=None)
 
 
-def link_refusal(pub, counts):
-    link = link_of(pub)
-    return ("The developer gets the page's link before the question, and no text message of yours carries "
-            f"it yet. Since {pub.get('id', '')} was published, your transcript holds "
-            f"{counts['thinking']} thinking, {counts['tool_use']} tool-call and {counts['text']} text "
-            "block(s), none with the link. Only visible text counts: thinking does not count (the developer never sees it), "
-            "a tool call is not a message, and `Artifact open` does not show the page. "
-            f"Write exactly `**Read:** {link}` as plain text in a message of its own, then ask the engine's "
-            "question as it is, with no link in it. Do both in this ONE response: the text block with the full link "
-            "(with its `#id` part) first, then the AskUserQuestion call; never end the turn on the link alone. A response "
-            "with only the link ends your turn and the developer has no question to answer. Your next response must hold "
-            "both: the link text block AND this AskUserQuestion call.")
-
-
 def guard_question(event, state, project, questions):
+    """The page behind each of the gate's questions, {id(question): pub}; a Refusal when it was not published or the
+    question carries the link itself. That the link was shown to the developer is guard_visible_link's check."""
+    pubs = {}
     for q in questions:
         stage, unit, opened = target_of(state, project)
         pub = None
@@ -860,7 +857,14 @@ def guard_question(event, state, project, questions):
         if not stage:
             continue
         if not pub:
-            pub = require_published(state, project, stage, unit, opened)
+            try:
+                pub = require_published(state, project, stage, unit, opened)
+            except Refusal:
+                # No gate open in the state (a restarted session, a lost record): when the page is on record elsewhere,
+                # the question is held to the visible link of that page instead of being told to publish it again.
+                if state["pending"] or not recoverable(event, state, project, q):
+                    raise
+                continue
         tested_first(pub, stage, unit)  # only the question: the rejected report (fixes picked after the test) still goes
         text = str(q.get("question", ""))
         url = str(pub.get("url", "")).strip()
@@ -868,9 +872,296 @@ def guard_question(event, state, project, questions):
             raise Refusal("The page's link goes to the developer in a message of its own, before the question; the "
                           "question text carries no link. Send the link "
                           f"{link_of(pub)} as a message, then ask the engine's question as it is.")
-        sent, counts = wait_for_link(event, pub)
-        if not sent:
-            raise Refusal(link_refusal(pub, counts))
+        pubs[id(q)] = pub
+    return pubs
+
+
+# ---------------------------------------------------------------- the link must be visible
+
+APPROVAL_HEADERS = {"approval", "unit-end", "unit end"}
+NOT_A_USER_MESSAGE = ("<task-notification", "[request interrupted", "stop hook feedback", "another claude session sent",
+                      "your response above was cut off")
+MD_LINK = re.compile(r"\[[^\]]*\]\(\s*<?([^)\s>]*)>?[^)]*\)")
+REFERS = re.compile(r"linked (?:artifact|page)|the (?:page|link|artifact) (?:above|below)|(?:see|check|open|read) the "
+                    r"(?:linked|approval|unit-end|page|link|artifact)|link above|page above", re.I)
+ANY_PAGE_LINK = r"https?://claude\.ai/(?:code/)?artifact/[A-Za-z0-9_-]+"
+
+
+def is_approval_question(question):
+    """An AI-DLC Approval or unit-end question: its header is Approval or Unit-end, or its options offer Approve and
+    Request Changes. A question that names a pull request is some other approval."""
+    if names_pull_request(str(question.get("question", ""))):
+        return False
+    ls = labels(question)
+    return norm(question.get("header", "")) in APPROVAL_HEADERS or ("approve" in ls and "request changes" in ls)
+
+
+def shown_text(text):
+    """The text as the developer reads it: a markdown link shows its label, and a label never stands in for the address,
+    so only the target of a markdown link is kept as an address."""
+    return MD_LINK.sub(lambda m: " " + m.group(1) + " ", text)
+
+
+def link_pattern(link):
+    return re.escape(link) + r"(?![A-Za-z0-9_-]|\.[A-Za-z0-9])"
+
+
+def has_link(text, link):
+    return bool(link) and re.search(link_pattern(link), shown_text(text)) is not None
+
+
+def has_page_link(text, urls, tokens):
+    """A link to one of the artifacts, with a fragment that names the Unit or the stage (any fragment when none is known)."""
+    shown = shown_text(text)
+    bases = [re.escape(u) for u in urls] or [ANY_PAGE_LINK]
+    for base in bases:
+        for m in re.finditer(base + r"#([\w.-]+)", shown):
+            frag = m.group(1).lower()
+            if not tokens or any(t in frag for t in tokens):
+                return True
+    return False
+
+
+def genuine_user(entry):
+    """A message the developer wrote, not a tool result nor something the harness or another session injected."""
+    if entry.get("isMeta") or entry.get("isCompactSummary") or entry.get("isSidechain"):
+        return False
+    message = entry.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    if isinstance(content, list):
+        content = "\n".join(str(b.get("text", "")) for b in content if isinstance(b, dict) and b.get("type") == "text")
+    if not isinstance(content, str):
+        return False
+    text = re.sub(r"<system-reminder>.*?</system-reminder>", "", content, flags=re.S).strip().lower()
+    return bool(text) and not text.startswith(NOT_A_USER_MESSAGE)
+
+
+def read_transcript(event):
+    path = event.get("transcript_path")
+    if not path:
+        raise Refusal("the session transcript is not given, so whether the developer got the page's link cannot be checked.")
+    entries = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(entry, dict) and entry.get("type") in ("assistant", "user") and not entry.get("isSidechain"):
+                    entries.append(entry)
+    except OSError as exc:
+        raise Refusal(f"the session transcript cannot be read ({exc}), so whether the developer got the page's "
+                      "link cannot be checked.") from None
+    return entries
+
+
+def blocks_of(entry):
+    message = entry.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}]
+    return [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+
+
+def segment(entries):
+    """[(kind, text, hidden)] of everything since the developer's last message: the assistant's text, thinking and tool
+    calls, and the tool results. hidden is True for text written after an AskUserQuestion call of the same response: the
+    app does not show it."""
+    items, after_question = [], False
+    for entry in entries:
+        if entry["type"] == "user":
+            if genuine_user(entry):
+                items, after_question = [], False
+                continue
+            after_question = False  # the question was answered or dropped: the next response is a new one
+            for block in blocks_of(entry):
+                if block.get("type") == "tool_result":
+                    items.append(("tool_result", flat(block.get("content")), False))
+            continue
+        for block in blocks_of(entry):
+            kind = block.get("type")
+            if kind == "text":
+                items.append(("text", str(block.get("text", "")), after_question))
+            elif kind == "thinking":
+                items.append(("thinking", str(block.get("thinking", "")), False))
+            elif kind == "tool_use":
+                items.append(("tool_use", json.dumps(block.get("input"), ensure_ascii=False), False))
+                if block.get("name") == "AskUserQuestion":
+                    after_question = True
+    return items
+
+
+def other_states(event):
+    """The states of the other sessions of this machine: a restarted session has a new id and an empty state, while the
+    page it published stays on record in the state of the session it came from."""
+    own = os.path.basename(state_path(event))
+    try:
+        names = sorted(n for n in os.listdir(state_dir()) if n.endswith(".json") and n != own)
+    except OSError:
+        return []
+    found = []
+    for name in names:
+        try:
+            with open(os.path.join(state_dir(), name), encoding="utf-8") as f:
+                found.append(normalize(json.load(f)))
+        except (OSError, ValueError):
+            continue
+    return found
+
+
+def published_in_transcript(entries):
+    """[(time, collection, doc_id, url)] of the bundles and gates rows this session's ArtifactData calls wrote."""
+    found = []
+    for entry in entries:
+        if entry["type"] != "assistant":
+            continue
+        for block in blocks_of(entry):
+            if block.get("type") != "tool_use" or block.get("name") != "ArtifactData" or not isinstance(block.get("input"), dict):
+                continue
+            ti = block["input"]
+            writes = [w for w in ti.get("writes") or [] if isinstance(w, dict)] if ti.get("action") == "batch" else [ti]
+            for w in writes:
+                if w.get("collection") in ("bundles", "gates") and w.get("doc_id") and (w.get("op") or w.get("action")) == "set":
+                    found.append((epoch_of(entry.get("timestamp")) or 0, w["collection"], str(w["doc_id"]),
+                                  str(ti.get("url") or "").rstrip("/")))
+    return found
+
+
+def recoverable(event, state, project, question):
+    """True when the page this question is about is on record outside this session's state: its exact link is found."""
+    return bool(expected_page(event, state, project, question, read_transcript(event))[0])
+
+
+def page_key_matches(key, stage, unit, page):
+    base, _, kpage = key.partition("@")
+    if kpage and kpage != page:
+        return False
+    if kpage and unit:
+        return base.endswith("/" + unit)
+    if base.startswith("id:"):
+        return not stage or stage in base
+    if unit:
+        return base == make_key(stage, unit)
+    return not stage or base == stage or base.startswith(stage + "/")
+
+
+def expected_page(event, state, project, question, entries):
+    """(link or None, artifact urls, tokens): the page this Approval question is about, found without the session's own
+    record when it has none. The link is the newest page on record for the intent, the stage and the Unit: this
+    session's state, the state of the other sessions, then the bundles and gates rows written in the transcript."""
+    intent, _root = intent_root(project)
+    stage, unit, _opened = target_of(state, project)
+    if not unit:
+        unit = claimed_unit(project)
+        if unit and (not stage or unit_rhythm(project, unit, UNIT_END_STAGE) == "unit-end"):
+            stage = UNIT_END_STAGE
+    page = "plan" if "approve plan" in labels(question) else "unit-end"
+    start = (intent or "").lower()
+    found, urls = [], []
+
+    def note(url):
+        if url and url not in urls:
+            urls.append(url)
+
+    for number, known in enumerate([state] + other_states(event)):
+        for key, pub in known["published"].items():
+            pid = str(pub.get("id", ""))
+            if not pid or not pid.lower().startswith(start):
+                continue
+            note(str(pub.get("url", "")).rstrip("/"))
+            if page_key_matches(key, stage, unit, page):
+                found.append((pub.get("at", 0) or 0, pid, str(pub.get("url", "")).rstrip("/")))
+    for at, collection, doc_id, url in published_in_transcript(entries):
+        if not doc_id.lower().startswith(start):
+            continue
+        note(url)
+        if collection == "bundles":
+            m = BUNDLE_ID.match(doc_id)
+            fits = bool(m) and m.group("page") == page and (not unit or m.group("head").endswith("-" + unit.lower()))
+        else:
+            fits = not stage or id_matches(doc_id, intent, stage, unit)
+        if fits:
+            found.append((at, doc_id, url))
+    best = max(found, default=None)
+    link = f"{best[2]}#{best[1]}" if best and best[2] else None
+    tokens = [t.lower() for t in (unit,) if t] or [t for t in (stage,) if t]
+    return link, urls, tokens
+
+
+def where_it_went(segment_items, link, urls):
+    """Why the link did not reach the developer, as one of the known cases, or None."""
+    def mentions(text):
+        if link:
+            return link in text or link.rpartition("#")[2] in text
+        return any(u + "#" in text for u in urls) or re.search(ANY_PAGE_LINK + "#", text) is not None
+
+    for kind, text, hidden in segment_items:
+        if kind == "text" and not hidden and mentions(text) and not (has_link(text, link) if link else
+                                                                       has_page_link(text, urls, [])):
+            return "markdown"
+    if any(k == "text" and h and mentions(t) for k, t, h in segment_items):
+        return "after"
+    if any(k == "thinking" and mentions(t) for k, t, _h in segment_items):
+        return "thinking"
+    if any(k == "text" and not h and REFERS.search(t) for k, t, h in segment_items):
+        return "refers"
+    if any(k in ("tool_use", "tool_result") and mentions(t) for k, t, _h in segment_items):
+        return "tool"
+    return None
+
+
+WHY = {
+    "none": "no text message of yours since the developer's last message carries the page's link",
+    "thinking": "the link is only in your thinking, and thinking is not output: the developer never sees it",
+    "tool": "the link is only in a tool call or a tool result (ArtifactData, Artifact open, Bash output): the developer does not see those",
+    "after": "the link was written after an AskUserQuestion call in the same response: the app does not show text after a question box",
+    "refers": "the text only refers to the page (\"linked artifact\", \"page above\") and holds no URL: there is nothing for the developer to open",
+    "markdown": "the markdown link's target is not the page's URL (a label showing the URL does not count): the developer would open another address",
+}
+
+
+def visible_refusal(case, link, urls, tokens, session_lost):
+    if link:
+        first = f"exactly this link, in full, with nothing else on that line (copy it, no backticks): {link}"
+    elif urls:
+        first = ("a link to the page of this " + (f"Unit ({tokens[0]})" if tokens else "stage") + " in the artifact where you wrote it: "
+                 + " or ".join(f"`{u}#<the row id you wrote>`" for u in urls) + ", the whole link, nothing else on that line")
+    else:
+        first = ("a link to the page, `<artifact url>#<the row id you wrote>` (find the artifact with Artifact `action: \"list\"`: "
+                 "AI-DLC unit approvals, or AI-DLC approval gates), the whole link, nothing else on that line")
+    lost = (" The session was restarted or its record of the page was lost, so this is the link as it is found again, not "
+            "as it was recorded." if session_lost else "")
+    return (f"Refused: this is an AI-DLC Approval question and {WHY[case]}. Thinking is not output, and tool calls and "
+            f"tool results are not shown to the developer; text written after a question box is not shown either.{lost} Do exactly this, "
+            "in ONE response, in this order:\n"
+            f"1. Write a text message whose first line is {first}\n"
+            "2. Put nothing after the question: no text and no link after the AskUserQuestion call.\n"
+            "3. Then call AskUserQuestion with the engine's question as it is, with no link in it.\n"
+            "Do not end the turn on the link alone.")
+
+
+def guard_visible_link(event, state, project, questions, pubs):
+    """An AI-DLC Approval question needs the page's link in visible assistant text since the developer's last message:
+    a text block before the call, in this response or an earlier one. It holds with no recorded publication too."""
+    for q in questions:
+        pub = pubs.get(id(q))
+        deadline = time.time() + link_wait()
+        while True:
+            entries = read_transcript(event)
+            if pub:
+                link, urls, tokens = link_of(pub), [], []
+            else:
+                link, urls, tokens = expected_page(event, state, project, q, entries)
+            items = segment(entries)
+            texts = [t for k, t, h in items if k == "text" and not h]
+            ok = any(has_link(t, link) for t in texts) if link else any(has_page_link(t, urls, tokens) for t in texts)
+            if ok or time.time() >= deadline or call_written(event):
+                break
+            time.sleep(0.2)
+        if not ok:
+            case = where_it_went(items, link, urls) or "none"
+            raise Refusal(visible_refusal(case, link, urls, tokens, not pub))
 
 
 def guard_report(state, project, call):
@@ -899,9 +1190,12 @@ def pre(event, project):
         state = load(event)
         guard_plan_links(event, state)
         sync_pending(state, project)
-        gates = gate_questions(state, questions_of(ti))
-        if gates:
-            guard_question(event, state, project, gates)
+        questions = questions_of(ti)
+        gates = gate_questions(state, questions)
+        pubs = guard_question(event, state, project, gates) if gates else {}
+        visible = [q for q in questions if q in gates or is_approval_question(q)]
+        if visible:
+            guard_visible_link(event, state, project, visible, pubs)
         return
     if tool == "Bash":
         closing = [c for c in engine_calls(ti.get("command", "")) if c["kind"] == "report" and c["result"] in CLOSING]

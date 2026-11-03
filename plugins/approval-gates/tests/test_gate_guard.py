@@ -262,10 +262,9 @@ class TestTheQuestion(Case):
         self.said("x", block="tool_use")
         code, _out, err = self.ask("User Stories complete. How would you like to proceed?")
         self.assertEqual(code, 2)
-        self.assertIn("no text message of yours carries it yet", err)
-        self.assertIn("holds 1 thinking, 1 tool-call and 0 text block(s), none with the link", err)
-        self.assertIn("thinking does not count", err)
-        self.assertIn(f"**Read:** {URL}#{gate_id}", err)
+        self.assertIn("no text message of yours since the developer's last message carries the page's link", err)
+        self.assertIn("Thinking is not output", err)
+        self.assertIn(f"{URL}#{gate_id}", err)
         self.said(f"Ready to review.\n\n**Read:** {URL}#{gate_id}")
         code, _out, err = self.ask("User Stories complete. How would you like to proceed?")
         self.assertEqual((code, err), (0, ""))
@@ -293,7 +292,7 @@ class TestTheQuestion(Case):
         newer = self.publish(f"{INTENT}-user-stories-20260102T1000", link=False)
         code, _out, err = self.ask("User Stories complete. How would you like to proceed?")
         self.assertEqual(code, 2)
-        self.assertIn(f"**Read:** {URL}#{newer}`", err)
+        self.assertIn(f"{URL}#{newer}", err)
 
     def test_without_a_transcript_the_question_cannot_be_checked(self):
         self.open_gate()
@@ -383,7 +382,6 @@ class TestTheQuestion(Case):
             gate_question("Pull request #12: how would you like to proceed?", labels=("Approve", "Merge")),
             gate_question("Merge https://github.com/acme/app/pull/12?", labels=("Approve", "Request Changes")),
             gate_question("Approve acme/app#12?", labels=("Approve", "Request Changes")),
-            gate_question("Approval of the plan", header="Approval", labels=("Go", "Stop")),
         ]
         for question in cases:
             code, _out, err = self.pre("AskUserQuestion", question)
@@ -685,10 +683,14 @@ class TestFailingOpen(Case):
         self.open_gate()
         self.assertEqual(self.state_of()["pending"]["stage"], "user-stories")
 
-    def test_no_current_stage_means_nothing_to_guard(self):
+    def test_no_current_stage_still_needs_a_visible_link_for_an_approval_question(self):
         os.remove(os.path.join(self.record, ".aidlc-engine", "active-directive.json"))
         os.remove(os.path.join(self.record, "aidlc-state.md"))
-        self.assertEqual(self.ask("x"), (0, "", ""))
+        code, _out, err = self.ask("x")
+        self.assertEqual(code, 2)
+        self.assertIn("1. Write a text message whose first line is", err)
+        other = gate_question("Which database?", header="Database", labels=("Postgres", "SQLite"))
+        self.assertEqual(self.pre("AskUserQuestion", other), (0, "", ""))
 
     def test_current_stage_falls_back_to_the_state_file(self):
         os.remove(os.path.join(self.record, ".aidlc-engine", "active-directive.json"))
@@ -832,7 +834,7 @@ class TestStopNet(Case):
         code, _out, err = self.ask(self.Q)                    # a bare ask: refused
         self.assertEqual(code, 2)
         self.assertIn("ONE response", err)
-        self.assertIn("never end the turn on the link alone", err)
+        self.assertIn("Do not end the turn on the link alone", err)
         self.said(f"**Read:** {URL}#{gate_id}")               # the link alone, then the turn ends
         code, out, err = self.stop()
         self.assertEqual((code, err), (0, ""))
@@ -868,8 +870,8 @@ class TestStopNet(Case):
         gate_id = self.publish(link=False)
         code, _out, err = self.ask(self.Q)
         self.assertEqual(code, 2)
-        self.assertIn("A response with only the link ends your turn and the developer has no question to answer", err)
-        self.assertIn("the link text block AND this AskUserQuestion call", err)
+        self.assertIn("Do not end the turn on the link alone", err)
+        self.assertIn("3. Then call AskUserQuestion", err)
         self.said(f"**Read:** {URL}#{gate_id}")
         self.assertIn("now ask the engine's Approval question", self.blocked(self.stop()[1]))
         self.assertEqual(self.stop()[1], "")                   # not twice on the same link message
