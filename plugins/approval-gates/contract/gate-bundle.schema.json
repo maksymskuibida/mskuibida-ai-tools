@@ -150,10 +150,31 @@
           "type": "object",
           "required": ["text", "settled"],
           "additionalProperties": false,
-          "description": "For a reviewer finding: what in the plan or the code settles it, or that nothing does.",
+          "description": "For a reviewer finding, a requirement or an NFR: where it is handled (link), or why it is not (acceptanceReason). One of the two is required (scripts/handling.py).",
           "properties": {
             "text": { "type": "string", "minLength": 1, "maxLength": 80 },
-            "settled": { "type": "boolean" }
+            "settled": { "type": "boolean" },
+            "link": {
+              "type": "object",
+              "required": ["kind", "target"],
+              "additionalProperties": false,
+              "properties": {
+                "kind": { "enum": ["step", "doc", "code", "test", "unit"] },
+                "target": { "type": "string", "pattern": "^(#[A-Za-z0-9._-]+|path:\\S+|unit:[A-Za-z0-9._-]+|https?://\\S+)$" },
+                "label": { "type": "string", "minLength": 1, "maxLength": 60 }
+              }
+            },
+            "acceptanceReason": {
+              "type": "object",
+              "required": ["text", "by"],
+              "additionalProperties": false,
+              "properties": {
+                "text": { "type": "string", "minLength": 1, "maxLength": 600 },
+                "by": { "enum": ["developer", "agent"] },
+                "quote": { "type": "string", "minLength": 1, "maxLength": 600 },
+                "message": { "type": "string", "minLength": 1, "maxLength": 200 }
+              }
+            }
           }
         },
         "suggestion": { "type": "boolean", "description": "The row proposes something the person may take or leave (Do it / Leave it)." },

@@ -31,7 +31,8 @@ def plan_bundle():
             {"key": "assumptions", "kind": "assumptions", "title": "Assumptions", "short": "Assumptions",
              "rows": [row("A-1", "high", lookFirst=True, refs=[{"label": "FD-Q1", "tip": "Your answer A", "target": "#fd-q1"}]), row("A-2", "low")]},
             {"key": "findings", "kind": "findings", "title": "Findings", "short": "Findings",
-             "rows": [row("FD R-02", "medium", coveredBy={"text": "Step 1 settles it", "settled": True},
+             "rows": [row("FD R-02", "medium", coveredBy={"text": "Step 1 settles it", "settled": True,
+                                                                     "link": {"kind": "step", "target": "#step-1"}},
                           refs=[{"label": "Step 1", "tip": "The slot rules", "target": "#step-1"}])]},
             {"key": "tests", "kind": "tests", "title": "Tests", "short": "Tests", "rows": [row("T-1", "critical")]},
         ],
@@ -234,3 +235,72 @@ class TestOrder(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNothingUnhandledSilently(unittest.TestCase):
+    """Every finding, requirement and NFR row links to where it is handled, or says why not (scripts/handling.py)."""
+
+    def finding(self, covered):
+        b = plan_bundle()
+        b["sections"][1]["rows"][0]["coveredBy"] = covered
+        return b
+
+    def test_a_finding_with_no_link_and_no_reason_is_refused(self):
+        problems = validate_bundle.validate(self.finding({"text": "not in the plan", "settled": False}))
+        self.assertTrue(any("row FD R-02" in p and "links nowhere and gives no reason" in p for p in problems), problems)
+
+    def test_a_finding_with_no_coveredby_at_all_is_refused(self):
+        b = plan_bundle()
+        del b["sections"][1]["rows"][0]["coveredBy"]
+        self.assertTrue(any("row FD R-02: link it to where it is handled" in p for p in validate_bundle.validate(b)))
+
+    def test_the_agents_reason_is_enough(self):
+        covered = {"text": "not in the plan", "settled": False,
+                   "acceptanceReason": {"text": "Cosmetic; the copy is rewritten in U7.", "by": "agent"}}
+        self.assertEqual(validate_bundle.validate(self.finding(covered)), [])
+
+    def test_the_developers_reason_quotes_them_and_names_the_message(self):
+        covered = {"text": "accepted", "settled": False, "acceptanceReason": {"text": "Max accepts it.", "by": "developer"}}
+        problems = validate_bundle.validate(self.finding(covered))
+        self.assertTrue(any("acceptanceReason.quote" in p and "acceptanceReason.message" in p for p in problems), problems)
+        covered["acceptanceReason"].update(quote="leave the rounding as it is", message="chat, 2026-11-03 10:12")
+        self.assertEqual(validate_bundle.validate(self.finding(covered)), [])
+
+    def test_every_link_kind_and_target_form(self):
+        for kind, target in (("step", "#step-1"), ("doc", "path:aidlc/x.md#SR1"), ("code", "path:src/slots.py"),
+                             ("test", "path:tests/test_slots.py"), ("unit", "unit:u7-copy"), ("doc", "https://x.example/d")):
+            covered = {"text": "handled", "settled": True, "link": {"kind": kind, "target": target}}
+            self.assertEqual(validate_bundle.validate(self.finding(covered)), [], (kind, target))
+
+    def test_a_linked_row_is_settled_and_its_target_has_a_known_form(self):
+        problems = validate_bundle.validate(self.finding({"text": "x", "settled": False, "link": {"kind": "step", "target": "#step-1"}}))
+        self.assertTrue(any("coveredBy.settled is true" in p for p in problems), problems)
+        problems = validate_bundle.validate(self.finding({"text": "x", "settled": True, "link": {"kind": "step", "target": "step 1"}}))
+        self.assertTrue(problems)
+
+    def test_a_requirement_row_outside_findings_must_be_handled_too(self):
+        b = plan_bundle()
+        b["sections"][0]["rows"].append(row("NFR3", "medium"))
+        self.assertTrue(any("row NFR3" in p for p in validate_bundle.validate(b)))
+        b["sections"][0]["rows"][-1]["coveredBy"] = {"text": "Step 1", "settled": True, "link": {"kind": "step", "target": "#step-1"}}
+        self.assertEqual(validate_bundle.validate(b), [])
+
+    def test_other_rows_need_nothing(self):
+        b = plan_bundle()
+        self.assertNotIn("coveredBy", b["sections"][0]["rows"][1])
+        self.assertEqual(validate_bundle.validate(b), [])
+
+    @unittest.skipUnless(NODE, "node is not installed")
+    def test_the_page_shows_linked_rows_as_passing_and_every_reason_next_to_its_row(self):
+        b = plan_bundle()
+        b["sections"][1]["rows"].append(row("FD R-03", "low", coveredBy={
+            "text": "not in the plan", "settled": False,
+            "acceptanceReason": {"text": "Max keeps it.", "by": "developer", "quote": "keep the rounding", "message": "chat, 3 Nov"}}))
+        page = render(b, {"summary": {"mode": "summary"}})["summary"]
+        self.assertIn('class="handled ok"', page)
+        self.assertIn("✓ Step 1 settles it", page)
+        self.assertIn("Accepted, reason below", page)
+        self.assertIn('<p class="reason"><b>Your reason:</b> Max keeps it. <q>keep the rounding</q>', page)
+        self.assertNotIn('class="rowbody"', page, "the reason shows with the row folded")
+        b["sections"][1]["rows"][1]["coveredBy"] = {"text": "not in the plan", "settled": False}
+        self.assertIn('class="handled open"', render(b)["summary"], "an old row with neither still renders, marked")

@@ -16,7 +16,8 @@ local $ref), then checks the rules a schema cannot say:
   - every id and anchor (rows, steps `step-<n>`, questions, sections) is unique; every `#` target resolves;
   - steps are numbered 1, 2, 3 … in build order;
   - a revision mark is at most the bundle's revision and carries a note; `revisions` lists 1 … revision;
-  - `asApproved` only on a changes section, and only with no rows; a map only on a built section.
+  - `asApproved` only on a changes section, and only with no rows; a map only on a built section;
+  - every reviewer finding, requirement and NFR row links to where it is handled or says why not (scripts/handling.py).
 
 Exit 0 and print `ok` (with --order, the section order a renderer shows), or exit 1 and print one problem per line.
 Standard library only.
@@ -29,6 +30,8 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import handling  # noqa: E402
 SCHEMA_PATH = os.path.join(os.path.dirname(HERE), "contract", "gate-bundle.schema.json")
 
 SEVERITY = ("critical", "high", "medium", "low")
@@ -255,6 +258,8 @@ def check_rules(bundle):
         target = str(ref.get("target", ""))
         if target.startswith("#") and target[1:] not in names:
             out.append(f"{where}: #{target[1:]} names nothing in this bundle")
+
+    out += handling.rows_problems(bundle.get("sections"))
 
     for s in bundle.get("sections") or []:
         m = s.get("map")

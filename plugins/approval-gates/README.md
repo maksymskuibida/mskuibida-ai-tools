@@ -58,6 +58,9 @@ capabilities):
   all, your read progress, and a chip per section.
 - Revisions v2, v3 and so on each have their own colour, down to the sub-step, with one filter per revision.
 - Read marks are yours. On a new revision, only the changed rows turn unread.
+- Every reviewer finding, requirement and NFR row says where it is handled (a plan step, a document section, a code or
+  test file, a later Unit: a green chip that opens it) or why it is not (the reason in a line under the row, with your
+  words quoted when it is your reason). `finalize` refuses a bundle with a row that does neither (1.21.0).
 - Notes on rows, and Do it / Leave it on suggestion rows, reach the agent with your chat answer. The decision itself
   is given in chat.
 

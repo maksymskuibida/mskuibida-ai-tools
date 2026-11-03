@@ -44,6 +44,9 @@ def agent_pass(bundle):
         for r in s["rows"]:
             if not r.get("label"):
                 r["label"] = "core" if s["kind"] == "built" else "medium"
+            covered = r.get("coveredBy")
+            if covered and not covered.get("link") and not covered.get("acceptanceReason"):
+                covered["acceptanceReason"] = {"text": "Handled in a later Unit's review.", "by": "agent"}
         if s["kind"] == "assumptions" and s["rows"] and first:
             s["rows"][0].update(label="high", lookFirst=True)
             first = False

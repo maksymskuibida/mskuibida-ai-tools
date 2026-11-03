@@ -44,7 +44,7 @@ schema file itself, so the two cannot drift. Keep to that subset when the schema
 |---|---|---|
 | plan | `narrows` | Places where the design narrows something already approved (an inception record, an earlier Unit, an answer). |
 | plan | `assumptions` | Every assumption made without asking. |
-| plan | `findings` | Reviewer findings that were waived or left open. Each row says in `coveredBy` what settles it, or that nothing does. |
+| plan | `findings` | Reviewer findings that were waived or left open. Each row says in `coveredBy` where it is handled, or why it is not (see `coveredBy` below). |
 | plan | `visible` | Changes to what the person sees, stored data, API or MCP shape, security, dependencies. |
 | plan | `tests` | The plan's tests, one row per group. |
 | unit-end | `changes` | What changed after plan approval. `asApproved: true` with no rows says "the design stays as approved". |
@@ -82,7 +82,18 @@ schema file itself, so the two cannot drift. Keep to that subset when the schema
   - an `http(s)` URL;
   - `path:<repo-relative path>[#<id>]`: a record outside the bundle. When `header.links.records` is set, the renderer
     links it there; otherwise it offers the path.
-- **`coveredBy`**: `{text, settled}`, for a reviewer finding.
+- **`coveredBy`**: `{text, settled, link?, acceptanceReason?}`: where a reviewer finding, a requirement or an NFR is
+  handled, or why it is not. Nothing is left unhandled without saying so:
+  - `link` `{kind, target, label?}` is where it is handled. `kind` is `step` (a code-plan step), `doc` (a document
+    section), `code` (a source file), `test` (a test file) or `unit` (a later Unit). `target` is `#<anchor>`,
+    `path:<repo-relative path>[#<id>]`, `unit:<Unit id>` or an http(s) URL. A linked row has `settled: true` and the page
+    shows it as passing (a green chip that opens the target).
+  - `acceptanceReason` `{text, by, quote?, message?}` is why it is not handled. `by: "developer"` quotes the developer
+    (`quote`, their words) and names the message they are on record in (`message`: a chat answer with its date, a
+    questions file and Q id, a page note). `by: "agent"` is the agent's own reason. The page shows the reason in a line
+    under its row, folded or not.
+  - A row with neither is refused by the validator. `unit_bundle.py draft` links what it can (a plan step that names the
+    finding, the review that waived it) and lists the rest in its `todo`.
 - **`suggestion`**: the row proposes something the person may take or leave.
 - **`rev`**, **`revKind`**, **`revNote`**: the row changed (`changed`) or appeared (`new`) in revision `rev`, and the
   note says what changed.
@@ -111,6 +122,10 @@ references. A sub-step's own `rev` marks the exact sub-step a revision changed.
 7. `asApproved` belongs only on a `changes` section, and only when that section has no rows. A `map` belongs only on a
    `built` section, and both ends of each of its edges are nodes.
 8. The `id` names the page and the revision.
+9. Every row of a `findings` section, and every row whose id is a requirement or NFR id (`FR`, `NFR`, `US`, `AC`, `BR`,
+   `REQ`), carries a `coveredBy` with a `link` or an `acceptanceReason`; a `link` has a known `kind` and target form and
+   `settled: true`; a developer's reason has `quote` and `message` (`scripts/handling.py`, shared with the per-stage
+   pages).
 
 ## What a renderer does
 

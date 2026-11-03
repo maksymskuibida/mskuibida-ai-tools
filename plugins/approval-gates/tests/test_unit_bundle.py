@@ -112,9 +112,12 @@ class TestPlanDraft(Base):
     def test_findings_left_open_or_waived_with_what_settles_them(self):
         rows = {r["id"]: r for r in rows_of(self.b, "findings")}
         self.assertEqual(sorted(rows), ["FD R-02", "FD R-03", "NR R-01"])  # FD R-01 was resolved
-        self.assertEqual(rows["FD R-02"]["coveredBy"], {"text": "Step 3 settles it", "settled": True})
-        self.assertEqual(rows["FD R-03"]["coveredBy"], {"text": "waived by the reviewer", "settled": True})
-        self.assertEqual(rows["NR R-01"]["coveredBy"], {"text": "not in the plan", "settled": False})
+        self.assertEqual(rows["FD R-02"]["coveredBy"], {"text": "Step 3 settles it", "settled": True,
+                                                        "link": {"kind": "step", "target": "#step-3", "label": "Step 3"}})
+        waived = rows["FD R-03"]["coveredBy"]
+        self.assertEqual((waived["text"], waived["settled"], waived["link"]["kind"]), ("waived by the reviewer", True, "doc"))
+        self.assertTrue(waived["link"]["target"].startswith("path:") and waived["link"]["target"].endswith("#R-03"))
+        self.assertEqual(rows["NR R-01"]["coveredBy"], {"text": "not handled yet", "settled": False})
         self.assertEqual(rows["FD R-02"]["label"], "low")  # a hint from the severity, for the agent to judge
 
     def test_code_plan_steps(self):
@@ -167,6 +170,24 @@ class TestPlanStepForms(Base):
     def test_a_draft_of_checkbox_steps_finalizes(self):
         path, b, _i = self.plan_with("# Plan\n\n- [ ] **Step 1: Only step.**\n  - [ ] do it\n")
         self.save(path, agent_pass(b))
+        self.finalize(path)
+
+    def test_a_finding_nothing_links_to_is_named_in_the_todo_and_refused_until_handled(self):
+        path, bundle, info = self.draft()
+        self.assertIn("handle 1 row(s) nothing links to (NR R-01)", " ".join(info["todo"]))
+        for s in bundle["sections"]:
+            for r in s["rows"]:
+                if not r.get("label"):
+                    r["label"] = "core" if s["kind"] == "built" else "medium"
+            if not s["rows"] and s["kind"] in ("narrows", "visible", "tests"):
+                s["rows"].append({"id": f"{s['key'][0].upper()}-1", "title": "A row", "label": "low", "body": "B.", "refs": []})
+        bundle["header"]["lede"] = bundle["header"]["lede"] or "What the Unit does."
+        self.save(path, bundle)
+        refused = self.finalize(path, ok=False)
+        self.assertIn('row NR R-01: "not handled yet" links nowhere and gives no reason', refused)
+        nr = next(r for s in bundle["sections"] for r in s["rows"] if r["id"] == "NR R-01")
+        nr["coveredBy"] = {"text": "in U7", "settled": True, "link": {"kind": "unit", "target": "unit:u7-latency"}}
+        self.save(path, bundle)
         self.finalize(path)
 
     def test_the_todo_states_what_finalize_enforces(self):
