@@ -13,6 +13,8 @@ import sys
 import tempfile
 import unittest
 
+import registry_isolation  # noqa: F401  (the hook writes the artifact-links registry: to a temporary folder)
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 PLUGIN = os.path.dirname(HERE)
 HOOK = os.path.join(PLUGIN, "hooks", "question_guard.py")

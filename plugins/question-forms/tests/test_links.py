@@ -4,6 +4,7 @@ Run: python3 -m unittest discover -s plugins/question-forms/tests"""
 import os
 import sys
 import unittest
+from unittest import mock
 
 from test_guard import FORM, REL, URL, Case
 
@@ -14,8 +15,9 @@ import aidlc_links  # noqa: E402
 class TestFormRegistry(Case):
     def setUp(self):
         super().setUp()
-        os.environ["AIDLC_ARTIFACTS_DIR"] = os.path.join(self.tmp, "links-data")
-        self.addCleanup(os.environ.pop, "AIDLC_ARTIFACTS_DIR", None)
+        patch = mock.patch.dict(os.environ, {"AIDLC_ARTIFACTS_DIR": os.path.join(self.tmp, "links-data")})
+        patch.start()
+        self.addCleanup(patch.stop)
 
     def entries(self):
         return aidlc_links.entries(self.project, "default", "261027-x")

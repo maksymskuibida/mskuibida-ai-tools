@@ -7,6 +7,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -14,6 +15,17 @@ spec = importlib.util.spec_from_file_location("aidlc_links", os.path.join(ROOT, 
 al = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(al)
 
+REAL = os.path.join(os.path.expanduser("~"), ".claude", "plugins", "data", "aidlc-artifacts")
+
+
+def real_listing():
+    found = []
+    for folder, dirs, files in os.walk(REAL):
+        found += [os.path.join(folder, name) for name in dirs + files]
+    return sorted(found)
+
+
+BEFORE = real_listing()  # taken when the suite is loaded, before any test runs
 ART = "https://claude.ai/artifact/abc123"
 INTENT = "261027-demo"
 STATE = """# State
@@ -31,8 +43,9 @@ class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
-        os.environ["AIDLC_ARTIFACTS_DIR"] = os.path.join(self.tmp, "data")
-        self.addCleanup(os.environ.pop, "AIDLC_ARTIFACTS_DIR", None)
+        patch = mock.patch.dict(os.environ, {"AIDLC_ARTIFACTS_DIR": os.path.join(self.tmp, "data")})
+        patch.start()
+        self.addCleanup(patch.stop)
         self.project = os.path.join(self.tmp, "proj")
         self.intent_dir = os.path.join(self.project, "aidlc", "spaces", "default", "intents", INTENT)
         os.makedirs(os.path.join(self.intent_dir, "construction", "u3-day-page"))
@@ -95,8 +108,11 @@ class TestRegistry(Base):
         self.assertEqual(len(al.entries(self.project, "default", INTENT)), 1)
 
     def test_an_unwritable_registry_never_raises(self):
-        os.environ["AIDLC_ARTIFACTS_DIR"] = os.path.join(self.tmp, "proj", "aidlc-state-is-a-file")
-        open(os.environ["AIDLC_ARTIFACTS_DIR"], "w").close()
+        blocked = os.path.join(self.tmp, "proj", "aidlc-state-is-a-file")
+        open(blocked, "w").close()
+        patch = mock.patch.dict(os.environ, {"AIDLC_ARTIFACTS_DIR": blocked})
+        patch.start()
+        self.addCleanup(patch.stop)
         self.assertIsNone(self.rec())
 
     def test_another_checkout_has_its_own_file(self):
@@ -172,6 +188,13 @@ class TestBackfill(Base):
         path = self.transcript([{"action": "set", "url": ART, "collection": "forms", "doc_id": "f1", "data": {"file": rel}}])
         recorded, _ = al.backfill(self.project, "default", INTENT, [path])
         self.assertEqual([(r["kind"], r["stage"]) for r in recorded], [("questions-form", "user-stories")])
+
+
+class TestZRealRegistryUntouched(unittest.TestCase):
+    """Runs last (the name): a full run of this folder's tests leaves the real registry folder as it was."""
+
+    def test_the_real_registry_folder_is_as_it_was_before_the_run(self):
+        self.assertEqual(real_listing(), BEFORE)
 
 
 if __name__ == "__main__":
