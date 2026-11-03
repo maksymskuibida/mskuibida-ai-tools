@@ -209,6 +209,29 @@ no test plan.
 
 ## 6. The guard
 
+### The link is always shown, even after a restart (u20-timeline, 2026-11-03)
+
+The unit-end bundle was written, the tool result was lost, the session restarted (a new session id: the guard's record of the
+page was under the old one), and the agent asked the unit-end question with the summary only in thinking. The developer wrote
+"I don't see the form"; the agent answered "check the linked artifact" with no URL. Nothing the developer could see held the link.
+
+**Every Approval question, whatever its header (Approval or Unit-end) and at every gate (the plan approval, the unit-end gate,
+a per-stage gate, and the unit-end gate asked again after a test plan), needs the page's link as a text message of yours since
+the developer's last message.** After a restart, a lost tool result or a "cut off mid-stream" notice, send the link again
+before the question; you cannot assume it was shown. These are not shown to the developer, so none counts: thinking, tool
+calls and their results (ArtifactData, `Artifact` open, Bash output), text written after the question call (the desktop app
+hides it), "see the linked artifact" with no URL, and a markdown link whose target is another address. The same order every
+time, in ONE response:
+
+1. A text message whose first line is the exact link `<artifact url>#<bundle or gate id>`, in full.
+2. Nothing after the question.
+3. Then the AskUserQuestion call, with no link in it.
+
+The guard finds the link itself when its record is gone (the newest page for the intent, stage and Unit, from any session's
+record and from your ArtifactData writes in the transcript) and names it in the refusal; follow the refusal's three steps
+word for word. If the developer says they do not see the form or the page, write the link again as text before anything else.
+The test-plan flow (§ 7) is the same: the unit-end question asked again after the test plan needs the new page's link as text.
+
 `hooks/gate_guard.py` refuses the Approval question and the approved, rejected or accepted report until
 a `gates` row for the stage (under the unit-end rhythm: the `bundles` row of the page the gate needs) was written in this session after the gate was opened and a message of yours
 (in the session's transcript) carries its link `<artifact url>#<id>`, and refuses a question that carries

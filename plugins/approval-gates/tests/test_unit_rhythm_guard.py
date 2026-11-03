@@ -429,7 +429,7 @@ class TestLinkInTheSameResponse(UnitCase):
             started = time.time()
             code, _out, err = self.run_hook(self.question_event(tool_use_id="toolu_q"))
         self.assertEqual(code, 2)
-        self.assertIn("none with the link", err)
+        self.assertIn("1. Write a text message whose first line is", err)
         self.assertLess(time.time() - started, 10)
 
     def test_a_link_that_never_comes_is_refused_after_the_wait(self):
@@ -438,7 +438,7 @@ class TestLinkInTheSameResponse(UnitCase):
         with mock.patch.dict(os.environ, {"APPROVAL_GATES_LINK_WAIT": "1"}):
             code, _out, err = self.run_hook(self.question_event())
         self.assertEqual(code, 2)
-        self.assertIn("none with the link", err)
+        self.assertIn("1. Write a text message whose first line is", err)
 
 
 class TestPerStageStaysAsItWas(UnitCase):
@@ -486,10 +486,11 @@ class TestLinkMustBeVisibleText(UnitCase):
     def test_the_refusal_names_the_link_and_how_to_send_it(self):
         link = self.written()
         _code, _out, err = self.end_ask()
-        self.assertIn(f"`**Read:** {link}`", err)
-        self.assertIn("plain text", err)
-        self.assertIn("message of its own", err)
-        self.assertIn("thinking does not count", err.lower())
+        self.assertIn(f"1. Write a text message whose first line is exactly this link", err)
+        self.assertIn(link, err)
+        self.assertIn("2. Put nothing after the question", err)
+        self.assertIn("3. Then call AskUserQuestion", err)
+        self.assertIn("thinking is not output", err.lower())
 
     def test_the_link_only_in_thinking_is_refused(self):
         link = self.written()
