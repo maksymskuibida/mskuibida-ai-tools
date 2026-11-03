@@ -1428,6 +1428,43 @@ def stop(event):
     return 0
 
 
+OWNER_FRESH_DAYS = 7  # approval-gates refreshes its owner file at least hourly while it runs
+
+
+def approval_gates_handles(event):
+    """True when the approval-gates plugin (1.22.0 and later) handles the AI-DLC findings of this project: its hook
+    refreshes <its state dir>/findings-owner.json while it runs. A file older than a week means it is gone."""
+    if not aidlc_project(event):
+        return False
+    folder = os.environ.get("APPROVAL_GATES_DIR") or os.path.join(os.path.expanduser("~"), ".claude", "approval-gates")
+    try:
+        return time.time() - os.path.getmtime(os.path.join(folder, "findings-owner.json")) < OWNER_FRESH_DAYS * 86400
+    except OSError:
+        return False
+
+
+def steps_aside(event):
+    """This plugin is deprecated for AI-DLC findings: when approval-gates handles them, it does nothing for them (and
+    drops a round of them it still holds). A code review (ReportFindings) still goes through here."""
+    name = str(event.get("tool_name") or "")
+    if name == "ReportFindings" or name.endswith("__ReportFindings") or not approval_gates_handles(event):
+        return False
+    command = str((event.get("tool_input") or {}).get("command", "")) if name == "Bash" else ""
+    if "review-brief" in command or re.search(r"\blog\s+review\b", command):
+        return True  # an AI-DLC review is approval-gates' even while a code review waits here
+    if not os.path.exists(state_path(event)):
+        return True
+    with state_lock(event):
+        try:
+            pend = pending_of(load(event))
+        except Refusal:
+            pend = None
+        if pend and pend.get("source") == "code-review":
+            return False
+        drop(event)
+    return True
+
+
 def main():
     try:
         event = json.load(sys.stdin)
@@ -1437,6 +1474,8 @@ def main():
         return 0
     name = event.get("hook_event_name")
     try:
+        if name != "UserPromptSubmit" and steps_aside(event):
+            return 0
         if name == "PreToolUse":
             return pre(event)
         if name == "PostToolUse":

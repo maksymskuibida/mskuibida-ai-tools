@@ -69,6 +69,7 @@ class Harness:
         else:
             os.makedirs(self.project)
         self.transcript = None  # set to a path to hand the hook a session transcript
+        self.gates = os.path.join(self.tmp.name, "approval-gates")  # approval-gates' state dir: no owner file unless a test writes one
 
     def say(self, text, block="text", sidechain=False):
         """Append one assistant line to the session transcript, shaped as Claude Code writes it."""
@@ -95,7 +96,8 @@ class Harness:
             event["tool_response"] = response
         if event_name == "UserPromptSubmit":
             event["prompt"] = tool_input
-        env = dict(os.environ, REVIEW_FINDINGS_DIR=self.state, CLAUDE_PROJECT_DIR=self.project, **(self.extra_env or {}))
+        env = dict(os.environ, REVIEW_FINDINGS_DIR=self.state, CLAUDE_PROJECT_DIR=self.project,
+                   APPROVAL_GATES_DIR=self.gates, **(self.extra_env or {}))
         done = subprocess.run([sys.executable, HOOK], input=raw if raw is not None else json.dumps(event),
                               capture_output=True, text=True, env=env, check=False)
         return done.returncode, done.stdout, done.stderr
@@ -1274,3 +1276,42 @@ class StopOnTheSummary(GuardCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StepsAsideForApprovalGates(GuardCase):
+    """Deprecated for AI-DLC findings (1.11.0): while approval-gates handles them (its owner file is fresh), this plugin
+    does nothing for them; a code review still goes through here."""
+
+    def own(self, age=0):
+        os.makedirs(self.h.gates, exist_ok=True)
+        path = os.path.join(self.h.gates, "findings-owner.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"plugin": "approval-gates"}, f)
+        if age:
+            then = time.time() - age
+            os.utime(path, (then, then))
+
+    def test_a_brief_records_nothing_and_says_nothing(self):
+        self.own()
+        code, out, err = self.h.brief()
+        self.assertEqual((code, out, err), (0, "", ""))
+        self.assertIsNone(self.h.pending())
+        self.assertAllowed(self.h.pre("AskUserQuestion", {"questions": [{"question": "Approve?", "header": "Approval",
+                                                                          "options": [{"label": "Approve"}, {"label": "Request Changes"}]}]}))
+
+    def test_a_round_held_from_before_is_dropped(self):
+        self.h.brief()
+        self.assertIsNotNone(self.h.pending())
+        self.own()
+        self.assertAllowed(self.h.pre("Bash", {"command": "aidlc engine orchestrate report --stage domain-design --result approved"}))
+        self.assertIsNone(self.h.pending())
+
+    def test_a_code_review_still_goes_through_here(self):
+        self.own()
+        self.h.report_findings()
+        self.assertEqual(self.h.pending()["source"], "code-review")
+
+    def test_a_stale_owner_file_means_approval_gates_is_gone(self):
+        self.own(age=8 * 86400)
+        self.h.brief()
+        self.assertEqual(self.h.pending()["source"], "aidlc")

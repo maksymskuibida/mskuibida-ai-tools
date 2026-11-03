@@ -475,3 +475,30 @@ class TestHelpers(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFindingsOnThePage(Case):
+    """--findings: the review findings the agent could not fix for certain become cards on the gate row."""
+
+    def findings_file(self, suggested=True):
+        findings = bundle.findings
+        with open(os.path.join(HERE, "fixtures", "findings", "brief-open.txt"), encoding="utf-8") as f:
+            doc = findings.parse_brief(f.read(), "user-stories")
+        if suggested:
+            findings.suggest(doc, {"R-03": "Use one name for the order event."})
+        path = os.path.join(self.tmp, "findings.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+        return path
+
+    def test_the_cards_go_on_the_gate_row(self):
+        self.summary("--stage", "user-stories", "--no-brief", "--findings", self.findings_file())
+        cards = self.gate()["findings"]
+        self.assertEqual((cards["open"], cards["blocking"]), (2, 1))
+        self.assertEqual([c["id"] for c in cards["items"]], ["R-02", "R-03"])
+        self.assertEqual(cards["items"][1]["action"], "Use one name for the order event.")
+
+    def test_a_finding_without_a_suggested_action_is_refused(self):
+        code, _out, err = self.run_script("--stage", "user-stories", "--no-brief", "--findings", self.findings_file(False))
+        self.assertEqual(code, 1)
+        self.assertIn("no suggested action for R-03", err)

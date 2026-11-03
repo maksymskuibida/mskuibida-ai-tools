@@ -66,6 +66,8 @@ except ImportError:  # no advisory locks on this platform: the unique temp file 
     fcntl = None
 
 PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import findings_round  # noqa: E402  (review findings at the gate: cards on the page, no Findings question)
 STALE_DAYS = 14  # another session's state file untouched for this long is removed when a state is saved
 GATE_LABELS = {"approve", "approve plan", "accept as-is"}
 CLOSING = {"approved", "rejected", "accepted"}
@@ -118,7 +120,7 @@ def state_path(event):
 
 
 def blank():
-    return {"pending": None, "published": {}, "plans": {}, "updated": time.time()}
+    return {"pending": None, "published": {}, "plans": {}, "findings": None, "updated": time.time()}
 
 
 def normalize(data):
@@ -130,6 +132,8 @@ def normalize(data):
             state["published"] = {k: v for k, v in data["published"].items() if isinstance(v, dict)}
         if isinstance(data.get("plans"), dict):
             state["plans"] = {k: v for k, v in data["plans"].items() if isinstance(v, dict)}
+        if isinstance(data.get("findings"), dict):
+            state["findings"] = data["findings"]
         if isinstance(data.get("updated"), (int, float)):
             state["updated"] = data["updated"]
     return state
@@ -193,8 +197,12 @@ def state_lock(event):
             handle.close()
 
 
+def findings_file(event):
+    return state_path(event)[:-len(".json")] + ".findings.json"
+
+
 def drop(event):
-    for path in (state_path(event), state_path(event) + ".lock"):
+    for path in (state_path(event), state_path(event) + ".lock", findings_file(event)):
         with contextlib.suppress(OSError):
             os.remove(path)
 
@@ -712,6 +720,7 @@ def wrong_flow_refusal(doc_id, stage, unit):
                    + publish_steps(stage, unit, "plan"), published_check("plan"))
 
 
+DEVELOPER_FIELDS = ("decision", "notes", "findingPicks", "targetPicks")
 NO_DEVELOPER_FIELDS = "Never update a row you wrote: a new presentation is a new row with a new id."
 
 
@@ -765,10 +774,11 @@ def check_gate_rows(tool_input):
             continue
         if data is None:
             raise unreadable_write("gates", doc_id, "`gate_bundle.py`")
-        if str(data.get("status", "")).lower() == "decided" or "decision" in data or "notes" in data:
-            raise Refusal(f"the write to gates/{doc_id}, because `status: \"decided\"`, `decision` and `notes` are written "
-                          "by the developer in the page.",
-                          ["Remove `status: \"decided\"`, `decision` and `notes` from the row's data.",
+        if str(data.get("status", "")).lower() == "decided" or any(str(k).split(".")[0] in DEVELOPER_FIELDS for k in data):
+            raise Refusal(f"the write to gates/{doc_id}, because `status: \"decided\"`, `decision`, `notes`, `findingPicks` "
+                          "and `targetPicks` are written by the developer in the page.",
+                          ["Remove `status: \"decided\"`, `decision`, `notes`, `findingPicks` and `targetPicks` from the row's "
+                           "data.",
                            "Write the row from the writes.json gate_bundle.py made, as it is. " + NO_DEVELOPER_FIELDS],
                           "the batch goes through with no approval-gates refusal.")
 
@@ -1113,7 +1123,8 @@ def other_states(event):
     page it published stays on record in the state of the session it came from."""
     own = os.path.basename(state_path(event))
     try:
-        names = sorted(n for n in os.listdir(state_dir()) if n.endswith(".json") and n != own)
+        names = sorted(n for n in os.listdir(state_dir()) if n.endswith(".json") and n != own
+                       and not n.endswith(".findings.json") and n != findings_round.OWNER)
     except OSError:
         return []
     found = []
@@ -1296,11 +1307,16 @@ def pre(event, project):
         except Refusal:
             return
         sync_pending(state, project)
-        for _op, collection, doc_id, _data, _url in writes_of(ti):
+        intent, _root = intent_root(project)
+        rnd = state["findings"]
+        for op, collection, doc_id, data, _url in writes_of(ti):
             if collection == "gates" and doc_id:
                 wrong = unit_end_flow_for(state, project, doc_id)
                 if wrong:
                     raise wrong_flow_refusal(doc_id, *wrong)
+                if op == "set" and rnd:
+                    with refused_as_refusal():
+                        findings_round.check_gate_write(rnd, doc_id, data, id_matches(doc_id, intent, rnd.get("stage"), rnd.get("unit")))
         return
     if tool == "AskUserQuestion":
         state = load(event)
@@ -1310,16 +1326,30 @@ def pre(event, project):
         gates = gate_questions(state, questions)
         pubs = guard_question(event, state, project, gates) if gates else {}
         visible = [q for q in questions if q in gates or is_approval_question(q)]
+        with refused_as_refusal():
+            findings_round.pre_question(state["findings"], bool(visible))
         if visible:
             guard_visible_link(event, state, project, visible, pubs)
         return
     if tool == "Bash":
-        closing = [c for c in engine_calls(ti.get("command", "")) if c["kind"] == "report" and c["result"] in CLOSING]
-        if closing:
+        command = ti.get("command", "")
+        closing = [c for c in engine_calls(command) if c["kind"] == "report" and c["result"] in CLOSING]
+        if closing or "review-brief" in command:
             state = load(event)
             sync_pending(state, project)
+            with refused_as_refusal():
+                findings_round.pre_bash(state["findings"], command)
             for call in closing:
                 guard_report(state, project, call)
+
+
+@contextlib.contextmanager
+def refused_as_refusal():
+    """The findings round says what it refuses; the guard refuses it in its own shape."""
+    try:
+        yield
+    except findings_round.Refused as r:
+        raise Refusal(r.what, r.steps, r.check) from None
 
 
 def guarded_pre(event, project):
@@ -1460,6 +1490,11 @@ def record_artifact(project, state, tool_input, response):
             continue
         pub = {"id": doc_id, "url": str(url or "").rstrip("/"), "at": time.time()}
         state["published"][key] = pub
+        rnd = state["findings"]
+        if rnd and id_matches(doc_id, intent, rnd.get("stage"), rnd.get("unit")):
+            note = findings_round.on_page(state, doc_id, pub["url"])
+            if note:
+                say("PostToolUse", note)
         if not changed:
             say("PostToolUse", f"gates/{doc_id} is published. Send the developer the link `{link_of(pub)}` in "
                                "a message of its own (the `**Read:**` line of the completion message), then "
@@ -1557,6 +1592,13 @@ def record_answers(project, state, tool_input, response):
                                    "answer. When it holds any, say so in one line and ask in chat whether to act on them "
                                    "before going on; the decision itself is the chat answer.")
             continue
+        rnd = state["findings"]
+        if answer is not None and rnd and rnd.get("page"):
+            typed = findings_round.on_typed(state, answer)
+            changed = True
+            say("PostToolUse", typed or (f"the gate page holds {len(rnd['ids'])} finding card(s) the developer sorted: read "
+                                         f"gates/{rnd['page']} with ArtifactData get now and act on `findingPicks` before "
+                                         "any report (the hook says what each pick means when you read it)."))
         if answer is None or "request changes" not in norm(answer):
             continue
         stage, unit, _opened = target_of(state, project)
@@ -1572,6 +1614,27 @@ def record_answers(project, state, tool_input, response):
 def is_test_first(answer):
     """The unit-end gate's third answer: test the not-verified points before deciding. Not an approval, not a rejection."""
     return norm(answer).startswith("test first")
+
+
+def record_findings(event, project, state, tool_input):
+    """A review brief, a review pass or a closing report: what it means for the findings round."""
+    before = json.dumps(state["findings"], sort_keys=True)
+    note = findings_round.post_bash(state, state_dir(), project, findings_file(event), tool_input.get("command", ""),
+                                    event.get("tool_response"), lambda stage, unit: unit_rhythm(project, unit or None, stage))
+    if note:
+        say("PostToolUse", note)
+    return json.dumps(state["findings"], sort_keys=True) != before
+
+
+def record_read(project, state, tool_input, response):
+    """An ArtifactData get of the round's page: the developer's sort of the finding cards."""
+    if (tool_input or {}).get("action") != "get" or tool_input.get("collection") != "gates" or failed(response):
+        return False
+    note = findings_round.on_read(state, state_dir(), project, str(tool_input.get("doc_id", "")), response)
+    if note:
+        say("PostToolUse", note)
+        return True
+    return False
 
 
 def pending_page(state, project):
@@ -1689,8 +1752,10 @@ def post(event, project):
                                f"{publish_instruction(pending['stage'], pending['unit'], 'plan' if pending['rhythm'] == 'unit-end' else None)}.")
         if tool == "Bash":
             changed = record_bash(event, project, state, ti) or changed
+            changed = record_findings(event, project, state, ti) or changed
         elif tool == "ArtifactData":
             changed = record_artifact(project, state, ti, event.get("tool_response")) or changed
+            changed = record_read(project, state, ti, event.get("tool_response")) or changed
         else:
             changed = record_answers(project, state, ti, event.get("tool_response")) or changed
             changed = mark_asked(project, state, ti, event.get("tool_response")) or changed
@@ -1719,9 +1784,26 @@ def show_page_hint(event):
         return
 
 
+def typed_findings(event):
+    """A message that is just one answer for every finding card ("fix all", "accept all") is recorded as the sort."""
+    try:
+        project = project_dir(event)
+        if not os.path.isdir(os.path.join(project, "aidlc", "spaces")) or not os.path.exists(state_path(event)):
+            return
+        with state_lock(event):
+            state = load(event)
+            note = findings_round.on_typed(state, event.get("prompt"))
+            if note:
+                save(event, state)
+                say("UserPromptSubmit", note)
+    except Exception:
+        return
+
+
 def prompt(event):
     match = RELEASE_PROMPT.match(str(event.get("prompt") or ""))
     if not match:
+        typed_findings(event)
         if SHOW_PAGE.search(str(event.get("prompt") or "")):
             show_page_hint(event)
         return
@@ -1731,6 +1813,14 @@ def prompt(event):
     with state_lock(event):
         drop(event)
     say("UserPromptSubmit", "guard state cleared for this session.")
+
+
+def plugin_version():
+    try:
+        with open(os.path.join(PLUGIN_ROOT, ".claude-plugin", "plugin.json"), encoding="utf-8") as f:
+            return json.load(f).get("version", "")
+    except (OSError, ValueError):
+        return ""
 
 
 def main():
@@ -1749,6 +1839,7 @@ def main():
         project = project_dir(event)
         if not os.path.isdir(os.path.join(project, "aidlc", "spaces")):
             return 0
+        findings_round.write_owner(state_dir(), plugin_version())
         if name == "PreToolUse":
             guarded_pre(event, project)
         elif name == "PostToolUse":
