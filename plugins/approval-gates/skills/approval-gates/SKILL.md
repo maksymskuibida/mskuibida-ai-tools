@@ -1,6 +1,6 @@
 ---
 name: approval-gates
-description: Use at every AI-DLC approval gate (and, at a unit-end gate answered Test first, for the test plan of its not-verified points: § 7). First read aidlc/.aidlc-unit-scope.json: for the Code Generation plan approval and the unit-end gate of a Unit claimed with gate_rhythm "unit-end" go straight to the unit-end flow (unit_bundle.py, a bundles/ row in "AI-DLC unit approvals"); every other gate follows the per-stage flow. Per-stage flow: right after `aidlc engine orchestrate report --result awaiting-approval` (or `--result revised`) and before the Approval question — publish the stage's documents as a page in the developer's "AI-DLC approval gates" artifact and send its link in a message of its own before the gate question. Also when the review brief is printed with open findings (no Findings question: fix what is certain, put the rest on the gate page as cards the developer sorts), and when the developer answered, to read the notes and the finding sort they left in the page.
+description: Use at every AI-DLC approval gate (and, at a unit-end gate answered Test first, for the test plan of its not-verified points: § 7). First read aidlc/.aidlc-unit-scope.json: for the Code Generation plan approval and the unit-end gate of a Unit claimed with gate_rhythm "unit-end" go straight to the unit-end flow (unit_bundle.py, a bundles/ row in "AI-DLC unit approvals"); every other gate follows the per-stage flow. Per-stage flow: right after `aidlc engine orchestrate report --result awaiting-approval` (or `--result revised`) and before the Approval question — draft the stage's page, judge the stage against its rules in judgment.json (the evaluation, every criterion, a one-sentence summary and label per item), finalize, publish it in the developer's "AI-DLC approval gates" artifact and send its link in a message of its own before the gate question. Also when the review brief is printed with open findings (no Findings question: fix what is certain, put the rest on the gate page as cards the developer sorts), and when the developer answered, to read the notes and the finding sort they left in the page.
 ---
 
 # Approval gates
@@ -23,8 +23,8 @@ stamp wins.
 
 Every approval gate gets a page, always. The engine's gate stays exactly as the engine prescribes:
 the completion message, then the Approval question with `AskUserQuestion`, then the end of your turn.
-The page, `approval-gate.html` next to this file, is where the developer **reads** the stage's
-documents, each in a view made for its kind, and may leave a note per document. The decision itself
+The page, `approval-gate.html` next to this file, is where the developer **reads your evaluation of the stage** and
+every item in plain words, opens what they want as written, and may leave a note per document. The decision itself
 is given in chat; the page holds none. Its header comment is the data contract. Never generate,
 restyle or edit a page per stage.
 
@@ -37,50 +37,89 @@ to Claude." Reuse its URL for every gate from then on. After a plugin update, re
 this file to the same URL once, with `capabilities: {db: {}, user: {}}` (the `user` capability keeps each
 viewer's read marks; an artifact published before 1.5.0 has only `db`): the rows stay.
 
-## 2. At every per-stage gate
+## 2. At every per-stage gate: draft, judge, finalize, publish
 
-After the `awaiting-approval` (or `revised`) report, and after the review brief was printed when the
-stage has a reviewer:
+The page leads with **your evaluation of the stage**, not with its documents split into lines. A script gathers what the
+stage is judged against and drafts the rows; you do the judging; a second script refuses the row until every part of the
+judgment is there. Max reads the page in minutes: what approving decides, what to look at first and why, then every item
+in one plain sentence. After the `awaiting-approval` (or `revised`) report, and after the review brief was printed when
+the stage has a reviewer:
 
-1. Write your Part-2 summary of the stage (Markdown) to a file in the scratchpad folder.
-2. Build the rows. Inside a skill the plugin root is `${CLAUDE_PLUGIN_ROOT}`:
+1. **Summary.** Write your Part-2 summary of the stage (Markdown) to a file in the scratchpad folder. The page folds it
+   under the evaluation.
+2. **Draft.** Inside a skill the plugin root is `${CLAUDE_PLUGIN_ROOT}`:
    ```
-   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/gate_bundle.py" --stage <slug> [--unit <u>] --why <first|revision|stale> \
-     --summary-file <the summary file> --out <a folder in the scratchpad>
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/gate_bundle.py" draft --stage <slug> [--unit <u>] --why <first|revision|stale> \
+     --summary-file <the summary file> [--findings <file>] [--handling <file>] --out <a folder in the scratchpad>
    ```
-   Use `--why revision` after a Request Changes round, `stale` when the review was out of date, otherwise
-   `first`. It prints `{"id", "stage", "unit", "documents", "writes", "batches", "round"}` and writes
-   `writes.json` next to the rows. Without a path it reads the project from `$CLAUDE_PROJECT_DIR`.
-   It also writes the gate's `ids`, what every id the page shows is: it runs the shared `aidlc_ids.py sync` (the
-   checkout's id map, kept outside the project) and then `refs` over the summary, the brief and every document, with
-   `--near` the stage's documents, so the page's Q1 and R-01 are this stage's and its BR1.1 this Unit's. Leave it as
-   the script wrote it. A warning that the map could not be built leaves `ids` out; the page then links only the ids
-   it shows itself.
-   It also writes `digest`, the stage item by item for the page's **At a glance** view (requirements, NFRs, rules,
-   decisions, stories; what an earlier stage settled; the stage's traceability). **Nothing traced is left unhandled in
-   silence**: when the stage's traceability.json has a row that is not covered, or a requirement or NFR of the stage
-   that no row covers, the script refuses and names each one. Write a JSON file `{"<id>": {"text": "…", "settled": true,
-   "link": {"kind": "step|doc|code|test|unit", "target": "#<anchor> | path:<file>[#<id>] | unit:<Unit>"}}}`, or
-   `{"<id>": {"text": "…", "acceptanceReason": {"text": "…", "by": "agent"}}}` (`by: "developer"` quotes them:
-   `"quote": "<their words>", "message": "<where they said it>"`), and run it again with `--handling <that file>`.
-   For the `build-and-test` stage the script also writes `buildTest` into the gate row: it reads the stage's tables
-   (the Target Verification Matrix, the commands and results, coverage against its floor, the evidence legend) so the
-   page shows a results strip, a filterable target matrix and a decision card per Not Met or Unverified target, with
-   the instruction files folded under Reference. Nothing for you to do; when the tables are not found the field is left
-   out and the page shows the stage like any other.
-3. Send the rows with **one** `ArtifactData` `batch`: the `writes` array of `writes.json` as it is
-   (`file_path` entries, no `if_version`, these are new rows). When the script says the writes do not
-   fit one batch, send the files named in `batches`, in order. If a write is refused because the id exists,
-   run the script again a minute later: an id is a time stamp.
-4. Present the gate as the protocol says. The completion message gets the line
-   `**Read:** <artifact url>#<id>` next to the `**Review:**` line; that message is where the link lives,
-   and it is sent first: the guard refuses the question until a message of yours carries the link.
-   Then ask the engine's question exactly as the protocol words it ("Delivery Planning complete. How
-   would you like to proceed?"): no link, no URL and no gate id in the question text, so the dialog stays
-   readable. The options stay the engine's. End the turn.
+   Use `--why revision` after a Request Changes round, `stale` when the review was out of date, otherwise `first`.
+   It writes into the folder the draft row (`gate.json`), the documents, **`criteria.json`** and **`judgment.json`**, and
+   prints `{"id", "documents", "round", "judgment", "criteria", "items", "todo", "next"}`. It never writes `writes.json`:
+   there is nothing to send until you judged the stage.
+   - `criteria.json` is what the stage is judged against, each with its full text and source: the engine's definition of
+     the stage (`stage-N`: its Constraints and what each file it writes must hold), the reviewer's checklist
+     (`review-N`: Core Review Questions and the stage's own "What to Check"), the project's settled rules (`rule-N`: every
+     NEVER / ALWAYS bullet of the memory files that apply), and what earlier stages settled (`earlier-<artifact>`: one per
+     document the stage consumes).
+   - The rest is as before: the gate's `ids` (`aidlc_ids.py sync`, then `refs` with `--near`; leave them as written), the
+     stage's items one by one (requirements, NFRs, rules, decisions, stories; whole, never clipped; a rule from its YAML
+     source of truth), `buildTest` for the Build and Test stage, and the finding cards with `--findings` (§ 2a).
+   - **Nothing traced is left unhandled in silence**: when the stage's traceability.json has a row that is not covered, or
+     a requirement or NFR that no row covers, draft refuses and names each one. Write a JSON file `{"<id>": {"text": "…",
+     "settled": true, "link": {"kind": "step|doc|code|test|unit", "target": "#<anchor> | path:<file>[#<id>] |
+     unit:<Unit>"}}}`, or `{"<id>": {"text": "…", "acceptanceReason": {"text": "…", "by": "agent"}}}` (`by: "developer"`
+     quotes them: `"quote": "<their words>", "message": "<where they said it>"`), and run draft again with `--handling`.
+3. **Judge: do the `todo` list in `judgment.json`.** This is the work the page exists for. Read the stage's documents and
+   `criteria.json`; write everything in plain words, whole sentences, never an ellipsis, never "see the document".
+   - **Every criterion**: `criteria.<key>.verdict` is `holds`, `fails` or `n/a` (a project rule that has nothing to do
+     with this stage is `n/a`). A `fails` gets a `note` saying what fails, and is named in the sources of a point below.
+   - **`evaluation.verdict`**: `ready`, `risks` (approvable, with things to know) or `not-ready`.
+   - **`evaluation.decides`**: two or three sentences on what approving this stage decides for the developer.
+   - **`evaluation.lookFirst`** (at least one): what the developer should check first, each with `why` (why first).
+   - **`evaluation.solid`** (at least one): what holds and needs no second look.
+   - **`evaluation.risks`** (each with `severity` critical | high | medium | low), **`gaps`** (what the stage should say
+     and does not), **`conflicts`** (where it disagrees with an earlier stage or a project rule): whenever there are any.
+   - **Every point has `sources`**: a criterion key, an item id, `doc:<document key>` or a finding id. The page makes
+     each a link that opens what it names.
+   - **Every item** in `items` (the draft lists them with their text under `_asWritten`): a one-sentence `summary` (at
+     most 300 characters) and a `label` by what it costs if it is wrong: `critical` wrong data, security or hard to undo;
+     `high` wrong behaviour people would see; `medium` rework in this stage or Unit; `low` cosmetic or internal. Set
+     `lookFirst: true` on the critical and high items the developer must check; keep or fix `relates`. Items an earlier
+     stage settled are not listed: the page folds them. After a Request Changes round, items whose text did not change
+     carry your earlier summary and label (`unchanged: true`); read them once.
+   - **`documents`**: `covered` when the items and the evaluation say everything the file says (the page folds it under
+     "As written", shown exactly as written), `shown` when the page must show it in full (questions, the review, anything
+     with content no item holds). The draft guessed; check each.
+   - Keys starting with `_` are notes for you; finalize drops them.
+4. **Finalize.**
+   ```
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/gate_bundle.py" finalize --out <the same folder>
+   ```
+   It merges the judgment into the row (`row.json`) and checks it. While anything is missing (no evaluation, an item
+   without a summary or a label, an ellipsis, a source that names nothing on the page, a failed criterion no point names)
+   it refuses in the recipe shape (`Refused: … because …`, numbered steps with one line per problem, `It worked when: …`):
+   fix each line in `judgment.json` and run it again. When it passes it prints `{"id", "verdict", "lookFirst", "items",
+   "criteria", "writes", "batches"}` and keeps your summaries for the next round.
+5. **Publish.** Send the rows with **one** `ArtifactData` `batch`: the `writes` array of `writes.json` as it is
+   (`file_path` entries, no `if_version`, these are new rows). When finalize names more than one file in `batches`, send
+   them in order. The guard refuses a `gates/` row with no evaluation, or with any part of the judgment missing, in the
+   same recipe shape. If a write is refused because the id exists, run draft and finalize again a minute later: an id is
+   a time stamp.
+6. **Present the gate** as the protocol says. The completion message gets the line `**Read:** <artifact url>#<id>` next
+   to the `**Review:**` line; that message is where the link lives, and it is sent first: the guard refuses the question
+   until a message of yours carries the link. Then ask the engine's question exactly as the protocol words it ("Delivery
+   Planning complete. How would you like to proceed?"): no link, no URL and no gate id in the question text. The options
+   stay the engine's. End the turn.
 
-The plan checkpoint of Code Generation (Approve Plan) is a gate too: the same steps, with its
-`code-generation-plan.md`.
+The plan checkpoint of Code Generation (Approve Plan) is a gate too: the same steps, with its `code-generation-plan.md`.
+
+What the page shows, top to bottom: **Claude's evaluation** (verdict, what approving decides, look at first, risks /
+gaps / conflicts / solid with their sources, and "Rules checked": every criterion with its verdict, failed ones open);
+**What the stage says** (every item as your sentence with its label, grouped Look at first / Matters most / Main / Minor,
+opening to the item as written: its criteria, logic and examples; unchanged and earlier-settled items and the
+traceability fold away with a count); the finding cards; your completion summary (folded); the review; the documents the
+items do not cover; and **As written**, the covered files, folded. Read marks per block and per item, and notes per
+document, stay as they were.
 
 ## 2a. Review findings: fix what is certain, the rest goes on the page
 
