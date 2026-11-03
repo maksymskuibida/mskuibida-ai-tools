@@ -2,7 +2,7 @@
 """Build the rows for one AI-DLC approval gate.
 
     gate_bundle.py --stage <slug> [--unit <u>] [--why first|revision|stale] [--summary-file <path>]
-                   [--project-dir <dir>] [--no-brief] [--findings <file>] --out <dir>
+                   [--project-dir <dir>] [--no-brief] [--findings <file>] [--handling <file>] --out <dir>
 
 Writes into <dir>:
     gate.json               the `gates/<id>` row
@@ -50,6 +50,9 @@ Findings: with --findings (the findings file the guard saved when the review bri
 what it could fix for certain and recorded the model's suggestions) the gate row carries `findings`, the cards the
 developer sorts on the page (Fix, Accept, Reject with a note); `findings.py cards` is its shape. The script refuses a file
 whose findings lack a suggested action or a finding text. The page writes the developer's sort as `findingPicks`.
+Digest: the gate row's `digest` holds the stage's items one by one (requirements, NFRs, rules, decisions, stories), what
+is settled in an earlier stage, and the stage's traceability (scripts/digest.py). A traced id the stage leaves uncovered
+needs a link or a reason (--handling <file>); the script refuses until every one has.
 Standard library only.
 """
 
@@ -63,6 +66,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import aidlc_ids  # noqa: E402  (the shared copy, next to this file)
+import digest  # noqa: E402  (the stage's items, for the page's digest)
 import findings  # noqa: E402  (the review findings that go on the page as cards)
 import validate_bundle  # noqa: E402
 
@@ -627,6 +631,24 @@ def build(args):
                  sorted({path for _row, _index, path in docs}))
     if ids:
         gate["ids"] = ids
+    given = {}
+    if args.handling:
+        try:
+            with open(args.handling, encoding="utf-8") as f:
+                given = json.load(f)
+        except (OSError, ValueError) as why_not:
+            raise BundleError(f"cannot read the handling file {args.handling}: {why_not}") from None
+    try:
+        found = digest.build([row for row, _index, _path in docs], ids or {}, os.path.relpath(folder, root), given)
+    except ValueError as why_not:
+        raise BundleError(
+            "something the stage leaves uncovered says neither where it is handled nor why not: " + str(why_not) +
+            ". Write a JSON file {\"<id>\": {\"text\": \"…\", \"settled\": true, \"link\": {\"kind\": \"step|doc|code|test|unit\", "
+            "\"target\": \"#<anchor> | path:<file>[#<id>] | unit:<Unit>\"}}} or {\"<id>\": {\"text\": \"…\", \"acceptanceReason\": "
+            "{\"text\": \"…\", \"by\": \"agent\"}}} (by \"developer\" adds \"quote\" and \"message\"), and run this again with "
+            "--handling <that file>") from None
+    if found["items"] or found["trace"]:
+        gate["digest"] = found
     gate["documents"] = [index for _row, index, _path in docs if index]
     return gate_id, gate, [row for row, _index, _path in docs]
 
@@ -661,6 +683,7 @@ def main(argv=None):
     ap.add_argument("--summary-file")
     ap.add_argument("--project-dir")
     ap.add_argument("--no-brief", action="store_true")
+    ap.add_argument("--handling", help="JSON {id: coveredBy}: where each traced id the stage leaves uncovered is handled, or why not")
     ap.add_argument("--findings", help="the findings file the guard saved: its open findings become cards on the page")
     ap.add_argument("--out", required=True)
     args = ap.parse_args(argv)

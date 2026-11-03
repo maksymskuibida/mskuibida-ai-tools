@@ -56,6 +56,13 @@ stage has a reviewer:
    `--near` the stage's documents, so the page's Q1 and R-01 are this stage's and its BR1.1 this Unit's. Leave it as
    the script wrote it. A warning that the map could not be built leaves `ids` out; the page then links only the ids
    it shows itself.
+   It also writes `digest`, the stage item by item for the page's **At a glance** view (requirements, NFRs, rules,
+   decisions, stories; what an earlier stage settled; the stage's traceability). **Nothing traced is left unhandled in
+   silence**: when the stage's traceability.json has a row that is not covered, or a requirement or NFR of the stage
+   that no row covers, the script refuses and names each one. Write a JSON file `{"<id>": {"text": "…", "settled": true,
+   "link": {"kind": "step|doc|code|test|unit", "target": "#<anchor> | path:<file>[#<id>] | unit:<Unit>"}}}`, or
+   `{"<id>": {"text": "…", "acceptanceReason": {"text": "…", "by": "agent"}}}` (`by: "developer"` quotes them:
+   `"quote": "<their words>", "message": "<where they said it>"`), and run it again with `--handling <that file>`.
    For the `build-and-test` stage the script also writes `buildTest` into the gate row: it reads the stage's tables
    (the Target Verification Matrix, the commands and results, coverage against its floor, the evidence legend) so the
    page shows a results strip, a filterable target matrix and a decision card per Not Met or Unverified target, with

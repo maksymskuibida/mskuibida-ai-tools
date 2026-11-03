@@ -64,7 +64,7 @@ capabilities):
 - Notes on rows, and Do it / Leave it on suggestion rows, reach the agent with your chat answer. The decision itself
   is given in chat.
 
-Per-stage gates are unchanged, except the Build and Test stage (below).
+Per-stage pages open on At a glance (below); the Build and Test stage adds its own views.
 
 ### Build and Test
 
@@ -152,6 +152,26 @@ Bolt, RAID, R-) whose target is not in the gate is still shown as a link: its to
 and pressing it says it is not in this page. Badges explain themselves the same way: severity, likelihood and impact,
 priority, verdicts, statuses, source tags such as `[Q3]` or `[assumption]`, and the change marks. A document whose
 shape is not recognised is Markdown with every H2 a collapsible section.
+
+## At a glance (1.23.0)
+
+Every per-stage page opens on **At a glance**, the stage item by item, before the documents as written (those follow,
+folded):
+
+- **Tiles**: how many items you have read (each requirement, rule, decision, story and finding card has its own read
+  dot), how many finding cards you sorted, how many traced items are not handled, how many are settled from earlier.
+- **What the stage holds**: one bar per kind (requirements, NFRs, rules, decisions, stories), split into covered and
+  linked, accepted with a reason, new in this stage, and settled earlier; hover a segment for its count.
+- **Traceability**: when the stage has a traceability.json, a matrix of what is traced (rows) against what covers it
+  (columns), a dot for covered and a cross for not.
+- **One lane per kind**: one line per item (its id, its title in plain words, a chip saying where it is handled or that
+  it was accepted, and the reason under the line when it is one); pressing the title opens what it says, what it relates
+  to (the ids it names, so you see how decisions connect) and a jump to its document. Items an earlier stage settled are
+  folded under a count: quoted here, approved before.
+
+The read progress in the bar counts items, not sections, and the Unread filter hides the items you read. `gate_bundle.py`
+builds it (`scripts/digest.py`) and refuses a stage whose traceability leaves something uncovered without a link or a
+reason (`--handling`), the same rule as the unit pages.
 
 ## Review findings at the gate (1.22.0)
 

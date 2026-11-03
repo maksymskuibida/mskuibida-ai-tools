@@ -194,6 +194,15 @@ other when it is not. Its shape is [`build-test.schema.json`](build-test.schema.
 `python3 validate_bundle.py --build-test <gate.json>`. The developer's picks come back in the row's `targetPicks`
 (`{<target id>: {pick: "accept"|"followup"|"fix", note?}}`), written by the page, never by the agent.
 
+## The digest of a per-stage gate row
+
+Not part of the bundle: the per-stage `gates/<id>` row carries `digest` (`scripts/digest.py`, written by
+`gate_bundle.py`): `{items[] {key, kind: requirement|nfr|rule|decision|story, id, title, body?, doc, settled?,
+coveredBy?, mentions[]}, trace[] {from, to, ok}, counts, settled}`. `coveredBy` has the shape and the rule of a bundle
+row's (`scripts/handling.py`): every traced id the stage leaves uncovered links to where it is handled or carries an
+`acceptanceReason`, or the row is not built. `approval-gate.html` draws it as At a glance; read marks are per item
+(`item:<key>`, `finding:<id>` in the viewer's reads document).
+
 ## The test plan (unit-end page only)
 
 Not part of the bundle: the developer can test the not-verified points before approving. The plan, its page and the

@@ -49,6 +49,9 @@
       a block's read dot. Block keys: "summary", "review", or a document key. A mark holds the hash of the
       text read, so on a new round only the blocks whose text changed turn unread.
 
+    gates/<id>.digest = {items[], trace[], counts, settled}   gate_bundle.py (scripts/digest.py): the stage item by item,
+      drawn first as "At a glance" (tiles, coverage per kind, the traceability matrix, one lane per kind with a read dot
+      per item; settled items folded). Read marks per item are "item:<key>" and "finding:<id>" in the reads document.
     gates/<id>.findingPicks[<finding id>] = {pick: "fix"|"accept"|"reject", note?, at}   when the row carries `findings`
       (gate_bundle.py --findings: {stage, open, blocking, items[] {id, title, plain?, action, actionBy, where?, severity,
       blocking, proposed, why, refs}, carried[]}): the developer's sort of each review finding Claude could not fix for
@@ -703,6 +706,49 @@ figure.screen > details.sub { margin: 0; padding: 4px 12px 6px; border-top: 1px 
 .dpick button:disabled { opacity: .45; cursor: not-allowed; }
 .fcard .need { font-size: 12px; color: var(--crit-fg); }
 .fcarried { margin: 10px 0 0; font-size: 13px; color: var(--muted); }
+/* ---- At a glance: the stage item by item. Tiles, then coverage per kind, the trace, then one lane per kind ---- */
+.digest .body { display: grid; gap: 18px; padding: 4px 14px 16px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.tile { display: grid; gap: 4px; align-content: start; padding: 10px 12px; border-radius: 10px; background: var(--raised); border: 1px solid var(--line-soft); min-width: 0; }
+.tile .lbl { font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.tile b { font-size: 24px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tile b small { font-size: 14px; font-weight: 500; color: var(--muted); }
+.tile .sub { font-size: 12px; color: var(--fg-2); }
+.tile.good b { color: var(--ok-fg); } .tile.bad b { color: var(--crit-fg); }
+.meter2 { height: 6px; border-radius: 3px; background: var(--line-soft); overflow: hidden; } .meter2 i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.dsec h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--fg-2); display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; }
+.dsec h3 .hint { font-weight: 400; font-size: 12px; color: var(--muted); }
+.cov2 { display: grid; grid-template-columns: minmax(84px, max-content) 1fr max-content; gap: 6px 12px; align-items: center; }
+.cov2 .k { font-size: 13px; color: var(--fg-2); }
+.cov2 .n { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+.sbar { display: flex; gap: 2px; height: 14px; min-width: 0; }
+.sbar i { display: block; height: 100%; min-width: 4px; border-radius: 3px; }
+.sbar i.ok, .lg i.ok { background: var(--ok-fg); } .sbar i.acc, .lg i.acc { background: var(--warn-dot); }
+.sbar i.new, .lg i.new { background: var(--accent); } .sbar i.old, .lg i.old { background: var(--control); }
+.lg { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.lg span { display: inline-flex; align-items: center; gap: 6px; } .lg i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.tmx { overflow-x: auto; } .tmx table { border-collapse: collapse; font-size: 12px; }
+.tmx th, .tmx td { padding: 4px 8px; border-bottom: 1px solid var(--line-soft); text-align: center; white-space: nowrap; }
+.tmx th { font: 500 12px var(--mono); color: var(--fg-2); } .tmx th.r { text-align: left; }
+.tmx .hit { color: var(--ok-fg); font-weight: 700; } .tmx .miss { color: var(--crit-fg); font-weight: 700; }
+.lane { display: grid; gap: 2px; }
+.irow { border-radius: 8px; } .irow:hover { background: var(--hover); }
+.irow .ih { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 2px 4px; }
+.irow .iid { flex: none; font: 500 12px var(--mono); color: var(--accent); min-width: 64px; }
+.irow .ititle { flex: 1 1 auto; min-width: 0; border: 0; background: none; padding: 4px 0; text-align: left; font: inherit; font-size: 14px; color: var(--fg); cursor: pointer; overflow-wrap: anywhere; }
+.irow.read .ititle { color: var(--muted); }
+.irow .ichips { display: inline-flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.irow .ib { padding: 0 8px 10px 108px; display: grid; gap: 6px; font-size: 13px; color: var(--fg-2); line-height: 1.5; }
+.irow .rel { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; } .irow .rel > span { font-size: 12px; color: var(--muted); }
+.ireason { margin: 0 4px 8px 108px; padding: 6px 10px; border-radius: 6px; background: var(--warn-bg); color: var(--warn-fg); font-size: 13px; line-height: 1.5; }
+.ireason q { font-style: italic; }
+.idot { flex: none; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 6px; background: transparent; display: inline-flex; align-items: center; justify-content: center; }
+.idot i { width: 10px; height: 10px; border-radius: 5px; background: var(--accent); border: 2px solid var(--accent); }
+.irow.read .idot i, .dcard.read .idot i { background: transparent; border-color: var(--control); }
+.idot:focus-visible, .ititle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+details.settled > summary { cursor: pointer; font-size: 13px; color: var(--muted); padding: 6px 4px; }
+.jump { font-size: 12px; }
+@media (max-width: 640px) { .irow .ib, .ireason { padding-left: 8px; margin-left: 4px; } .irow .ih { flex-wrap: wrap; } .irow .iid { min-width: 0; } }
 .refgrp > .body { display: grid; gap: 12px; padding-left: 12px; }
 @media (max-width: 767px) {
   .bt-strip { grid-template-columns: minmax(0, 1fr); }
@@ -782,7 +828,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
 
   let db = null, uid = null, tipOn = null;
   const fresh = () => ({ unsub: [], gate: null, docs: new Map(), docsLoaded: false, notes: {}, dirty: new Set(), noteStat: {}, unsaved: false, saving: false, failed: false,
-    noteTimer: null, painted: "", openNotes: new Set(), railSig: "", mode: {}, picks: {}, fpicks: {}, bt: { v: new Set(), u: new Set(), q: "", rows: new Set() }, refs: new Map(), ids: {}, railOpen: {},
+    noteTimer: null, painted: "", openNotes: new Set(), railSig: "", mode: {}, picks: {}, fpicks: {}, iopen: new Set(), bt: { v: new Set(), u: new Set(), q: "", rows: new Set() }, refs: new Map(), ids: {}, railOpen: {},
     reads: {}, readKey: "", hashes: {}, filter: "all", prev: null, prevDocs: null, changed: {}, changedSecs: {} });
   const view = Object.assign({ id: "", diagrams: 0 }, fresh());
   const hasMd = () => typeof marked !== "undefined" && typeof DOMPurify !== "undefined";
@@ -999,16 +1045,18 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
   function paintAll() {
     if (!view.gate) return;
     const g = view.gate; const docs = docList();
-    const sig = JSON.stringify([view.id, g.summary, g.brief, g.review, docs.map((d) => [d.key, d.title, d.kind, d.text, !!d.pending, !!d.partial]), g.buildTest || null, g.findings || null, isDark(), view.mode, view.changed]);
+    const sig = JSON.stringify([view.id, g.summary, g.brief, g.review, docs.map((d) => [d.key, d.title, d.kind, d.text, !!d.pending, !!d.partial]), g.buildTest || null, g.findings || null, g.digest || null, isDark(), view.mode, view.changed]);
     if (sig === view.painted) { paintChrome(docs); return; }
     view.painted = sig; view.refs = new Map();
     view.hashes = {}; if (g.summary) view.hashes.summary = hash(g.summary); if (g.brief) view.hashes.review = hash(g.brief);
     docs.forEach((d) => { if (!d.pending) view.hashes[d.key] = hash(d.text); });
-    const FN = fnd(); if (FN) view.hashes.findings = hash(JSON.stringify(FN.items));
+    const FN = fnd(); if (FN) { view.hashes.findings = hash(JSON.stringify(FN.items)); FN.items.forEach((f) => { view.hashes["finding:" + f.id] = hash(JSON.stringify(f)); }); }
+    const DG = dg(); if (DG) DG.items.forEach((it) => { view.hashes["item:" + it.key] = hash(JSON.stringify([it.title, it.body || "", it.coveredBy || null])); });
     const B = bt(); if (B && B.targets) { view.hashes["bt-matrix"] = hash(JSON.stringify(B.targets)); if (openTargets(B).length) view.hashes["bt-decide"] = hash(JSON.stringify(openTargets(B))); }
     const frag = [];
     if (B) frag.push(btStrip(B));
     if (g.summary) frag.push(`<details class="block sum" open id="b-summary" data-block="summary"><summary>${CARET}<h2>Summary</h2><span class="hint wide">what Claude did in this stage</span><span class="end">${rdot("summary")}</span></summary><div class="body md" id="summarymd"></div></details>`);
+    if (DG) frag.push(digestBlock(DG));
     if (FN) frag.push(findingsBlock(FN));
     if (g.brief) frag.push(briefBlock(g));
     if (B && B.targets && B.targets.length) { frag.push(btMatrixBlock(B)); frag.push(btDecideBlock(B)); }
@@ -1049,6 +1097,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
   /* ---------- the chrome: header facts, the sticky bar, read and filter state, the outline, the band ---------- */
   function blocksOf(docs) {
     const g = view.gate, out = [];
+    const DG = dg(); if (DG) out.push({ key: "digest", go: "b-digest", short: "At a glance", count: itemProgress().read + "/" + itemProgress().total, tip: "The stage item by item: requirements, rules, decisions and stories, each with its own read mark" });
     if (g.summary) out.push({ key: "summary", go: "b-summary", short: "Summary", count: "", tip: "The summary of what Claude did in this stage" });
     if (g.brief) {
       const b = parseBrief(g.brief); const open = b ? b.rows.filter((x) => isOpenStatus(x.status)) : []; const hi = open.filter((x) => isHi(x.severity)).length;
@@ -1083,7 +1132,8 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
   function paintChrome(docs) {
     if (!view.gate) return;
     const g = view.gate, blocks = blocksOf(docs);
-    const total = blocks.filter((b) => view.hashes[b.key]).length, read = blocks.filter((b) => isRead(b.key)).length;
+    const ip = itemProgress();
+    const total = blocks.filter((b) => view.hashes[b.key]).length + ip.total, read = blocks.filter((b) => isRead(b.key)).length + ip.read;
     const nChanged = Object.keys(view.changed).length, nNotes = noted().length;
     const filters = [["all", "All", blocks.length], ["unread", "Unread", total - read]].concat(nChanged ? [["changed", "Changed", nChanged]] : []).concat(nNotes ? [["notes", "With notes", nNotes]] : []);
     if (!filters.some((f) => f[0] === view.filter)) view.filter = "all";
@@ -1116,6 +1166,10 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
       const r = isRead(x.key); node.classList.toggle("read", r);
       const dot = node.querySelector(":scope > summary .rdot"); if (dot) { const lab = r ? "Mark as unread" : "Mark as read"; dot.setAttribute("aria-label", lab); dot.dataset.tip = lab; }
       const ok = passes(x.key); node.hidden = !ok; if (ok) shown++;
+    });
+    el.col.querySelectorAll("[data-item]").forEach((n) => {
+      const r = isRead(n.dataset.item); n.classList.toggle("read", r); n.hidden = view.filter === "unread" && r;
+      const d = n.querySelector(":scope > .ih > .idot, :scope > .dtop > .idot"); if (d) { d.dataset.tip = r ? "Read. Press to mark unread" : "Mark as read"; d.setAttribute("aria-label", (r ? "Mark unread: " : "Mark read: ") + (n.dataset.item.split(":")[1] || "")); }
     });
     const rgp = $("b-reference"); if (rgp) rgp.hidden = [...rgp.querySelectorAll("details.doc")].every((n) => n.hidden);
     const nm = $("nomatch"); if (nm) { nm.hidden = !!shown || !blocks.length; nm.textContent = view.filter === "unread" ? "You marked everything read. Choose All to see it again." : "Nothing here for this filter. Choose All to see every block."; }
@@ -2643,6 +2697,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     el.col.querySelectorAll("details").forEach((d) => { d.open = true; });
     el.col.querySelectorAll("details.block[data-block]").forEach((b) => { if (isRead(b.dataset.block)) b.open = false; });
     const rg = $("b-reference"); if (rg) rg.open = false;  /* the instruction files stay folded until asked for */
+    if (dg()) el.col.querySelectorAll("details.block.doc").forEach((b) => { b.open = false; });  /* the digest leads; the documents as written wait below */
     drawDiagrams(el.col);
   }
   /* Marking a block read folds it; marking it unread opens it again. */
@@ -2659,7 +2714,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     e.preventDefault();
     if (t.dataset.filter) { view.filter = t.dataset.filter; paintChrome(docList()); }
     else if (t.dataset.all) expandAll(t.dataset.all === "open");
-    else if (t.dataset.allread) readAndFold(blocksOf(docList()).map((b) => b.key), true);
+    else if (t.dataset.allread) { readAndFold(blocksOf(docList()).map((b) => b.key), true); setRead(itemKeys(), true); paintItems(); }
     else if (t.dataset.outline) { el.rail.classList.toggle("show"); t.setAttribute("aria-expanded", String(el.rail.classList.contains("show"))); if (el.rail.classList.contains("show")) el.rail.scrollIntoView({ block: "nearest" }); }
     else if (t.dataset.retry) { view.unsaved = true; view.failed = false; flushNotes(); }
     else if (t.dataset.go) go(t.dataset.go, t);
@@ -2813,7 +2868,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     const p = view.fpicks[f.id] || {}; const note = (p.note || "").trim(); const id = esc(f.id);
     const sev = `<span class="tag" style="background:var(--${f.blocking ? "crit" : "warn"}-bg);color:var(--${f.blocking ? "crit" : "warn"}-fg)" data-tip="${esc(f.why || "")}">${esc(f.severity)}${f.blocking ? " · blocks approval" : ""}</span>`;
     const by = f.actionBy === "model" ? "suggested by a model" : f.actionBy === "reviewer" ? "the reviewer's action" : "";
-    return `<div class="dcard fcard ${f.blocking ? "blocking" : "carried"}${p.pick ? " chosen" : ""}" data-fid="${id}"><div class="dtop">${sev}<span class="mono">${id}</span>${f.proposed ? `<span class="hint" data-tip="${esc(f.why || "")}">suggested: ${esc(f.proposed)}</span>` : ""}</div>` +
+    return `<div class="dcard fcard ${f.blocking ? "blocking" : "carried"}${p.pick ? " chosen" : ""}${isRead("finding:" + f.id) ? " read" : ""}" data-fid="${id}" data-item="finding:${id}"><div class="dtop">${idot("finding:" + f.id, f.id)}${sev}<span class="mono">${id}</span>${f.proposed ? `<span class="hint" data-tip="${esc(f.why || "")}">suggested: ${esc(f.proposed)}</span>` : ""}</div>` +
       `<h3>${inline(f.title)}</h3>${f.plain ? `<p class="fplain">${inline(f.plain)}</p>` : ""}` +
       `<p class="faction"><b>Suggested</b>${inline(f.action || "")}${by ? ` <span class="fsugg">(${esc(by)})</span>` : ""}</p>` +
       (f.where ? `<span class="fwhere">${esc(f.where)}</span>` : "") +
@@ -2857,6 +2912,85 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     const need = card.querySelector(".need"); if (need) need.hidden = !!e.target.value.trim();
     findingsCount(); paintChrome(docList());
   });
+
+  /* ---------- At a glance: the stage item by item (gate_bundle.py writes `digest`; scripts/digest.py) ---------- */
+  const dg = () => (view.gate && view.gate.digest && ((view.gate.digest.items || []).length || (view.gate.digest.trace || []).length)) ? view.gate.digest : null;
+  const KIND_NAMES = { requirement: ["Requirements", "requirement"], nfr: ["Non-functional requirements", "NFR"], rule: ["Business rules", "rule"], decision: ["Decisions", "decision"], story: ["Stories", "story"] };
+  const KIND_ORDER = ["requirement", "nfr", "rule", "decision", "story"];
+  const itemKeys = () => Object.keys(view.hashes).filter((k) => k.startsWith("item:") || k.startsWith("finding:"));
+  const itemProgress = () => { const keys = itemKeys(); return { total: keys.length, read: keys.filter((k) => isRead(k)).length }; };
+  const idot = (key, label) => `<button type="button" class="idot" data-iread="${esc(key)}" aria-label="${esc((isRead(key) ? "Mark unread: " : "Mark read: ") + label)}" data-tip="${isRead(key) ? "Read. Press to mark unread" : "Mark as read"}"><i aria-hidden="true"></i></button>`;
+  const share = (it) => it.coveredBy && it.coveredBy.link ? "ok" : it.coveredBy && it.coveredBy.acceptanceReason ? "acc" : it.settled ? "old" : "new";
+  const SHARE_NAMES = { ok: "Covered, linked", acc: "Accepted, with a reason", new: "New in this stage", old: "Settled earlier" };
+  function handledChip(it) {
+    const c = it.coveredBy; if (!c) return it.settled ? '<span class="tag" data-tip="Defined and approved in an earlier stage; quoted here">settled</span>' : "";
+    if (c.link) return `<a class="tag" style="background:var(--ok-bg);color:var(--ok-fg)" href="${c.link.target && c.link.target.charAt(0) === "#" ? esc(c.link.target) : "#"}" ${c.link.target && c.link.target.charAt(0) === "#" ? `data-jump="${esc(c.link.target.slice(1))}"` : ""} data-tip="${esc(c.text + (c.link.target ? " (" + c.link.target.replace(/^path:|^unit:/, "") + ")" : ""))}">&#10003; ${esc(c.link.label || c.text)}</a>`;
+    if (c.acceptanceReason) return `<span class="tag" style="background:var(--warn-bg);color:var(--warn-fg)" data-tip="${esc(c.acceptanceReason.text)}">accepted</span>`;
+    return '<span class="tag" style="background:var(--crit-bg);color:var(--crit-fg)">not handled</span>';
+  }
+  function reasonHtml(it) {
+    const a = it.coveredBy && it.coveredBy.acceptanceReason; if (!a) return "";
+    return `<p class="ireason"><b>${a.by === "developer" ? "Your reason" : "Claude's reason"}:</b> ${esc(a.text)}${a.quote ? ` <q>${esc(a.quote)}</q>` : ""}${a.message ? ` <span class="hint">(${esc(a.message)})</span>` : ""}</p>`;
+  }
+  function itemRow(it, docs) {
+    const key = "item:" + it.key, read = isRead(key), open = view.iopen.has(it.key);
+    const doc = docs.find((d) => d.key === it.doc);
+    const rel = (it.mentions || []).length ? `<div class="rel"><span>Relates to</span>${it.mentions.map((m) => `<span class="chip">${esc(m)}</span>`).join("")}</div>` : "";
+    return `<div class="irow${read ? " read" : ""}" id="item-${esc(it.key)}" data-item="${esc(key)}" data-aidlc-id="${esc(it.id)}"><div class="ih">${idot(key, it.id)}<span class="iid">${esc(it.id)}</span>` +
+      `<button type="button" class="ititle" data-iopen="${esc(it.key)}" aria-expanded="${open}">${esc(it.title)}</button><span class="ichips">${handledChip(it)}</span></div>` + reasonHtml(it) +
+      (open ? `<div class="ib">${it.body ? `<p>${inline(it.body)}</p>` : ""}${rel}${doc ? `<a class="jump" href="#" data-go="d-${esc(doc.key)}">In ${esc(doc.title || doc.key)}</a>` : ""}</div>` : "") + "</div>";
+  }
+  function coverageHtml(D) {
+    const kinds = KIND_ORDER.filter((k) => D.items.some((i) => i.kind === k)); if (!kinds.length) return "";
+    const rows = kinds.map((k) => {
+      const its = D.items.filter((i) => i.kind === k); const by = { ok: 0, acc: 0, new: 0, old: 0 }; its.forEach((i) => { by[share(i)]++; });
+      const segs = ["ok", "acc", "new", "old"].filter((s) => by[s]).map((s) => `<i class="${s}" style="flex:${by[s]} 1 0" data-tip="${esc(by[s] + " " + KIND_NAMES[k][1] + (by[s] === 1 ? "" : "s") + ": " + SHARE_NAMES[s].toLowerCase())}"></i>`).join("");
+      return `<span class="k">${esc(KIND_NAMES[k][0])}</span><div class="sbar" role="img" aria-label="${esc(KIND_NAMES[k][0] + ": " + ["ok", "acc", "new", "old"].filter((s) => by[s]).map((s) => by[s] + " " + SHARE_NAMES[s].toLowerCase()).join(", "))}">${segs}</div><span class="n">${its.length}</span>`;
+    }).join("");
+    const used = ["ok", "acc", "new", "old"].filter((s) => D.items.some((i) => share(i) === s));
+    return `<div class="dsec"><h3>What the stage holds<span class="hint">by kind; hover a segment for its count</span></h3><div class="cov2">${rows}</div><div class="lg">${used.map((s) => `<span><i class="${s}"></i>${SHARE_NAMES[s]}</span>`).join("")}</div></div>`;
+  }
+  function traceHtml(D) {
+    const T = D.trace || []; if (!T.length) return "";
+    const froms = [...new Set(T.map((t) => t.from))], tos = [...new Set(T.map((t) => t.to || "—"))];
+    if (tos.length > 14) return `<div class="dsec"><h3>Traceability<span class="hint">${T.filter((t) => t.ok).length} of ${T.length} covered</span></h3></div>`;
+    const cell = (f, t) => { const hit = T.find((x) => x.from === f && (x.to || "—") === t); return hit ? (hit.ok ? `<td class="hit" data-tip="${esc(f + " is covered by " + t)}">&#9679;</td>` : `<td class="miss" data-tip="${esc(f + ": not covered" + (t !== "—" ? " by " + t : ""))}">&#10005;</td>`) : "<td></td>"; };
+    return `<div class="dsec"><h3>Traceability<span class="hint">${T.filter((t) => t.ok).length} of ${T.length} covered; rows are what is traced, columns what covers it</span></h3><div class="tmx"><table><thead><tr><th class="r" scope="col"></th>${tos.map((t) => `<th scope="col">${esc(t)}</th>`).join("")}</tr></thead><tbody>${froms.map((f) => `<tr><th class="r" scope="row">${esc(f)}</th>${tos.map((t) => cell(f, t)).join("")}</tr>`).join("")}</tbody></table></div></div>`;
+  }
+  function lanesHtml(D, docs) {
+    return KIND_ORDER.filter((k) => D.items.some((i) => i.kind === k)).map((k) => {
+      const its = D.items.filter((i) => i.kind === k), fresh = its.filter((i) => !i.settled || i.coveredBy), old = its.filter((i) => i.settled && !i.coveredBy);
+      return `<div class="dsec"><h3>${esc(KIND_NAMES[k][0])}<span class="hint">${fresh.length} to read${old.length ? `, ${old.length} settled earlier` : ""}</span></h3><div class="lane">${fresh.map((i) => itemRow(i, docs)).join("")}` +
+        (old.length ? `<details class="settled"${view.iopen.has("settled:" + k) ? " open" : ""} data-settled="${k}"><summary>Settled in an earlier stage (${old.length}): quoted here, approved before</summary>${old.map((i) => itemRow(i, docs)).join("")}</details>` : "") + "</div></div>";
+    }).join("");
+  }
+  function digestBlock(D) {
+    const docs = docList(), ip = itemProgress(), F = fnd();
+    const unhandled = D.items.filter((i) => i.coveredBy && !i.coveredBy.link && !i.coveredBy.acceptanceReason).length;
+    const accepted = D.items.filter((i) => i.coveredBy && i.coveredBy.acceptanceReason).length;
+    const pct = ip.total ? Math.round(ip.read / ip.total * 100) : 100;
+    const tiles = `<div class="tiles"><div class="tile"><span class="lbl">Read</span><b class="num">${ip.read}<small> / ${ip.total}</small></b><div class="meter2" aria-hidden="true"><i style="width:${pct}%"></i></div><span class="sub">items with their own read mark</span></div>` +
+      (F ? `<div class="tile${fpickedCount(F) === F.items.length ? " good" : ""}"><span class="lbl">Findings sorted</span><b class="num">${fpickedCount(F)}<small> / ${F.items.length}</small></b><span class="sub">${F.blocking ? F.blocking + " blocking" : "none blocking"}</span></div>` : "") +
+      `<div class="tile${unhandled ? " bad" : " good"}"><span class="lbl">Not handled</span><b class="num">${unhandled}</b><span class="sub">${accepted ? accepted + " accepted with a reason" : "every traced item links somewhere"}</span></div>` +
+      (D.settled ? `<div class="tile"><span class="lbl">Settled earlier</span><b class="num">${D.settled}</b><span class="sub">quoted, approved in an earlier stage</span></div>` : "") + "</div>";
+    return `<details class="block digest" open id="b-digest" data-block="digest"><summary>${CARET}<h2>At a glance</h2><span class="hint wide">the stage item by item; the documents as written follow below</span></summary><div class="body" id="digestbody">${tiles}${coverageHtml(D)}${traceHtml(D)}${lanesHtml(D, docs)}</div></details>`;
+  }
+  function paintItems() {
+    const D = dg(), body = $("digestbody");
+    if (D && body) { const keep = body.querySelector("[data-iread]:focus, [data-iopen]:focus"); const k = keep && (keep.dataset.iread || keep.dataset.iopen);
+      body.innerHTML = digestBlock(D).split('id="digestbody">')[1].replace(/<\/div><\/details>$/, ""); linkRefs(body); tipTerms(body);
+      if (k) { const back = body.querySelector(`[data-iread="${CSS.escape(k)}"], [data-iopen="${CSS.escape(k)}"]`); if (back) back.focus(); } }
+    paintChrome(docList());
+  }
+  el.col.addEventListener("click", (e) => {
+    const r = e.target.closest("[data-iread]");
+    if (r) { e.preventDefault(); e.stopPropagation(); setRead([r.dataset.iread], !isRead(r.dataset.iread)); paintItems(); return; }
+    const o = e.target.closest("[data-iopen]");
+    if (o) { e.preventDefault(); const k = o.dataset.iopen; if (view.iopen.has(k)) view.iopen.delete(k); else view.iopen.add(k); paintItems(); return; }
+    const j = e.target.closest(".digest [data-go]");
+    if (j) { e.preventDefault(); const t = $(j.dataset.go); if (t) { t.open = true; jumpTo(t); } }
+  });
+  el.col.addEventListener("toggle", (e) => { const d = e.target; if (d.dataset && d.dataset.settled) { if (d.open) view.iopen.add("settled:" + d.dataset.settled); else view.iopen.delete("settled:" + d.dataset.settled); } }, true);
 
   /* ---------- notes: saved as you type; a failed save says so and is sent again ---------- */
   function noteEdited(key, text) {
