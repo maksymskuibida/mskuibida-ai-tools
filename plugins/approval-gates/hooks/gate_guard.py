@@ -68,7 +68,8 @@ except ImportError:  # no advisory locks on this platform: the unique temp file 
 PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import findings_round  # noqa: E402  (review findings at the gate: cards on the page, no Findings question)
-sys.path.append(os.path.join(PLUGIN_ROOT, "scripts"))
+sys.path.insert(0, os.path.join(PLUGIN_ROOT, "scripts"))
+import judgment  # noqa: E402  (the agent's evaluation of the stage: a gates/ row without it is refused)
 import aidlc_links  # noqa: E402  (the registry of the pages published for each stage: the project panel lists them)
 STALE_DAYS = 14  # another session's state file untouched for this long is removed when a state is saved
 GATE_LABELS = {"approve", "approve plan", "accept as-is"}
@@ -568,8 +569,9 @@ def publish_instruction(stage, unit, page=None):
                 "a text block of the same response that makes the question, before the AskUserQuestion call (never inside the "
                 "question, and never end the turn on the link alone)")
     script = os.path.join(PLUGIN_ROOT, "scripts", "gate_bundle.py")
-    cmd = f'python3 "{script}" --stage {stage}' + (f" --unit {unit}" if unit else "")
+    cmd = f'python3 "{script}" draft --stage {stage}' + (f" --unit {unit}" if unit else "")
     return (f"run `{cmd} --why <first|revision> --summary-file <a file holding your summary> --out <a scratch folder>`, "
+            "judge the stage in its judgment.json as its todo says, run `finalize --out <that folder>`, "
             "write the rows of its writes.json with one ArtifactData batch, and give the developer the link "
             "`<artifact url>#<gate id>` in a text block of the same response that makes the question, before the "
             "AskUserQuestion call (never inside the question, and never end the turn on the link alone)")
@@ -594,10 +596,13 @@ def publish_steps(stage, unit, page=None):
                 "`gates/` row, never the \"AI-DLC approval gates\" artifact.",
                 LINK_THEN_ASK]
     script = os.path.join(PLUGIN_ROOT, "scripts", "gate_bundle.py")
-    cmd = f'python3 "{script}" --stage {stage}' + (f" --unit {unit}" if unit else "")
+    cmd = f'python3 "{script}" draft --stage {stage}' + (f" --unit {unit}" if unit else "")
     return [f"Write your summary of the stage, in Markdown, to {SCRATCH}/summary.md.",
             f"Run `{cmd} --why first --summary-file {SCRATCH}/summary.md --out {SCRATCH}/gate` (`--why revision` after a "
             "Request Changes round).",
+            f"Do every item of its `todo` in {SCRATCH}/gate/judgment.json: judge the stage against each criterion of "
+            "criteria.json, write the evaluation, and a one-sentence summary and a label for every item.",
+            f"Run `python3 \"{script}\" finalize --out {SCRATCH}/gate`; when it prints Refused, fix what it lists and run it again.",
             f"Send the `writes` array of {SCRATCH}/gate/writes.json, as it is, with one ArtifactData batch to the "
             "\"AI-DLC approval gates\" artifact (its URL: Artifact `action: \"list\"`); when the script names `batches`, send "
             "those files in order.",
@@ -781,8 +786,21 @@ def check_gate_rows(tool_input):
                           "and `targetPicks` are written by the developer in the page.",
                           ["Remove `status: \"decided\"`, `decision`, `notes`, `findingPicks` and `targetPicks` from the row's "
                            "data.",
-                           "Write the row from the writes.json gate_bundle.py made, as it is. " + NO_DEVELOPER_FIELDS],
+                           "Write the row from the writes.json gate_bundle.py finalize made, as it is. " + NO_DEVELOPER_FIELDS],
                           "the batch goes through with no approval-gates refusal.")
+        if op == "set":
+            missing = judgment.row_problems(data)
+            if missing:
+                script = os.path.join(PLUGIN_ROOT, "scripts", "gate_bundle.py")
+                raise Refusal(f"the write to gates/{doc_id}, because the page would show the stage without your judgment of "
+                              f"it ({len(missing)} part(s) missing, first: {one_line(missing[0])})",
+                              [f"Run `python3 \"{script}\" draft --stage <stage> [--unit <unit>] --why first --summary-file "
+                               f"{SCRATCH}/summary.md --out {SCRATCH}/gate` if you have not, and do every item of its `todo` "
+                               f"in {SCRATCH}/gate/judgment.json.",
+                               f"Run `python3 \"{script}\" finalize --out {SCRATCH}/gate`; when it prints Refused, fix what it "
+                               "lists and run it again.",
+                               f"Send the `writes` array of {SCRATCH}/gate/writes.json, as it is, with one ArtifactData batch."],
+                              "the hook answers your batch with `gates/<id> is published`.")
 
 
 def link_of(pub):

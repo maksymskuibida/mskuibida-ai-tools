@@ -1,6 +1,7 @@
 [
   {"slug": "user-stories", "number": "2.4", "name": "User Stories", "phase": "inception",
    "produces": ["stories", "personas", "user-stories-assessment", "traceability"],
+   "consumes": [{"artifact": "requirements", "required": true}],
    "reviewer": "aidlc-product-lead-agent", "review_class": "advisory"},
   {"slug": "delivery-planning", "number": "2.9", "name": "Delivery Planning", "phase": "inception",
    "produces": ["bolt-plan", "team-allocation"]},

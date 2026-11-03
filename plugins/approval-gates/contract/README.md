@@ -200,8 +200,38 @@ Not part of the bundle: the per-stage `gates/<id>` row carries `digest` (`script
 `gate_bundle.py`): `{items[] {key, kind: requirement|nfr|rule|decision|story, id, title, body?, doc, settled?,
 coveredBy?, mentions[]}, trace[] {from, to, ok}, counts, settled}`. `coveredBy` has the shape and the rule of a bundle
 row's (`scripts/handling.py`): every traced id the stage leaves uncovered links to where it is handled or carries an
-`acceptanceReason`, or the row is not built. `approval-gate.html` draws it as At a glance; read marks are per item
+`acceptanceReason`, or the row is not built. An item's `title` and `body` are whole, never clipped; `format: "yaml"`
+marks a body that is the item's entry in a fenced YAML block (a rule's source of truth). With a judgment (above) the page
+draws the items as "What the stage says"; a row without one is drawn as At a glance; read marks are per item
 (`item:<key>`, `finding:<id>` in the viewer's reads document).
+
+## Per-stage gate judgment
+
+Not part of the bundle: the judgment of a per-stage `gates/<id>` row (1.24.0). `gate_bundle.py draft` writes
+`criteria.json` (`[{key, origin: stage|review|rule|earlier, title, text, source: "path:<file>#L<n>"}]`, from
+`scripts/criteria.py`) and `judgment.json` (`aidlc-stage-judgment/1`, [`stage-judgment.schema.json`](stage-judgment.schema.json)):
+
+```
+{schema, gate, stage, unit?, round,
+ evaluation {verdict: ready|risks|not-ready, decides,
+             lookFirst[] {text, why, sources[]}, solid[] {text, sources[]}, risks[] {text, severity, sources[]},
+             gaps[] {text, sources[]}, conflicts[] {text, sources[]}},
+ criteria   {<key>: {verdict: holds|fails|n/a, note?}},
+ items      {<item id>: {summary, label: critical|high|medium|low, lookFirst?, relates[], unchanged?}},
+ documents  {<document key>: covered|shown}}
+```
+
+Keys starting with `_` are notes for the agent and never reach the row. `gate_bundle.py finalize` merges it into the row
+(`evaluation`; `criteria` with each verdict and note; each digest item's `summary`, `label`, `lookFirst`, `relates`,
+`unchanged`; each `documents[]` entry's `covered`) and holds the row to `scripts/judgment.py` `row_problems`, which the
+guard applies to every `gates/` row it sees written:
+
+- `verdict` is one of the three; `decides` is written; `lookFirst` (each with `why`) and `solid` have at least one point.
+- Every point is whole (no ellipsis, at most 600 characters) and has at least one source: a criterion key, a digest item
+  id, `doc:<document key>` or a finding id of the row's `findings`.
+- Every criterion has a verdict; a `fails` has a note and is a source of a lookFirst, risks, gaps or conflicts point.
+- Every digest item but those an earlier stage settled (`settled` with no `coveredBy`) has a `summary` (whole, at most 300
+  characters) and a `label`; `lookFirst` only on critical and high.
 
 ## The test plan (unit-end page only)
 

@@ -1,0 +1,43 @@
+{
+  "evaluation": {
+    "verdict": "risks",
+    "decides": "Approving fixes what a customer can do in the first release: reserve a loaf for the next morning until 18:00 and pick it up in a slot. The baker's own view (US1.2) is named but not written yet.",
+    "lookFirst": [
+      {"text": "US1.2, the baker's list of tomorrow's orders, has no description and no acceptance criteria.",
+       "why": "The baker is the one who bakes from it; without criteria nobody can say when it is done, and the next stages will guess.",
+       "sources": ["US1.2", "stage-2", "review-2"]},
+      {"text": "The 18:00 cut-off in AC1.1.2 is new here: the requirements never name a closing time.",
+       "why": "A cut-off decides how much the bakery can plan; it should be the owner's call, not the stories'.",
+       "sources": ["US1.1", "earlier-requirements"]}
+    ],
+    "solid": [
+      {"text": "The customer's story is one visible behaviour with Given/When/Then criteria a tester can follow.", "sources": ["US1.1", "stage-2"]},
+      {"text": "Every story names its persona.", "sources": ["stage-2", "doc:personas"]}
+    ],
+    "risks": [
+      {"text": "Slots hold at most eight orders (FR2.2), but no criterion says what a customer sees when a slot is full.", "severity": "high", "sources": ["US1.1", "review-3"]}
+    ],
+    "gaps": [
+      {"text": "FR2.1's 15-minute slots between 07:00 and 10:00 are not in any criterion yet.", "sources": ["US1.1", "earlier-requirements"]}
+    ],
+    "conflicts": []
+  },
+  "criteria": {
+    "stage-1": {"verdict": "holds"},
+    "stage-2": {"verdict": "fails", "note": "US1.2 carries no acceptance criteria."},
+    "stage-3": {"verdict": "holds"},
+    "review-1": {"verdict": "holds"},
+    "review-2": {"verdict": "fails", "note": "Nothing in US1.2 can be tested."},
+    "review-3": {"verdict": "fails", "note": "A full slot is not covered."},
+    "review-4": {"verdict": "holds"},
+    "rule-1": {"verdict": "holds", "note": "No story takes payment."},
+    "rule-2": {"verdict": "n/a"},
+    "earlier-requirements": {"verdict": "holds", "note": "FR2.1 and FR2.2 are reflected, the cut-off is an addition (look first)."}
+  },
+  "items": {
+    "US1": {"summary": "Everything a customer does to reserve bread for the next morning.", "label": "medium"},
+    "US1.1": {"summary": "A customer reserves a loaf for tomorrow until 18:00 and gets a confirmation; after 18:00 ordering is closed.", "label": "high", "lookFirst": true, "relates": ["FR2.1", "FR2.2"]},
+    "US1.2": {"summary": "The baker sees tomorrow's orders; the story is named but has no text or criteria yet.", "label": "high", "lookFirst": true}
+  },
+  "documents": {"stories": "covered", "personas": "shown", "traceability": "covered", "user-stories-questions": "shown", "review-02": "shown"}
+}

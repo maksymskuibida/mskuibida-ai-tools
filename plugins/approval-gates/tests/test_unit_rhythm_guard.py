@@ -6,9 +6,13 @@ Run: python3 -m unittest discover -s plugins/approval-gates/tests"""
 import datetime
 import json
 import os
+import sys
 import threading
 import time
 import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from bundle_helpers import JUDGED  # noqa: E402
 from unittest import mock
 
 from test_gate_guard import INTENT, URL, Case, gate_question
@@ -363,7 +367,7 @@ class TestFlowIsNamed(UnitCase):
     def gates_row(self, doc_id):
         path = os.path.join(self.tmp, "gate-row.json")
         with open(path, "w", encoding="utf-8") as f:
-            json.dump({"title": "Code Generation", "status": "open", "round": 1}, f)
+            json.dump(dict({"title": "Code Generation", "status": "open", "round": 1}, **JUDGED), f)
         return {"action": "batch", "url": URL, "writes": [{"op": "set", "collection": "gates", "doc_id": doc_id, "file_path": path}]}
 
     def test_a_gates_row_at_the_plan_approval_is_the_wrong_page(self):

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aidlc-stage-judgment/1",
+  "title": "The agent's judgment of a per-stage AI-DLC gate (judgment.json)",
+  "description": "Written by gate_bundle.py draft with every slot empty, filled by the agent, merged into the gates/<id> row by gate_bundle.py finalize. The rules beyond shape (sources resolve, a failed criterion is cited, no ellipsis) are scripts/judgment.py row_problems. Keys starting with _ are notes for the agent.",
+  "type": "object",
+  "required": ["schema", "gate", "evaluation", "criteria", "items", "documents"],
+  "properties": {
+    "schema": {"const": "aidlc-stage-judgment/1"},
+    "gate": {"type": "string"},
+    "stage": {"type": "string"},
+    "unit": {"type": ["string", "null"]},
+    "round": {"type": ["integer", "null"]},
+    "evaluation": {
+      "type": "object",
+      "required": ["verdict", "decides", "lookFirst", "solid"],
+      "properties": {
+        "verdict": {"enum": ["ready", "risks", "not-ready"]},
+        "decides": {"type": "string", "minLength": 1, "maxLength": 900},
+        "lookFirst": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/point", "required": ["text", "why", "sources"]}},
+        "solid": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/point"}},
+        "risks": {"type": "array", "items": {"allOf": [{"$ref": "#/$defs/point"}, {"required": ["severity"]}]}},
+        "gaps": {"type": "array", "items": {"$ref": "#/$defs/point"}},
+        "conflicts": {"type": "array", "items": {"$ref": "#/$defs/point"}}
+      }
+    },
+    "criteria": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["verdict"],
+        "properties": {"verdict": {"enum": ["holds", "fails", "n/a"]}, "note": {"type": "string"}}
+      }
+    },
+    "items": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["summary", "label"],
+        "properties": {
+          "summary": {"type": "string", "minLength": 1, "maxLength": 300},
+          "label": {"enum": ["critical", "high", "medium", "low"]},
+          "lookFirst": {"type": "boolean"},
+          "relates": {"type": "array", "items": {"type": "string"}},
+          "unchanged": {"type": "boolean"}
+        }
+      }
+    },
+    "documents": {"type": "object", "additionalProperties": {"enum": ["covered", "shown"]}}
+  },
+  "$defs": {
+    "point": {
+      "type": "object",
+      "required": ["text", "sources"],
+      "properties": {
+        "text": {"type": "string", "minLength": 1, "maxLength": 600},
+        "why": {"type": "string", "maxLength": 600},
+        "severity": {"enum": ["critical", "high", "medium", "low"]},
+        "sources": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+      }
+    }
+  }
+}

@@ -56,3 +56,9 @@ def agent_pass(bundle):
     if not bundle["header"]["lede"]:
         bundle["header"]["lede"] = "What the Unit does."
     return bundle
+
+# A gates/ row's judgment that holds to judgment.row_problems: the guard refuses a gate row without one.
+JUDGED = {"evaluation": {"verdict": "ready", "decides": "Approving fixes the stories.",
+                         "lookFirst": [{"text": "The slot length.", "why": "It shapes the booking.", "sources": ["stage-1"]}],
+                         "solid": [{"text": "Every requirement has a story.", "sources": ["stage-1"]}]},
+          "criteria": [{"key": "stage-1", "origin": "stage", "title": "Stories describe what a person does", "verdict": "holds"}]}

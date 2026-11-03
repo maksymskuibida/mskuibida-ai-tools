@@ -4,12 +4,15 @@
 gate_bundle.py calls `build(docs, ids, folder, handling)` and stores the result as the gate row's `digest`:
 
     digest: {items[], trace[], counts {<kind>: n}, settled: n}
-    item:   {key, kind, id, title, body?, doc, settled?, coveredBy?, mentions[]}
+    item:   {key, kind, id, title, body?, format?, doc, settled?, coveredBy?, mentions[]}
     trace:  {from, to, ok}
 
 - **Items** are the things a reviewer checks one by one: requirements (FR, REQ), NFRs, business rules (BR), decisions
-  (ADR) and stories (US, with their AC folded into the body). They are read from a document's id tables (first column an
-  id), `- **ID** text` bullets and `### ID Title` headings. Anything else stays in the documents as written.
+  (ADR) and stories (US, with their AC folded into the body). They are read from the entries of a fenced ```yaml block
+  (`- id: BR1.1`, the source of truth of rules.md; `format: "yaml"`, the body is the entry as written), a document's id
+  tables (first column an id), `- **ID** text` bullets and `### ID Title` headings (the body is the lines under it, as
+  written, criteria included). Nothing is clipped: the page shows the item whole when it is opened. Anything else stays
+  in the documents as written.
 - **Settled** items are ids the project defines in a document outside this stage's folder (from the gate's `ids` map):
   approved in an earlier stage and only quoted here. The page folds them under a count.
 - **Trace** is what the stage's traceability.json says covers what. A coverage row that is not OK, and a requirement or
@@ -32,7 +35,8 @@ HEADING = re.compile(r"^#{2,4}\s+((?:NFR|FR|REQ|BR|US)\d+(?:\.\d+)*|ADR-\d+)\b[\
 BULLET = re.compile(r"^\s*[-*]\s+\*\*((?:NFR|FR|REQ|BR|US)\d+(?:\.\d+)*|ADR-\d+)\b[^*]*\*\*:?\s*(.*)$")
 CRITERION = re.compile(r"^\s*[-*]\s+(AC\d+(?:\.\d+)*)\s+(.*)$")
 TRACE_STAGE_KINDS = ("requirement", "nfr")
-TITLE_MAX, BODY_MAX = 140, 600
+YAML_ENTRY = re.compile(r"^(\s*)-\s+id:\s*[\"']?((?:NFR|FR|REQ|BR|US)\d+(?:\.\d+)*|ADR-\d+)[\"']?\s*$")
+YAML_TITLE = ("statement", "title", "name", "summary", "description", "decision", "story")
 
 
 def kind_of(item_id):
@@ -43,11 +47,6 @@ def plain(text):
     text = re.sub(r"`([^`]*)`", r"\1", str(text or ""))
     text = re.sub(r"\*\*([^*]+)\*\*|__([^_]+)__", lambda m: m.group(1) or m.group(2), text)
     return re.sub(r"\s+", " ", text).strip()
-
-
-def clip(text, size):
-    text = plain(text)
-    return text if len(text) <= size else text[:size - 1].rstrip() + "…"
 
 
 def cells(line):
@@ -79,6 +78,36 @@ def from_tables(text):
     return out
 
 
+def from_yaml(text):
+    """(id, title, body) of every `- id: <item id>` entry of a fenced ```yaml block; the body is the entry as written."""
+    out, fence, cur, indent = [], None, None, 0
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("```"):
+            fence = None if fence else (s[3:].strip().lower() or "text")
+            cur = None
+            continue
+        if fence not in ("yaml", "yml"):
+            continue
+        head = YAML_ENTRY.match(line)
+        if head:
+            indent = len(head.group(1))
+            cur = [head.group(2), "", [line[indent:]]]
+            out.append(cur)
+            continue
+        if cur is None:
+            continue
+        lead = len(line) - len(line.lstrip())
+        if s and lead <= indent:
+            cur = None
+            continue
+        cur[2].append(line[indent:])
+        found = re.match(r"^\s+(\w+):\s*(.+)$", line)
+        if found and found.group(1) in YAML_TITLE and not cur[1] and lead == indent + 2:
+            cur[1] = found.group(2).strip().strip("\"'>|")
+    return [(i, plain(t), "\n".join(b).rstrip()) for i, t, b in out]
+
+
 def from_lines(text):
     """(id, title, body) of `### ID Title` headings (the lines under one, criteria included, are its body) and of
     `- **ID** text` bullets."""
@@ -104,8 +133,8 @@ def from_lines(text):
             continue
         if current is not None and line.strip() and not line.strip().startswith(("|", "```")):
             crit = CRITERION.match(line)
-            current[2].append(f"{crit.group(1)}: {plain(crit.group(2))}" if crit else plain(line.lstrip("-* ")))
-    return [(i, t, " · ".join(b)) for i, t, b in out]
+            current[2].append(f"- {crit.group(1)}: {crit.group(2).strip()}" if crit else line.rstrip())
+    return [(i, t, "\n".join(b).strip()) for i, t, b in out]
 
 
 def traceability(docs):
@@ -146,18 +175,23 @@ def build(docs, ids, stage_folder, given=None):
     for d in docs:
         if d.get("kind") == "review" or d["key"].startswith("traceability"):
             continue
-        for rid, title, body in from_lines(d["text"]) + from_tables(d["text"]):
+        yaml_ids = {i for i, _t, _b in from_yaml(d["text"])}
+        for rid, title, body in from_yaml(d["text"]) + from_lines(d["text"]) + from_tables(d["text"]):
             kind = kind_of(rid)
             if not kind:
                 continue
             if rid in seen:  # the heading and the table name the same item: keep the fuller one
                 item = seen[rid]
                 if not item.get("body") and body:
-                    item["body"] = clip(body, BODY_MAX)
+                    item["body"] = body
+                if item["title"] == rid and title:
+                    item["title"] = plain(title)
                 continue
-            item = {"key": anchor(rid), "kind": kind, "id": rid, "title": clip(title or rid, TITLE_MAX), "doc": d["key"]}
+            item = {"key": anchor(rid), "kind": kind, "id": rid, "title": plain(title) or rid, "doc": d["key"]}
             if body:
-                item["body"] = clip(body, BODY_MAX)
+                item["body"] = body
+            if rid in yaml_ids:
+                item["format"] = "yaml"
             if rid in settled:
                 item["settled"] = True
             mentions = sorted({m for m in ID_TOKEN.findall(title + " " + body) if m != rid and not m.startswith(rid + ".")})
