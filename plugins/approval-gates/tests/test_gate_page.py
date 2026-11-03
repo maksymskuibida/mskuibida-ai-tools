@@ -35,3 +35,13 @@ class TestThePage(unittest.TestCase):
         self.assertIn('const off = k === "accept" && f.blocking;', self.page)
         self.assertIn("Reject needs a reason", self.page)
         self.assertIn("gates/<id>.findingPicks[<finding id>]", self.page, "the header names the field")
+
+    def test_the_read_dot_is_the_last_element_of_an_item_row_and_a_finding_card(self):
+        item = self.page[self.page.index("function itemRow"):]
+        item = item[:item.index("function coverageHtml")]
+        self.assertLess(item.index('class="ititle"'), item.index("${idot(key, it.id)}"), "item row: dot after the title")
+        self.assertLess(item.index("${handledChip(it)}"), item.index("${idot(key, it.id)}"), "item row: dot after the chips")
+        card = self.page[self.page.index('<div class="dtop">${sev}'):]
+        card = card[:card.index("</div>")]
+        self.assertTrue(card.endswith('${idot("finding:" + f.id, f.id)}'), "finding card: dot ends the header")
+
