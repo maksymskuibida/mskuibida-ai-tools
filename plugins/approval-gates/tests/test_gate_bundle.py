@@ -54,7 +54,7 @@ class Case(unittest.TestCase):
     def run_script(self, *args, aidlc=None):
         """(exit code, stdout, stderr) of main() with the project and output folder filled in."""
         argv = ["--project-dir", self.project, "--out", self.out, *args]
-        env = {"AIDLC_IDS_DIR": os.path.join(self.tmp, "ids")}
+        env = {"AIDLC_IDS_DIR": os.path.join(self.tmp, "ids"), "APPROVAL_GATES_DIR": os.path.join(self.tmp, "state")}
         if aidlc:
             env["APPROVAL_GATES_AIDLC"] = aidlc
         out, err = io.StringIO(), io.StringIO()
@@ -74,6 +74,41 @@ class Case(unittest.TestCase):
         code, out, err = self.run_script(*args, **kw)
         self.assertEqual(code, 0, err)
         return json.loads(out)
+
+    def finalized(self, *args, **kw):
+        """Draft, a judgment filled in by fill_judgment, finalize: finalize's summary."""
+        drafted = self.summary(*args, **kw)
+        fill_judgment(drafted["judgment"])
+        code, out, err = self.run_finalize()
+        self.assertEqual(code, 0, err)
+        return json.loads(out)
+
+    def run_finalize(self, *args):
+        env = {"APPROVAL_GATES_DIR": os.path.join(self.tmp, "state")}
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.dict(os.environ, env), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = bundle.main(["finalize", "--out", self.out, *args])
+        return code, out.getvalue(), err.getvalue()
+
+
+def fill_judgment(path, **over):
+    """A judgment that holds to every rule: what an agent writes, mechanically."""
+    with open(path, encoding="utf-8") as f:
+        j = json.load(f)
+    first = next(iter(j["criteria"]), None) or next(iter(j["items"]), None) or "doc:" + next(iter(j["documents"]))
+    j["evaluation"].update(verdict="risks", decides="Approving fixes what customers can order and when.",
+                           lookFirst=[{"text": "The pickup window is the riskiest choice.", "why": "It is hard to change later.",
+                                       "sources": [first]}],
+                           solid=[{"text": "The stories cover every requirement.", "sources": [first]}])
+    for c in j["criteria"].values():
+        c["verdict"] = "holds"
+    for i in j["items"].values():
+        i.update(summary="A plain one-sentence summary.", label="medium")
+    for k, v in over.items():
+        j[k] = v
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(j, f)
+    return j
 
 
 class TestRows(Case):
@@ -220,6 +255,10 @@ class TestRows(Case):
         for part in (first, second):
             self.assertLess(len(part["text"].encode("utf-8")), 200_000)
         self.assertFalse(os.path.exists(os.path.join(self.out, "documents", "personas.json")))
+        fill_judgment(summary["judgment"])
+        code, out, err = self.run_finalize()
+        self.assertEqual(code, 0, err)
+        summary = json.loads(out)
         with open(summary["writes"], encoding="utf-8") as f:
             ids = [w["doc_id"] for w in json.load(f) if w["collection"].endswith("/documents")]
         self.assertEqual(ids[:3], ["stories", "personas-p1", "personas-p2"])
@@ -246,7 +285,9 @@ class TestRows(Case):
 
 class TestWrites(Case):
     def test_writes_json_shape(self):
-        summary = self.summary("--stage", "user-stories", "--no-brief")
+        drafted = self.summary("--stage", "user-stories", "--no-brief")
+        summary = self.finalized("--stage", "user-stories", "--no-brief")
+        summary["documents"] = drafted["documents"]
         with open(summary["writes"], encoding="utf-8") as f:
             writes = json.load(f)
         self.assertEqual(summary["writes"], os.path.join(self.out, "writes.json"))
@@ -254,7 +295,7 @@ class TestWrites(Case):
         self.assertEqual(len(writes), 1 + 5)
         gate_id = summary["id"]
         self.assertEqual(writes[0], {"op": "set", "collection": "gates", "doc_id": gate_id,
-                                     "file_path": os.path.join(self.out, "gate.json")})
+                                     "file_path": os.path.join(self.out, "row.json")})
         for write, key in zip(writes[1:], summary["documents"]):
             self.assertEqual(write, {"op": "set", "collection": "gates/%s/documents" % gate_id, "doc_id": key,
                                      "file_path": os.path.join(self.out, "documents", key + ".json")})
@@ -269,6 +310,9 @@ class TestWrites(Case):
             with open(os.path.join(folder, "extra-%02d.md" % n), "w", encoding="utf-8") as f:
                 f.write("# Extra %d\n" % n)
         code, out, err = self.run_script("--stage", "delivery-planning", "--no-brief")
+        self.assertEqual(code, 0, err)
+        fill_judgment(json.loads(out)["judgment"])
+        code, out, err = self.run_finalize()
         self.assertEqual(code, 0, err)
         summary = json.loads(out)
         self.assertEqual(len(summary["batches"]), 2)

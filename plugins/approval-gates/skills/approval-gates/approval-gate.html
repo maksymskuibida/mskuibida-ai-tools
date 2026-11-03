@@ -49,9 +49,20 @@
       a block's read dot. Block keys: "summary", "review", or a document key. A mark holds the hash of the
       text read, so on a new round only the blocks whose text changed turn unread.
 
+    gates/<id>.evaluation = {verdict: ready|risks|not-ready, decides, lookFirst[] {text, why, sources[]}, solid[], risks[]
+      {text, severity, sources[]}, gaps[], conflicts[]}   gates/<id>.criteria = [{key, origin: stage|review|rule|earlier,
+      title, text, source, verdict: holds|fails|n/a, note?}]   gate_bundle.py finalize (scripts/judgment.py, contract/README.md
+      § "Per-stage gate judgment"): the agent's evaluation of the stage against its rules. Drawn first as "Claude's
+      evaluation": the verdict and what approving decides, Look at first, Risks / Gaps / Conflicts / Solid (every source a
+      chip that opens what it names), and Rules checked (a tally per origin and every criterion with its verdict).
     gates/<id>.digest = {items[], trace[], counts, settled}   gate_bundle.py (scripts/digest.py): the stage item by item,
-      drawn first as "At a glance" (tiles, coverage per kind, the traceability matrix, one lane per kind with a read dot
-      per item; settled items folded). Read marks per item are "item:<key>" and "finding:<id>" in the reads document.
+      each judged item with the agent's {summary, label: critical|high|medium|low, lookFirst?, relates[], unchanged?}.
+      Drawn as "What the stage says": one line per item (the summary, whole), grouped Look at first / Matters most / Main /
+      Minor; opening one shows it as written (YAML rules as facts, stories with their criteria); unchanged items, items an
+      earlier stage settled and the traceability fold away with a count. documents[].covered: the file the items cover,
+      folded under "As written" and shown only as written. A row without `evaluation` (before 1.24.0) is drawn as
+      "At a glance" (tiles, coverage per kind, one lane per kind). Read marks per item are "item:<key>" and
+      "finding:<id>" in the reads document; the evaluation's mark is "evaluation".
     gates/<id>.findingPicks[<finding id>] = {pick: "fix"|"accept"|"reject", note?, at}   when the row carries `findings`
       (gate_bundle.py --findings: {stage, open, blocking, items[] {id, title, plain?, action, actionBy, where?, severity,
       blocking, proposed, why, refs}, carried[]}): the developer's sort of each review finding Claude could not fix for
@@ -755,6 +766,65 @@ details.settled > summary { cursor: pointer; font-size: 13px; color: var(--muted
 .jump { font-size: 12px; }
 @media (max-width: 640px) { .irow .ib, .ireason { padding-left: 8px; margin-left: 4px; } .irow .iid { min-width: 0; } }
 .refgrp > .body { display: grid; gap: 12px; padding-left: 12px; }
+/* ---- Claude's evaluation: the verdict and what approving decides, what to look at first, risks / gaps / conflicts /
+   solid side by side, then the rules checked (a tally per origin, each criterion with its verdict). ---- */
+.evalb > .body { display: grid; gap: 18px; padding-top: 14px; }
+.decides { margin: 0; font-size: 15.5px; line-height: 1.55; color: var(--fg); max-width: 72ch; text-wrap: pretty; }
+.esec h3, .ecol h3 { margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; }
+.esec h3 .hint { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.ecol h3 .n { font: 500 12px var(--mono); color: var(--muted); }
+ol.lfl { list-style: none; counter-reset: lf; margin: 0; padding: 0; display: grid; gap: 8px; }
+ol.lfl > li { counter-increment: lf; position: relative; padding: 10px 12px 10px 44px; border-radius: 10px; background: var(--warn-bg); color: var(--fg); min-width: 0; }
+ol.lfl > li::before { content: counter(lf); position: absolute; left: 12px; top: 11px; width: 22px; height: 22px; border-radius: 50%; background: var(--warn-dot); color: var(--on-accent); font: 600 12px/22px var(--mono); text-align: center; }
+.pt1 { margin: 0; font-size: 14.5px; font-weight: 500; line-height: 1.45; overflow-wrap: anywhere; }
+.why { margin: 4px 0 0; font-size: 13px; color: var(--fg-2); line-height: 1.5; }
+.why b { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--warn-fg); margin-right: 8px; }
+.egrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; }
+.ecol { min-width: 0; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); border-top-width: 3px; background: var(--surface); }
+.ecol.k-risks { border-top-color: var(--crit-fg); } .ecol.k-gaps { border-top-color: var(--warn-dot); } .ecol.k-conflicts { border-top-color: var(--r2-fg); } .ecol.k-solid { border-top-color: var(--ok-fg); }
+ul.pts { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+li.pt { display: grid; gap: 4px; min-width: 0; } li.pt + li.pt { padding-top: 10px; border-top: 1px solid var(--line-soft); }
+li.pt > p { margin: 0; font-size: 13.5px; line-height: 1.5; overflow-wrap: anywhere; }
+li.pt > .tag { justify-self: start; }
+.srcs { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin-top: 4px; }
+.srcs > span { font-size: 11.5px; color: var(--muted); }
+.src { min-height: 24px; padding: 0 8px; border-radius: 12px; font: 500 11.5px var(--body); background: var(--surface); border: 1px solid var(--control); color: var(--accent); }
+.src.mono { font: 500 11.5px var(--mono); }
+.src:hover { background: var(--accent-soft); border-color: var(--accent); }
+p.none { font-size: 13px; }
+.ctally .sbar i.cv-holds, .lg i.cv-holds { background: var(--ok-fg); } .ctally .sbar i.cv-fails, .lg i.cv-fails { background: var(--crit-fg); } .ctally .sbar i.cv-na, .lg i.cv-na { background: var(--control); }
+.ctally .n .bad, .esec h3 .bad { color: var(--crit-fg); font-weight: 600; }
+details.cgroup { margin-top: 10px; border-top: 1px solid var(--line-soft); }
+details.cgroup > summary { cursor: pointer; padding: 8px 0 6px; font-size: 13px; font-weight: 600; color: var(--fg-2); }
+details.cgroup > summary .hint { font-weight: 400; font-size: 12px; margin-left: 6px; }
+details.crow { border-radius: 6px; scroll-margin-top: calc(var(--bar-h) + 16px); }
+details.crow > summary { list-style: none; cursor: pointer; display: flex; gap: 10px; align-items: baseline; padding: 6px 6px; border-radius: 6px; }
+details.crow > summary::-webkit-details-marker { display: none; }
+details.crow > summary:hover { background: var(--hover); }
+details.crow > summary .tag { flex: none; min-width: 86px; justify-content: center; }
+.ctitle { font-size: 13.5px; line-height: 1.45; min-width: 0; overflow-wrap: anywhere; }
+.cbody { padding: 2px 6px 10px 102px; display: grid; gap: 6px; font-size: 13px; color: var(--fg-2); }
+.cnote { margin: 0; } .cnote b { color: var(--fg); font-weight: 600; }
+/* items written for a human: the agent's one sentence leads, the item as written opens under it */
+.irow.j .ih { align-items: flex-start; padding: 6px 4px; }
+.irow.j.lf { background: var(--warn-bg); }
+.irow.j.lf:hover { background: var(--warn-bg); }
+.ix { flex: none; width: 28px; min-height: 28px; height: 28px; padding: 0; border: 0; background: transparent; color: var(--muted); display: inline-flex; align-items: center; justify-content: center; transition: transform .12s; margin-top: 1px; }
+.ix[aria-expanded="true"] { transform: rotate(90deg); }
+.imain { flex: 1 1 auto; min-width: 0; display: grid; gap: 3px; }
+.imeta { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+.imeta .iid { min-width: 0; }
+.imeta .kind { font-size: 11.5px; color: var(--muted); }
+.isum { border: 0; background: none; padding: 0; text-align: left; font: inherit; font-size: 14.5px; line-height: 1.5; color: var(--fg); cursor: pointer; overflow-wrap: anywhere; min-height: 0; }
+.isum:hover { color: var(--accent-strong); }
+.irow.j.read .isum { color: var(--muted); }
+.irow.j .ib { padding: 4px 8px 12px 40px; }
+.awt { margin: 0; font-size: 13.5px; color: var(--fg); } .awt b { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-right: 8px; }
+.aw { margin: 0; } dl.aw { grid-template-columns: fit-content(140px) minmax(0, 1fr); }
+.aw .rule-logic { display: block; margin: 0; }
+.tier + .tier { margin-top: 4px; }
+.items > .body { display: grid; gap: 16px; padding: 10px 14px 16px; }
+@media (max-width: 640px) { .cbody { padding-left: 6px; } .irow.j .ib { padding-left: 8px; } details.crow > summary .tag { min-width: 0; } }
 @media (max-width: 767px) {
   .bt-strip { grid-template-columns: minmax(0, 1fr); }
   .bts + .bts { border-left: 0; border-top: 1px solid var(--line); }
@@ -1050,29 +1120,34 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
   function paintAll() {
     if (!view.gate) return;
     const g = view.gate; const docs = docList();
-    const sig = JSON.stringify([view.id, g.summary, g.brief, g.review, docs.map((d) => [d.key, d.title, d.kind, d.text, !!d.pending, !!d.partial]), g.buildTest || null, g.findings || null, g.digest || null, isDark(), view.mode, view.changed]);
+    const sig = JSON.stringify([view.id, g.summary, g.brief, g.review, docs.map((d) => [d.key, d.title, d.kind, d.text, !!d.pending, !!d.partial, !!d.covered]), g.buildTest || null, g.findings || null, g.digest || null, g.evaluation || null, g.criteria || null, isDark(), view.mode, view.changed]);
     if (sig === view.painted) { paintChrome(docs); return; }
     view.painted = sig; view.refs = new Map();
     view.hashes = {}; if (g.summary) view.hashes.summary = hash(g.summary); if (g.brief) view.hashes.review = hash(g.brief);
-    docs.forEach((d) => { if (!d.pending) view.hashes[d.key] = hash(d.text); });
+    const E = ev(), covered = new Set(coveredDocs().map((d) => d.key));
+    if (E) view.hashes.evaluation = hash(JSON.stringify([E, g.criteria || []]));
+    docs.forEach((d) => { if (!d.pending && !covered.has(d.key)) view.hashes[d.key] = hash(d.text); });
     const FN = fnd(); if (FN) { view.hashes.findings = hash(JSON.stringify(FN.items)); FN.items.forEach((f) => { view.hashes["finding:" + f.id] = hash(JSON.stringify(f)); }); }
-    const DG = dg(); if (DG) DG.items.forEach((it) => { view.hashes["item:" + it.key] = hash(JSON.stringify([it.title, it.body || "", it.coveredBy || null])); });
+    const DG = dg(); if (DG) DG.items.forEach((it) => { view.hashes["item:" + it.key] = hash(JSON.stringify([it.title, it.body || "", it.coveredBy || null, it.summary || "", it.label || ""])); });
     const B = bt(); if (B && B.targets) { view.hashes["bt-matrix"] = hash(JSON.stringify(B.targets)); if (openTargets(B).length) view.hashes["bt-decide"] = hash(JSON.stringify(openTargets(B))); }
     const frag = [];
     if (B) frag.push(btStrip(B));
-    if (g.summary) frag.push(`<details class="block sum" open id="b-summary" data-block="summary"><summary>${CARET}<h2>Summary</h2><span class="hint wide">what Claude did in this stage</span><span class="end">${rdot("summary")}</span></summary><div class="body md" id="summarymd"></div></details>`);
-    if (DG) frag.push(digestBlock(DG));
+    if (E) { frag.push(evalBlock(E)); if (DG) frag.push(itemsBlock(DG)); }
+    if (g.summary) frag.push(`<details class="block sum" open id="b-summary" data-block="summary"><summary>${CARET}<h2>${E ? "Completion summary" : "Summary"}</h2><span class="hint wide">what Claude did in this stage</span><span class="end">${rdot("summary")}</span></summary><div class="body md" id="summarymd"></div></details>`);
+    if (DG && !E) frag.push(digestBlock(DG));
     if (FN) frag.push(findingsBlock(FN));
     if (g.brief) frag.push(briefBlock(g));
     if (B && B.targets && B.targets.length) { frag.push(btMatrixBlock(B)); frag.push(btDecideBlock(B)); }
     if (!docs.length) frag.push(view.docsLoaded ? '<div class="card0 msg"><b>No documents yet.</b><p>Claude writes them with the gate; they appear here as soon as they land.</p></div>' : '<p class="hint">Loading documents…</p>');
     const refs = refDocs(docs);
-    docs.forEach((d, i) => { if (!refs.includes(d)) frag.push(docBlock(d, i)); });
+    docs.forEach((d, i) => { if (!refs.includes(d) && !covered.has(d.key)) frag.push(docBlock(d, i)); });
     if (refs.length) frag.push(refGroup(refs));
+    if (covered.size) frag.push(asWrittenGroup(docs.filter((d) => covered.has(d.key))));
     el.col.innerHTML = frag.join("") + '<div class="card0 nomatch" id="nomatch" hidden></div>';
     if (g.summary) renderMarkdown($("summarymd"), g.summary);
     if (g.brief) fillBrief(g);
     docs.forEach((d, i) => fillDoc(d, i));
+    fillMd(el.col); itemsCount();
     findingsCount(); Object.keys(view.fpicks).forEach((id) => { const st = view.noteStat["fpick:" + id]; if (st) setNoteStat("fpick:" + id, st[0], st[1]); });
     btRender(); btDecideCount(); { const q = $("bt-q"); if (q) q.value = view.bt.q; }
     Object.keys(view.picks).forEach((id) => { const st = view.noteStat["pick:" + id]; if (st) setNoteStat("pick:" + id, st[0], st[1]); });
@@ -1102,7 +1177,12 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
   /* ---------- the chrome: header facts, the sticky bar, read and filter state, the outline, the band ---------- */
   function blocksOf(docs) {
     const g = view.gate, out = [];
-    const DG = dg(); if (DG) out.push({ key: "digest", go: "b-digest", short: "At a glance", count: itemProgress().read + "/" + itemProgress().total, tip: "The stage item by item: requirements, rules, decisions and stories, each with its own read mark" });
+    const E = ev();
+    if (E) {
+      out.push({ key: "evaluation", go: "b-eval", short: "Evaluation", count: "", extra: (E.lookFirst || []).length ? `<span class="tag" ${toneOf("warn")}>${E.lookFirst.length} to look at first</span>` : "", tip: "Claude's evaluation of the stage against its rules: what to look at first, risks, gaps, conflicts" });
+      const J = judgedItems(); if (J.length) out.push({ key: "items", go: "b-items", short: "Items", count: J.filter((i) => isRead("item:" + i.key)).length + "/" + J.length, tip: "Every requirement, rule, decision and story, summarised and labelled by Claude" });
+    }
+    const DG = !E && dg(); if (DG) out.push({ key: "digest", go: "b-digest", short: "At a glance", count: itemProgress().read + "/" + itemProgress().total, tip: "The stage item by item: requirements, rules, decisions and stories, each with its own read mark" });
     if (g.summary) out.push({ key: "summary", go: "b-summary", short: "Summary", count: "", tip: "The summary of what Claude did in this stage" });
     if (g.brief) {
       const b = parseBrief(g.brief); const open = b ? b.rows.filter((x) => isOpenStatus(x.status)) : []; const hi = open.filter((x) => isHi(x.severity)).length;
@@ -1119,7 +1199,9 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
       const open = openTargets(B);
       if (open.length) out.push({ key: "bt-decide", go: "b-bt-decide", short: "Decisions", count: pickedCount(B) + "/" + open.length, tip: "A decision card for each target that is not met or unverified" });
     }
+    const covered = new Set(coveredDocs().map((d) => d.key));
     docs.forEach((d) => {
+      if (covered.has(d.key)) return;
       const shown = $("d-" + d.key); const title = ((shown && shown.querySelector("summary h2")) || {}).textContent || d.title || d.key;
       const secs = shown ? shown.querySelectorAll("details.sec").length : 0;
       out.push({ key: d.key, go: "d-" + d.key, short: title.trim(), count: secs ? String(secs) : "", tip: `${title.trim()}${secs ? ": " + plural(secs, "section") : ""}${d.path ? " · " + d.path : ""}`, doc: d });
@@ -1240,7 +1322,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
   }
 
   /* ---------- a document block ---------- */
-  function docBlock(d, i) {
+  function docBlock(d, i, aw) {
     const note = (view.notes[d.key] || "").trim();
     const file = d.path ? `<span class="file wide" data-tip="${esc("Where this document lives in the project: " + d.path)}"><span>${esc(d.path)}</span></span>` : "";
     const size = d.bytes ? `<span class="hint mono wide" data-tip="The file’s size">${kb(d.bytes)}</span>` : "";
@@ -1249,7 +1331,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     const kind = KIND[d.kind] ? `<span class="pill quiet" data-tip="${esc(KIND_TIP[d.kind])}">${KIND[d.kind]}</span>` : "";
     const showNote = view.openNotes.has(d.key) || note;
     return `<details class="block doc${ch ? " rev" + t.slice(1) : ""}" id="d-${esc(d.key)}" data-block="${esc(d.key)}"${closed ? "" : " open"}>
-      <summary>${CARET}<h2>${esc(d.title || d.key)}</h2>${revTag(d.key)}${kind}${file}<span class="end">${size}${note ? '<i class="notedot" data-tip="You left a note on this document"></i>' : ""}<span class="seg" id="seg-${esc(d.key)}" role="group" aria-label="Show the document as" hidden><button type="button" data-mode="view" data-key="${esc(d.key)}" data-tip="A view made for this kind of document">View</button><button type="button" data-mode="text" data-key="${esc(d.key)}" data-tip="The document as written">Text</button></span><button type="button" class="notebtn" data-key="${esc(d.key)}" aria-controls="nb-${esc(d.key)}" aria-pressed="${showNote ? "true" : "false"}">${note ? "Your note" : "Add a note"}</button>${rdot(d.key)}</span></summary>
+      <summary>${CARET}<h2>${esc(d.title || d.key)}</h2>${revTag(d.key)}${kind}${file}<span class="end">${size}${note ? '<i class="notedot" data-tip="You left a note on this document"></i>' : ""}<span class="seg" id="seg-${esc(d.key)}" role="group" aria-label="Show the document as" hidden><button type="button" data-mode="view" data-key="${esc(d.key)}" data-tip="A view made for this kind of document">View</button><button type="button" data-mode="text" data-key="${esc(d.key)}" data-tip="The document as written">Text</button></span><button type="button" class="notebtn" data-key="${esc(d.key)}" aria-controls="nb-${esc(d.key)}" aria-pressed="${showNote ? "true" : "false"}">${note ? "Your note" : "Add a note"}</button>${aw ? "" : rdot(d.key)}</span></summary>
       <div class="body"><div class="notebox" id="nb-${esc(d.key)}"${showNote ? "" : " hidden"}><label for="nt-${esc(d.key)}"><b>Note to Claude</b><span>on this document; it goes with your answer in chat</span><span class="stat" id="ns-${esc(d.key)}" aria-live="polite"></span></label><textarea id="nt-${esc(d.key)}" rows="2" placeholder="Something to change, check or keep in mind"></textarea></div><div id="db-${esc(d.key)}"></div></div>
     </details>`;
   }
@@ -1261,7 +1343,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     ta.addEventListener("blur", () => { if (view.unsaved) flushNotes(); });
     if (d.pending) { body.innerHTML = '<p class="hint" style="margin-top:10px">This document is still being written.</p>'; return; }
     if (d.partial) body.insertAdjacentHTML("beforeend", '<p class="hint" style="margin-top:10px">Part of this document is still being written.</p>');
-    const vf = viewFor(d);
+    const vf = d.covered && ev() ? null : viewFor(d);  /* a covered file is shown as written, nothing else */
     const mode = view.mode[d.key] || "view";
     if (vf && mode === "view") {
       let built = null;
@@ -2670,19 +2752,22 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     if (sig === view.railSig) return; view.railSig = sig;
     let html = `<div class="railh">Outline</div>`;
     const top = (go, key, title) => `<div class="rgroup"><button type="button" class="rdoc${isRead(key) ? " read" : ""}" data-go="${go}"><span class="rcaret none" aria-hidden="true"></span><span class="rtitle">${title}</span></button></div>`;
+    if (ev()) { html += top("b-eval", "evaluation", "Claude's evaluation"); if (judgedItems().length) html += top("b-items", "items", "What the stage says"); }
     if (view.gate && view.gate.summary && passes("summary")) html += top("b-summary", "summary", "Summary");
     if (view.gate && view.gate.brief && passes("review")) html += top("b-brief", "review", "Review");
     if (view.gate && view.gate.buildTest && view.gate.buildTest.targets && view.gate.buildTest.targets.length) {
       if (passes("bt-matrix")) html += top("b-bt-matrix", "bt-matrix", "Target matrix");
       if (view.hashes["bt-decide"] && passes("bt-decide")) html += top("b-bt-decide", "bt-decide", "Decisions");
     }
-    docs.filter((d) => passes(d.key)).forEach((d) => {
+    const covered = new Set(coveredDocs().map((d) => d.key));
+    docs.filter((d) => passes(d.key) && !covered.has(d.key)).forEach((d) => {
       const shown = el.col.querySelector(`#d-${CSS.escape(d.key)} summary h2`); const title = (shown && shown.textContent.trim()) || d.title || d.key;
       const secs = [...el.col.querySelectorAll(`#d-${CSS.escape(d.key)} details.sec`)].filter((x) => !x.hidden);
       const block = $("d-" + d.key); const open = Object.prototype.hasOwnProperty.call(view.railOpen, d.key) ? view.railOpen[d.key] : !!(block && block.open);
       html += `<details class="rgroup" data-key="${esc(d.key)}"${open ? " open" : ""}><summary tabindex="-1"><span class="rdoc${isRead(d.key) ? " read" : ""}" data-go="d-${esc(d.key)}" role="button" tabindex="0"><span class="rcaret${secs.length ? "" : " none"}" aria-label="${secs.length ? "Show or hide its sections" : ""}">${secs.length ? CHEV : ""}</span><span class="rtitle">${esc(title)}</span>${(view.notes[d.key] || "").trim() ? '<i class="notedot" aria-label="has your note"></i>' : ""}</span></summary>` +
         secs.map((s) => `<button type="button" class="rsec${s.classList.contains("changed") ? " changed" : ""}" data-go="${esc(s.id)}">${esc(s.dataset.title)}</button>`).join("") + `</details>`;
     });
+    if (covered.size) html += top("b-aswritten", "aswritten", "As written (" + covered.size + ")");
     el.rail.innerHTML = html;
   }
   function go(id, from) {
@@ -2702,7 +2787,14 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     el.col.querySelectorAll("details").forEach((d) => { d.open = true; });
     el.col.querySelectorAll("details.block[data-block]").forEach((b) => { if (isRead(b.dataset.block)) b.open = false; });
     const rg = $("b-reference"); if (rg) rg.open = false;  /* the instruction files stay folded until asked for */
-    if (dg()) el.col.querySelectorAll("details.block.doc").forEach((b) => { b.open = false; });  /* the digest leads; the documents as written wait below */
+    if (dg() || ev()) el.col.querySelectorAll("details.block.doc").forEach((b) => { b.open = false; });  /* the digest or the evaluation leads; the documents wait below */
+    if (ev()) {
+      const sum = $("b-summary"); if (sum) sum.open = false;
+      const aw = $("b-aswritten"); if (aw) aw.open = false;
+      el.col.querySelectorAll("details.crow").forEach((d) => { d.open = false; });
+      el.col.querySelectorAll("details.cgroup").forEach((d) => { d.open = view.iopen.has("cg:" + d.dataset.origin) || !!d.querySelector(".tag[style*='crit']"); });
+      el.col.querySelectorAll("details.settled").forEach((d) => { d.open = view.iopen.has("settled:" + d.dataset.settled); });
+    }
     drawDiagrams(el.col);
   }
   /* Marking a block read folds it; marking it unread opens it again. */
@@ -2981,6 +3073,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     return `<details class="block digest" open id="b-digest" data-block="digest"><summary>${CARET}<h2>At a glance</h2><span class="hint wide">the stage item by item; the documents as written follow below</span></summary><div class="body" id="digestbody">${tiles}${coverageHtml(D)}${traceHtml(D)}${lanesHtml(D, docs)}</div></details>`;
   }
   function paintItems() {
+    if (ev()) { paintItems2(); paintChrome(docList()); return; }
     const D = dg(), body = $("digestbody");
     if (D && body) { const keep = body.querySelector("[data-iread]:focus, [data-iopen]:focus"); const k = keep && (keep.dataset.iread || keep.dataset.iopen);
       body.innerHTML = digestBlock(D).split('id="digestbody">')[1].replace(/<\/div><\/details>$/, ""); linkRefs(body); tipTerms(body);
@@ -2995,7 +3088,134 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     const j = e.target.closest(".digest [data-go]");
     if (j) { e.preventDefault(); const t = $(j.dataset.go); if (t) { t.open = true; jumpTo(t); } }
   });
+  el.col.addEventListener("toggle", (e) => { const d = e.target; if (d.classList && d.classList.contains("cgroup")) { if (d.open) view.iopen.add("cg:" + d.dataset.origin); else view.iopen.delete("cg:" + d.dataset.origin); } }, true);
   el.col.addEventListener("toggle", (e) => { const d = e.target; if (d.dataset && d.dataset.settled) { if (d.open) view.iopen.add("settled:" + d.dataset.settled); else view.iopen.delete("settled:" + d.dataset.settled); } }, true);
+
+  /* ---------- Claude's evaluation and the items written for a human (gate_bundle.py finalize; scripts/judgment.py) ----------
+     A row with `evaluation` leads with the agent's judgment of the stage against its rules, then every item with the agent's
+     one-sentence summary and label, grouped by what matters; opening an item shows it as written. Files the items cover fold
+     under "As written". A row without `evaluation` (written before 1.24.0) keeps At a glance. */
+  const ev = () => (view.gate && view.gate.evaluation && typeof view.gate.evaluation === "object") ? view.gate.evaluation : null;
+  const VERDICT = { ready: ["Ready to approve", "ok", "Nothing Claude found stands in the way of approving"],
+    risks: ["Ready, with risks", "accent", "Approvable, but read what to look at first and the risks"],
+    "not-ready": ["Not ready", "warn", "Claude would not approve this as it stands; the points below say why"] };
+  const LABEL = { critical: ["critical", "crit", "Wrong data, security, or hard to undo if this is wrong"], high: ["high", "high", "Wrong behaviour people would see if this is wrong"],
+    medium: ["medium", "med", "Rework in this stage or Unit if this is wrong"], low: ["low", "low", "Cosmetic or internal if this is wrong"] };
+  const KIND_SHORT = { requirement: "Requirement", nfr: "NFR", rule: "Rule", decision: "Decision", story: "Story" };
+  const ORIGIN = { stage: ["Stage definition", "Stage rule", "The engine's own definition of this stage"], review: ["Reviewer's checklist", "Review check", "What the stage's reviewer checks"],
+    rule: ["Project rules", "Project rule", "A settled rule of this project (its memory files)"], earlier: ["Earlier stages", "Earlier stage", "What an earlier, approved stage settled"] };
+  const CVERDICT = { holds: ["Holds", "ok"], fails: ["Fails", "crit"], "n/a": ["Not relevant", "low"] };
+  const coveredDocs = () => ev() ? docList().filter((d) => d.covered) : [];
+  const critOf = (key) => ((view.gate && view.gate.criteria) || []).find((c) => c.key === key);
+  const itemOf = (id) => ((dg() || {}).items || []).find((i) => i.id === id);
+  const judgedItems = () => ((dg() || {}).items || []).filter((i) => !(i.settled && !i.coveredBy));
+  const toneOf = (t) => `style="background:var(--${t}-bg);color:var(--${t}-fg)"`;
+  function srcChip(ref) {
+    const c = critOf(ref);
+    if (c) return `<button type="button" class="src" data-src="c:${esc(ref)}" data-tip="${esc(ORIGIN[c.origin][1] + ": " + c.title)}">${esc(ORIGIN[c.origin][1])} ${esc(ref.replace(/^\D+-/, ""))}</button>`;
+    if (String(ref).startsWith("doc:")) { const d = docList().find((x) => x.key === ref.slice(4)); return `<button type="button" class="src" data-src="d:${esc(ref.slice(4))}" data-tip="${esc(d && d.path ? d.path : "A document of this stage")}">${esc(d ? d.title || d.key : ref.slice(4))}</button>`; }
+    const it = itemOf(ref);
+    if (it) return `<button type="button" class="src mono" data-src="i:${esc(it.key)}" data-tip="${esc(it.summary || it.title)}">${esc(ref)}</button>`;
+    return `<button type="button" class="src mono" data-src="f:${esc(ref)}" data-tip="A review finding on this page">${esc(ref)}</button>`;
+  }
+  const srcs = (p) => (p.sources || []).length ? `<div class="srcs"><span>From</span>${p.sources.map(srcChip).join("")}</div>` : "";
+  function pointList(points, kind) {
+    return `<ul class="pts">${points.map((p) => `<li class="pt">${kind === "risks" && LABEL[p.severity] ? `<span class="tag" ${toneOf(LABEL[p.severity][1])} data-tip="${esc(LABEL[p.severity][2])}">${esc(LABEL[p.severity][0])}</span>` : ""}<p>${inline(p.text)}</p>${srcs(p)}</li>`).join("")}</ul>`;
+  }
+  function criteriaHtml(C) {
+    if (!C.length) return "";
+    const by = (o) => C.filter((c) => c.origin === o);
+    const fails = C.filter((c) => c.verdict === "fails").length;
+    const bars = Object.keys(ORIGIN).filter((o) => by(o).length).map((o) => {
+      const its = by(o), n = { holds: 0, fails: 0, "n/a": 0 }; its.forEach((c) => { if (n[c.verdict] !== undefined) n[c.verdict]++; });
+      const said = Object.keys(n).filter((v) => n[v]).map((v) => n[v] + " " + CVERDICT[v][0].toLowerCase()).join(", ");
+      return `<span class="k">${esc(ORIGIN[o][0])}</span><div class="sbar" role="img" aria-label="${esc(ORIGIN[o][0] + ": " + said)}">${Object.keys(n).filter((v) => n[v]).map((v) => `<i class="cv-${v === "n/a" ? "na" : v}" style="flex:${n[v]} 1 0" data-tip="${esc(n[v] + " " + CVERDICT[v][0].toLowerCase())}"></i>`).join("")}</div><span class="n">${n.fails ? `<b class="bad">${n.fails} fail${n.fails === 1 ? "s" : ""}</b> · ` : ""}${its.length}</span>`;
+    }).join("");
+    const groups = Object.keys(ORIGIN).filter((o) => by(o).length).map((o) => `<details class="cgroup" data-origin="${o}"${view.iopen.has("cg:" + o) || by(o).some((c) => c.verdict === "fails") ? " open" : ""}><summary>${esc(ORIGIN[o][0])} <span class="hint">${esc(ORIGIN[o][2])} · ${by(o).length}</span></summary>` +
+      by(o).sort((a, b) => (a.verdict === "fails" ? 0 : a.verdict === "holds" ? 1 : 2) - (b.verdict === "fails" ? 0 : b.verdict === "holds" ? 1 : 2)).map((c) => `<details class="crow" id="crit-${esc(c.key)}"><summary><span class="tag" ${toneOf(CVERDICT[c.verdict] ? CVERDICT[c.verdict][1] : "low")}>${esc(CVERDICT[c.verdict] ? CVERDICT[c.verdict][0] : "?")}</span><span class="ctitle">${inline(c.title)}</span></summary><div class="cbody">${c.note ? `<p class="cnote"><b>Claude:</b> ${inline(c.note)}</p>` : ""}${c.text && c.text !== c.title ? `<div class="md" data-md="${esc(c.text)}"></div>` : ""}<span class="mono hint">${esc(String(c.source || "").replace(/^path:/, ""))}</span></div></details>`).join("") + `</details>`).join("");
+    return `<section class="esec"><h3>Rules checked<span class="hint">${C.length} criteria from the stage's definition, its reviewer, the project's rules and earlier stages${fails ? ` · <b class="bad">${fails} fail</b>` : ""}</span></h3><div class="cov2 ctally">${bars}</div>` +
+      `<div class="lg"><span><i class="cv-holds"></i>Holds</span><span><i class="cv-fails"></i>Fails</span><span><i class="cv-na"></i>Not relevant here</span></div>${groups}</section>`;
+  }
+  function evalBlock(E) {
+    const v = VERDICT[E.verdict] || ["Evaluated", "quiet", ""];
+    const C = (view.gate && view.gate.criteria) || [];
+    const cols = [["risks", "Risks", "What could go wrong if this is approved as it is"], ["gaps", "Gaps", "What the stage should say and does not"],
+      ["conflicts", "Conflicts", "Where it disagrees with an earlier stage or a project rule"], ["solid", "Solid", "What holds and needs no second look"]]
+      .filter(([k]) => (E[k] || []).length).map(([k, t, tip]) => `<section class="ecol k-${k}"><h3 data-tip="${esc(tip)}">${t}<span class="n">${E[k].length}</span></h3>${pointList(E[k], k)}</section>`).join("");
+    const noConflict = !(E.conflicts || []).length && C.some((c) => c.origin === "rule" || c.origin === "earlier") ? `<p class="hint none">No conflict found with the project's rules or earlier stages.</p>` : "";
+    return `<details class="block evalb" open id="b-eval" data-block="evaluation"><summary>${CARET}<h2>Claude's evaluation</h2><span class="pill ${v[1]}" data-tip="${esc(v[2])}">${esc(v[0])}</span><span class="end">${rdot("evaluation")}</span></summary>` +
+      `<div class="body"><p class="decides">${inline(E.decides || "")}</p>` +
+      ((E.lookFirst || []).length ? `<section class="esec lf"><h3>Look at first</h3><ol class="lfl">${E.lookFirst.map((p) => `<li><p class="pt1">${inline(p.text)}</p>${p.why ? `<p class="why"><b>Why first</b>${inline(p.why)}</p>` : ""}${srcs(p)}</li>`).join("")}</ol></section>` : "") +
+      (cols ? `<div class="egrid">${cols}</div>` : "") + noConflict + criteriaHtml(C) + `</div></details>`;
+  }
+  function asWritten(it) {
+    if (!it.body) return "";
+    if (it.format === "yaml" && typeof jsyaml !== "undefined") {
+      try {
+        let v = jsyaml.load(it.body); if (Array.isArray(v)) v = v[0];
+        if (v && typeof v === "object") return `<dl class="facts aw">${Object.entries(v).filter(([k]) => k !== "id").map(([k, x]) => `<dt>${esc(upper(k.replace(/_/g, " ")))}</dt><dd>${typeof x === "object" ? `<pre class="plain">${esc(jsyaml.dump(x))}</pre>` : (/^logic$/i.test(k) ? `<span class="rule-logic">${esc(x)}</span>` : inline(String(x)))}</dd>`).join("")}</dl>`;
+      } catch { /* shown as written */ }
+      return `<pre class="plain">${esc(it.body)}</pre>`;
+    }
+    return `<div class="md aw" data-md="${esc(it.body)}"></div>`;
+  }
+  function itemRow2(it, docs) {
+    const key = "item:" + it.key, read = isRead(key), open = view.iopen.has(it.key);
+    const doc = docs.find((d) => d.key === it.doc); const L = LABEL[it.label];
+    const rel = (it.relates || it.mentions || []).length ? `<div class="rel"><span>Relates to</span>${(it.relates || it.mentions).map((m) => `<span class="chip">${esc(m)}</span>`).join("")}</div>` : "";
+    return `<div class="irow j${read ? " read" : ""}${it.lookFirst ? " lf" : ""}" id="item-${esc(it.key)}" data-item="${esc(key)}" data-aidlc-id="${esc(it.id)}"><div class="ih">` +
+      `<button type="button" class="ix" data-iopen="${esc(it.key)}" aria-expanded="${open}" aria-label="${esc((open ? "Hide " : "Show ") + it.id + " as written")}">${CHEV}</button>` +
+      `<div class="imain"><div class="imeta"><span class="iid">${esc(it.id)}</span><span class="kind">${esc(KIND_SHORT[it.kind] || it.kind)}</span>${L ? `<span class="tag" ${toneOf(L[1])} data-tip="${esc(L[2])}">${esc(L[0])}</span>` : ""}${it.unchanged ? '<span class="tag" data-tip="Its text is the same as in the last round">unchanged</span>' : ""}${handledChip(it)}</div>` +
+      `<button type="button" class="isum" data-iopen="${esc(it.key)}">${inline(it.summary || it.title)}</button></div>${idot(key, it.id)}</div>` + reasonHtml(it) +
+      (open ? `<div class="ib aw-wrap"><p class="awt"><b>As written</b>${inline(it.title)}</p>${asWritten(it)}${rel}${doc ? `<a class="jump" href="#" data-go="d-${esc(doc.key)}">in ${esc(doc.path ? doc.path.split("/").pop() : doc.title)}</a>` : ""}</div>` : "") + "</div>";
+  }
+  function itemsBlock(D) {
+    const docs = docList(); const all = D.items;
+    const judged = all.filter((i) => !(i.settled && !i.coveredBy));
+    const lf = judged.filter((i) => i.lookFirst);
+    const rest = judged.filter((i) => !i.lookFirst);
+    const fold = rest.filter((i) => i.unchanged);
+    const live = rest.filter((i) => !i.unchanged);
+    const tier = (labels) => live.filter((i) => labels.includes(i.label));
+    const tiers = [["Look at first", lf, "The items Claude marked for your first look"], ["Matters most", tier(["critical", "high"]), "Critical or high: costly if wrong"],
+      ["Main", tier(["medium"]), "Rework in this stage if wrong"], ["Minor", tier(["low"]), "Cosmetic or internal"], ["Not labelled", live.filter((i) => !LABEL[i.label]), ""]]
+      .filter((t) => t[1].length).map(([t, its, hint]) => `<div class="dsec tier"><h3>${esc(t)}<span class="hint">${its.length}${hint ? " · " + esc(hint) : ""}</span></h3><div class="lane">${its.map((i) => itemRow2(i, docs)).join("")}</div></div>`).join("");
+    const settled = all.filter((i) => i.settled && !i.coveredBy);
+    const folded = (k, title, its) => its.length ? `<details class="settled" data-settled="${k}"${view.iopen.has("settled:" + k) ? " open" : ""}><summary>${esc(title)} (${its.length})</summary><div class="lane">${its.map((i) => k === "earlier" ? itemRow(i, docs) : itemRow2(i, docs)).join("")}</div></details>` : "";
+    const kinds = KIND_ORDER.filter((k) => judged.some((i) => i.kind === k)).map((k) => plural(judged.filter((i) => i.kind === k).length, KIND_NAMES[k][1])).join(", ");
+    const T = D.trace || [];
+    return `<details class="block items" open id="b-items" data-block="items"><summary>${CARET}<h2>What the stage says</h2><span class="hint wide">${esc(kinds)}; open one to read it as written</span><span class="end"><span class="pill quiet num" id="items-read"></span></span></summary>` +
+      `<div class="body" id="itemsbody">${tiers}${folded("unchanged", "Unchanged since the last round", fold)}${folded("earlier", "Settled in an earlier stage, quoted here", settled)}` +
+      (T.length ? `<details class="settled" data-settled="trace"${view.iopen.has("settled:trace") ? " open" : ""}><summary>Traceability: ${T.filter((t) => t.ok).length} of ${T.length} covered</summary>${traceHtml(D)}</details>` : "") + `</div></details>`;
+  }
+  function fillMd(root) { root.querySelectorAll("[data-md]").forEach((n) => { renderMarkdown(n, n.dataset.md); n.removeAttribute("data-md"); }); }
+  function itemsCount() { const c = $("items-read"); if (!c) return; const keys = judgedItems().map((i) => "item:" + i.key); c.textContent = keys.filter(isRead).length + " of " + keys.length + " read"; }
+  function paintItems2() {
+    const D = dg(), body = $("itemsbody"); if (!D || !body) return;
+    const keep = body.querySelector("[data-iread]:focus, [data-iopen]:focus"); const k = keep && (keep.dataset.iread || keep.dataset.iopen);
+    body.innerHTML = node(itemsBlock(D)).querySelector("#itemsbody").innerHTML; fillMd(body); linkRefs(body); tipTerms(body);
+    if (k) { const back = body.querySelector(`[data-iread="${CSS.escape(k)}"], [data-iopen="${CSS.escape(k)}"]`); if (back) back.focus(); }
+    itemsCount();
+  }
+  function asWrittenGroup(docs) {
+    return `<details class="block refgrp aswritten" id="b-aswritten" data-block="aswritten"><summary>${CARET}<h2>As written</h2><span class="hint wide">the files the evaluation and the items above cover, exactly as the stage wrote them</span><span class="end"><span class="pill quiet num">${plural(docs.length, "file")}</span></span></summary><div class="body">${docs.map((d, i) => docBlock(d, i, true)).join("")}</div></details>`;
+  }
+  function openSource(ref) {
+    const [t, key] = [ref.slice(0, 1), ref.slice(2)];
+    if (t === "c") { const row = $("crit-" + key); if (row) { row.open = true; jumpTo(row); } return; }
+    if (t === "d") { const b = $("d-" + key); if (b) { b.open = true; jumpTo(b); } return; }
+    if (t === "f") { const c = el.col.querySelector(`.fcard[data-fid="${CSS.escape(key)}"]`); if (c) jumpTo(c); return; }
+    if (t === "i") {
+      view.iopen.add(key); const it = ((dg() || {}).items || []).find((x) => x.key === key);
+      if (it && it.unchanged && !it.lookFirst) view.iopen.add("settled:unchanged");
+      if (it && it.settled && !it.coveredBy) view.iopen.add("settled:earlier");
+      paintItems2(); const row = $("item-" + key); if (row) jumpTo(row);
+    }
+  }
+  el.col.addEventListener("click", (e) => {
+    const s = e.target.closest("[data-src]"); if (!s) return;
+    e.preventDefault(); e.stopPropagation(); openSource(s.dataset.src);
+  }, true);
 
   /* ---------- notes: saved as you type; a failed save says so and is sent again ---------- */
   function noteEdited(key, text) {

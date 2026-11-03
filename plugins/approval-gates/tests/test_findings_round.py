@@ -9,6 +9,9 @@ import subprocess
 import sys
 import unittest
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from bundle_helpers import JUDGED  # noqa: E402
+
 from test_gate_guard import HERE, PLUGIN, URL, INTENT, Case, gate_question
 
 BRIEFS = os.path.join(HERE, "fixtures", "findings")
@@ -43,7 +46,7 @@ class FindingsCase(Case):
         self.counter += 1
         os.makedirs(folder)
         path = os.path.join(folder, "gate.json")
-        row = {"title": "User Stories", "status": "open", "round": 1}
+        row = dict({"title": "User Stories", "status": "open", "round": 1}, **JUDGED)
         if cards is not None:
             row["findings"] = cards
         with open(path, "w", encoding="utf-8") as f:

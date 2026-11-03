@@ -64,7 +64,7 @@ capabilities):
 - Notes on rows, and Do it / Leave it on suggestion rows, reach the agent with your chat answer. The decision itself
   is given in chat.
 
-Per-stage pages open on At a glance (below); the Build and Test stage adds its own views.
+Per-stage pages open on Claude's evaluation of the stage (below); the Build and Test stage adds its own views.
 
 ### Build and Test
 
@@ -152,6 +152,29 @@ Bolt, RAID, R-) whose target is not in the gate is still shown as a link: its to
 and pressing it says it is not in this page. Badges explain themselves the same way: severity, likelihood and impact,
 priority, verdicts, statuses, source tags such as `[Q3]` or `[assumption]`, and the change marks. A document whose
 shape is not recognised is Markdown with every H2 a collapsible section.
+
+## Claude's evaluation (1.24.0)
+
+A per-stage page no longer opens on the stage's documents split into lines. It opens on the agent's **judgment of the
+stage against its rules**:
+
+- `gate_bundle.py draft` gathers what the stage is judged against (`scripts/criteria.py`): the engine's definition of the
+  stage (its Constraints and what each file it writes must hold), the reviewer's checklist (its Core Review Questions and
+  the stage's "What to Check"), the project's settled rules (every NEVER / ALWAYS bullet of the memory files that apply)
+  and what earlier stages settled (one per document the stage consumes). It writes them to `criteria.json`, an empty
+  `judgment.json` and a `todo` list, and no batch.
+- The agent judges in `judgment.json`: a verdict per criterion (holds, fails, not relevant), what approving decides, what
+  to look at first and why, what is solid, the risks, gaps and conflicts with earlier stages or rules (each point with the
+  criteria, items or files it rests on), one sentence and an importance label per item, and which files the items cover.
+- `gate_bundle.py finalize` refuses the row, one line per problem, until all of it is there (no ellipsis, no source that
+  names nothing, every failed criterion named in a point); the guard refuses a `gates/` row without it the same way.
+- The page leads with **Claude's evaluation**, then **What the stage says**: each item as the agent's sentence with its
+  label, grouped Look at first / Matters most / Main / Minor; opening one shows it whole, as written (a rule's logic, a
+  story's criteria). Items an earlier stage settled, items unchanged since the last round and the traceability fold away
+  with a count. Files the items cover fold under **As written**; the rest still render in their views.
+- After Request Changes, the next draft carries the summary and label of every item whose text did not change.
+
+Rows written before 1.24.0 still open on At a glance:
 
 ## At a glance (1.23.0)
 

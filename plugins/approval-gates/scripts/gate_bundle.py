@@ -1,18 +1,31 @@
 #!/usr/bin/env python3
-"""Build the rows for one AI-DLC approval gate.
+"""Build the rows for one AI-DLC approval gate: a draft the agent judges, then the rows it sends.
 
-    gate_bundle.py --stage <slug> [--unit <u>] [--why first|revision|stale] [--summary-file <path>]
+    gate_bundle.py draft --stage <slug> [--unit <u>] [--why first|revision|stale] [--summary-file <path>]
                    [--project-dir <dir>] [--no-brief] [--findings <file>] [--handling <file>] --out <dir>
+    gate_bundle.py finalize --out <dir> [--judgment <file>]
+    (with no command, the arguments are draft's)
 
-Writes into <dir>:
-    gate.json               the `gates/<id>` row
+draft writes into <dir>:
+    gate.json               the draft `gates/<id>` row (never sent as it is: it has no evaluation)
     documents/<key>.json    one `gates/<id>/documents/<key>` row per document
+    criteria.json           what the stage is judged against (scripts/criteria.py): the engine's stage definition, the
+                            reviewer's checklist, the project's rules, what earlier stages settled
+    judgment.json           the agent's part, empty (scripts/judgment.py): the evaluation, a verdict per criterion, a
+                            summary and a label per item, covered or shown per document
+and removes any writes.json an earlier finalize left there. It prints {"id", "stage", "unit", "documents", "round",
+"judgment", "criteria", "items", "todo": [what is left to do], "next": "<the finalize command>"}.
+
+finalize merges judgment.json into the row and refuses, in the recipe shape (Refused … because …, numbered steps with one
+line per problem, It worked when …), while any part of the judgment is missing. Then it writes into <dir>:
+    row.json                the `gates/<id>` row, judged
     writes.json             the `writes` array for one ArtifactData batch (set, file_path entries, no
                             if_version: every row is new)
     writes-<n>.json         only when writes.json is over one batch (50 writes or 1 MiB): the same
                             writes in order, in batches that fit; the gate row is in the first
-and prints a short JSON summary on stdout:
-    {"id", "stage", "unit", "documents": [keys], "writes": "<abs path>", "batches": [<abs path>, ...], "round"}
+keeps each item's summary and label for the next round (`$APPROVAL_GATES_DIR/stage-judgments/`; a draft of the same stage
+carries them over for items whose text did not change), and prints
+    {"id", "stage", "unit", "round", "verdict", "lookFirst", "items", "criteria", "writes", "batches"}
 
 The script never touches the artifact: the agent makes the ArtifactData call.
 
@@ -66,8 +79,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import aidlc_ids  # noqa: E402  (the shared copy, next to this file)
+import criteria as criteria_mod  # noqa: E402  (what the stage is judged against)
 import digest  # noqa: E402  (the stage's items, for the page's digest)
 import findings  # noqa: E402  (the review findings that go on the page as cards)
+import judgment  # noqa: E402  (the agent's evaluation of the stage, and the rules finalize holds it to)
 import validate_bundle  # noqa: E402
 
 MAX_DOC_BYTES = 200_000
@@ -554,7 +569,7 @@ def now_utc():
 
 def build(args):
     project = os.path.abspath(args.project_dir or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
-    _space, intent, root = record_root(project)
+    space, intent, root = record_root(project)
     graph = load_graph(project)
     graph_stage = graph.get(args.stage) if graph else None
     folder, phase = stage_dir(root, args.stage, args.unit, graph_stage)
@@ -643,14 +658,15 @@ def build(args):
     except ValueError as why_not:
         raise BundleError(
             "something the stage leaves uncovered says neither where it is handled nor why not: " + str(why_not) +
-            ". Write a JSON file {\"<id>\": {\"text\": \"…\", \"settled\": true, \"link\": {\"kind\": \"step|doc|code|test|unit\", "
+            ". Do this: 1. Write a JSON file {\"<id>\": {\"text\": \"…\", \"settled\": true, \"link\": {\"kind\": \"step|doc|code|test|unit\", "
             "\"target\": \"#<anchor> | path:<file>[#<id>] | unit:<Unit>\"}}} or {\"<id>\": {\"text\": \"…\", \"acceptanceReason\": "
-            "{\"text\": \"…\", \"by\": \"agent\"}}} (by \"developer\" adds \"quote\" and \"message\"), and run this again with "
-            "--handling <that file>") from None
+            "{\"text\": \"…\", \"by\": \"agent\"}}} (by \"developer\" adds \"quote\" and \"message\"). 2. Run this again with "
+            "--handling <that file>. It worked when: the draft prints its id and todo list") from None
     if found["items"] or found["trace"]:
         gate["digest"] = found
     gate["documents"] = [index for _row, index, _path in docs if index]
-    return gate_id, gate, [row for row, _index, _path in docs]
+    crit = criteria_mod.gather(project, root, space, phase, args.stage, name, folder, graph, graph_stage)
+    return gate_id, gate, [row for row, _index, _path in docs], crit
 
 
 def batches_of(writes, sizes):
@@ -675,33 +691,102 @@ def write_json(path, value):
     return os.path.getsize(path)
 
 
-def main(argv=None):
-    ap = argparse.ArgumentParser(prog="gate_bundle.py", description="Build the rows for one AI-DLC approval gate.")
-    ap.add_argument("--stage", required=True)
-    ap.add_argument("--unit")
-    ap.add_argument("--why", choices=("first", "revision", "stale"))
-    ap.add_argument("--summary-file")
-    ap.add_argument("--project-dir")
-    ap.add_argument("--no-brief", action="store_true")
-    ap.add_argument("--handling", help="JSON {id: coveredBy}: where each traced id the stage leaves uncovered is handled, or why not")
-    ap.add_argument("--findings", help="the findings file the guard saved: its open findings become cards on the page")
-    ap.add_argument("--out", required=True)
-    args = ap.parse_args(argv)
+SELF = os.path.abspath(__file__)
+MAX_ROW_BYTES = 900_000  # one row must fit one write; stay under the 1 MiB limit
+
+
+def read_json(path, what):
     try:
-        gate_id, gate, docs = build(args)
-    except BundleError as why_not:
-        print(f"gate_bundle.py: {why_not}", file=sys.stderr)
-        return 1
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError) as why_not:
+        raise BundleError(f"cannot read {what} {path}: {why_not}") from None
+
+
+def refuse(what, why, problems, steps, check):
+    """A refusal in the guard's recipe shape: what and why on one line, numbered steps, how to tell it worked."""
+    lines = [f"Refused: {what}, because {why}.", "Do this:"]
+    for n, step in enumerate(steps, 1):
+        lines.append(f"{n}. {step}")
+        if n == 1 and problems:
+            lines += [f"   - {p}" for p in problems]
+    lines.append(f"It worked when: {check}")
+    print("\n".join(lines), file=sys.stderr)
+    return 1
+
+
+def draft(args):
+    gate_id, gate, docs, crit = build(args)
     out = os.path.abspath(args.out)
-    writes, sizes = [], []
-    path = os.path.join(out, "gate.json")
-    sizes.append(write_json(path, gate))
-    writes.append({"op": "set", "collection": "gates", "doc_id": gate_id, "file_path": path})
+    for name in os.listdir(out) if os.path.isdir(out) else []:
+        if re.fullmatch(r"(writes(-\d+)?|row)\.json", name):  # an earlier finalize's output is never sent with a new draft
+            os.remove(os.path.join(out, name))
+    gate["gate"] = gate_id
+    write_json(os.path.join(out, "gate.json"), gate)
     for row in docs:
-        doc_id = row.pop("id")
-        path = os.path.join(out, "documents", doc_id + ".json")
-        sizes.append(write_json(path, row))
-        writes.append({"op": "set", "collection": f"gates/{gate_id}/documents", "doc_id": doc_id, "file_path": path})
+        write_json(os.path.join(out, "documents", row["id"] + ".json"), {k: v for k, v in row.items() if k != "id"})
+    write_json(os.path.join(out, "criteria.json"), crit)
+    previous = None
+    store = judgment.store_path(gate.get("intent"), gate.get("stage"), gate.get("unit"))
+    if os.path.isfile(store):
+        try:
+            previous = read_json(store, "the last judgment of this stage")
+        except BundleError:
+            previous = None
+    texts = {}
+    for row in docs:
+        texts[row["key"]] = texts.get(row["key"], "") + row["text"]
+    j = judgment.skeleton(gate_id, gate, crit, texts, previous)
+    path = os.path.join(out, "judgment.json")
+    write_json(path, j)
+    print(json.dumps({"id": gate_id, "stage": args.stage, "unit": args.unit, "documents": [d["key"] for d in gate["documents"]],
+                      "round": gate["round"], "judgment": path, "criteria": os.path.join(out, "criteria.json"),
+                      "items": len(j["items"]), "todo": judgment.todo(j, gate),
+                      "next": f'python3 "{SELF}" finalize --out {out}'}, ensure_ascii=False))
+    return 0
+
+
+def finalize(args):
+    out = os.path.abspath(args.out)
+    gate = read_json(os.path.join(out, "gate.json"), "the draft row (run draft first)")
+    crit = read_json(os.path.join(out, "criteria.json"), "the criteria (run draft first)")
+    jpath = os.path.abspath(args.judgment or os.path.join(out, "judgment.json"))
+    j = read_json(jpath, "the judgment")
+    cmd = f'python3 "{SELF}" finalize --out {out}'
+    problems = judgment.shape_problems(j)
+    if not problems and j.get("gate") != gate.get("gate"):
+        problems = [f"judgment.json belongs to gate {j.get('gate')}, the draft row to {gate.get('gate')}: run draft again"]
+    if problems:
+        return refuse("the gate row", "judgment.json is not the file draft wrote", problems,
+                      [f"Run draft again (it writes {jpath}), then do its todo list in that file.", f"Run `{cmd}`."],
+                      "finalize prints the gate id and the path of writes.json.")
+    row = judgment.merge(gate, crit, j)
+    problems = judgment.row_problems(row)
+    if problems:
+        return refuse("the gate row", f"{len(problems)} part(s) of your judgment of the stage are missing or break its rules",
+                      problems,
+                      [f"In {jpath}, fix each line below (criteria.json next to it has every criterion's text):",
+                       f"Run `{cmd}` again.",
+                       "Send the `writes` array of the writes.json it names with one ArtifactData batch."],
+                      "finalize prints the gate id and the path of writes.json, with no Refused line.")
+    gate_id = row.pop("gate")
+    path = os.path.join(out, "row.json")
+    size = write_json(path, row)
+    if size > MAX_ROW_BYTES:
+        return refuse("the gate row", f"it is {size} bytes, over the {MAX_ROW_BYTES} a row may hold",
+                      [], ["Make the longest summaries and points shorter, or set documents you wrote item by item to "
+                           "covered, in " + jpath + ".", f"Run `{cmd}` again."], "finalize prints the gate id.")
+    writes = [{"op": "set", "collection": "gates", "doc_id": gate_id, "file_path": path}]
+    sizes = [size]
+    folder = os.path.join(out, "documents")
+    rows = []
+    for name in os.listdir(folder) if os.path.isdir(folder) else []:
+        if name.endswith(".json"):
+            rows.append((read_json(os.path.join(folder, name), "a document row"), name))
+    for doc, name in sorted(rows, key=lambda x: (x[0].get("n", 0), x[0].get("part", 1))):
+        doc_path = os.path.join(folder, name)
+        sizes.append(os.path.getsize(doc_path))
+        writes.append({"op": "set", "collection": f"gates/{gate_id}/documents", "doc_id": name[:-5], "file_path": doc_path})
     main_path = os.path.join(out, "writes.json")
     write_json(main_path, writes)
     batches = batches_of(writes, sizes)
@@ -713,9 +798,50 @@ def main(argv=None):
             write_json(paths[-1], batch)
         print(f"approval-gates: {len(writes)} writes do not fit one batch; send {len(paths)} batches, in order "
               f"({', '.join(os.path.basename(p) for p in paths)})", file=sys.stderr)
-    print(json.dumps({"id": gate_id, "stage": args.stage, "unit": args.unit, "documents": [d["key"] for d in gate["documents"]],
-                      "writes": main_path, "batches": paths, "round": gate["round"]}))
+    store = judgment.store_path(row.get("intent"), row.get("stage"), row.get("unit"))
+    try:
+        write_json(store, dict(judgment.memory(row), gate=gate_id))
+    except OSError as why_not:
+        print(f"approval-gates: the next round cannot carry this judgment over ({why_not})", file=sys.stderr)
+    e = row["evaluation"]
+    print(json.dumps({"id": gate_id, "stage": row.get("stage"), "unit": row.get("unit"), "round": row.get("round"),
+                      "verdict": e.get("verdict"), "lookFirst": len(e.get("lookFirst") or []),
+                      "items": len(judgment.judged_items((row.get("digest") or {}).get("items"))),
+                      "criteria": len(row.get("criteria") or []), "writes": main_path, "batches": paths}, ensure_ascii=False))
     return 0
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    command = argv.pop(0) if argv and argv[0] in ("draft", "finalize") else "draft"
+    if command == "finalize":
+        ap = argparse.ArgumentParser(prog="gate_bundle.py finalize",
+                                     description="Merge the agent's judgment into the gate row and write the batch.")
+        ap.add_argument("--out", required=True, help="the folder draft wrote")
+        ap.add_argument("--judgment", help="the judgment file (default: <out>/judgment.json)")
+        ap.add_argument("--project-dir")
+        args = ap.parse_args(argv)
+        try:
+            return finalize(args)
+        except BundleError as why_not:
+            print(f"gate_bundle.py: {why_not}", file=sys.stderr)
+            return 1
+    ap = argparse.ArgumentParser(prog="gate_bundle.py draft", description="Draft the rows for one AI-DLC approval gate.")
+    ap.add_argument("--stage", required=True)
+    ap.add_argument("--unit")
+    ap.add_argument("--why", choices=("first", "revision", "stale"))
+    ap.add_argument("--summary-file")
+    ap.add_argument("--project-dir")
+    ap.add_argument("--no-brief", action="store_true")
+    ap.add_argument("--handling", help="JSON {id: coveredBy}: where each traced id the stage leaves uncovered is handled, or why not")
+    ap.add_argument("--findings", help="the findings file the guard saved: its open findings become cards on the page")
+    ap.add_argument("--out", required=True)
+    args = ap.parse_args(argv)
+    try:
+        return draft(args)
+    except BundleError as why_not:
+        print(f"gate_bundle.py: {why_not}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

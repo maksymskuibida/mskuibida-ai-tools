@@ -16,6 +16,9 @@ import sys
 import tempfile
 import unittest
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from bundle_helpers import JUDGED  # noqa: E402
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 PLUGIN = os.path.dirname(HERE)
 HOOK = os.path.join(PLUGIN, "hooks", "gate_guard.py")
@@ -141,7 +144,7 @@ class Case(unittest.TestCase):
         os.makedirs(folder)
         gate = os.path.join(folder, "gate.json")
         with open(gate, "w", encoding="utf-8") as f:
-            json.dump({"title": "User Stories", "status": "open", "round": 1}, f)
+            json.dump(dict({"title": "User Stories", "status": "open", "round": 1}, **JUDGED), f)
         writes = [{"op": "set", "collection": "gates", "doc_id": gate_id, "file_path": gate}]
         for n in range(rows):
             path = os.path.join(folder, "doc%d.json" % n)
@@ -490,7 +493,7 @@ class TestTheReport(Case):
 class TestGateRows(Case):
     def write(self, **fields):
         return {"action": "batch", "url": URL, "writes": [
-            {"op": "set", "collection": "gates", "doc_id": "x-20260101T0900", "data": dict({"title": "t"}, **fields)}]}
+            {"op": "set", "collection": "gates", "doc_id": "x-20260101T0900", "data": dict({"title": "t"}, **JUDGED, **fields)}]}
 
     def test_a_decided_status_is_refused(self):
         code, _out, err = self.pre("ArtifactData", self.write(status="decided"))
