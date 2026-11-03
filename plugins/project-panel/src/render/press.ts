@@ -5,6 +5,7 @@
 import type { PanelModel } from '../../types'
 import { rowsOf } from './attention'
 import { uniqueIds } from './kit'
+import { linksTarget } from './links'
 import { PLAN_KEY } from './plan'
 
 export type PressAction =
@@ -55,6 +56,9 @@ export function pressAction(model: PanelModel | null, expanded: Record<string, b
     const isOpen = expanded[section] ?? !found.isCollapsed
     return { kind: 'toggle', key: section, isOpen: !isOpen }
   }
+
+  const links = linksTarget(model, expanded, element)
+  if (links !== null) return { kind: 'toggle', key: links.key, isOpen: links.isOpen }
 
   const folds: [string, string, boolean][] = [
     ['more:', '#all', true],

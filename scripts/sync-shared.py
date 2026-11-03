@@ -7,12 +7,14 @@ shared/, and this script writes it into every plugin that carries it:
   shared/aidlc-ids/aidlc_ids.py     -> plugins/*/scripts/aidlc_ids.py, wherever one exists
   shared/aidlc-ids/aidlc-ids.js     -> every page (plugins/**/*.html) between /* aidlc-ids.js:begin */ and :end */
   shared/aidlc-ids/aidlc-ids.css    -> the same pages, between /* aidlc-ids.css:begin */ and :end */
+  shared/aidlc-links/aidlc_links.py -> plugins/*/scripts/aidlc_links.py, wherever one exists
 
   sync-shared.py                     write the shared copies into every plugin file that carries one
   sync-shared.py --check             exit 1, naming each file, when a copy differs from shared/ (CI runs this)
   sync-shared.py --add-page <html>   give a page both blocks: the CSS at the end of its first <style>, the script as a
                                      <script> of its own before its first <script>
   sync-shared.py --add-python <dir>  copy aidlc_ids.py into a plugin's scripts folder
+  sync-shared.py --add-links <dir>   copy aidlc_links.py into a plugin's scripts folder
 
 Edit the shared copy, never a plugin's. Standard library only.
 """
@@ -26,6 +28,8 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHARED = os.path.join(ROOT, "shared", "aidlc-ids")
 PY = "aidlc_ids.py"
+LINKS_PY = "aidlc_links.py"
+LINKS = os.path.join(ROOT, "shared", "aidlc-links")
 BLOCKS = {"aidlc-ids.js": "aidlc-ids.js", "aidlc-ids.css": "aidlc-ids.css"}
 
 
@@ -53,7 +57,10 @@ def pages():
 
 
 def pythons():
-    return sorted(glob.glob(os.path.join(ROOT, "plugins", "*", "scripts", PY)))
+    """[(plugin copy, canonical copy)] of every shared Python file a plugin carries."""
+    out = [(p, os.path.join(SHARED, PY)) for p in glob.glob(os.path.join(ROOT, "plugins", "*", "scripts", PY))]
+    out += [(p, os.path.join(LINKS, LINKS_PY)) for p in glob.glob(os.path.join(ROOT, "plugins", "*", "scripts", LINKS_PY))]
+    return sorted(out)
 
 
 def synced_page(text):
@@ -82,15 +89,19 @@ def main(argv=None):
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--add-page", action="append", default=[])
     ap.add_argument("--add-python", action="append", default=[])
+    ap.add_argument("--add-links", action="append", default=[])
     args = ap.parse_args(argv)
     for path in args.add_page:
         add_page(os.path.abspath(path))
     for folder in args.add_python:
         os.makedirs(folder, exist_ok=True)
         write(os.path.join(folder, PY), read(os.path.join(SHARED, PY)))
+    for folder in args.add_links:
+        os.makedirs(folder, exist_ok=True)
+        write(os.path.join(folder, LINKS_PY), read(os.path.join(LINKS, LINKS_PY)))
     stale = []
-    canonical = read(os.path.join(SHARED, PY))
-    for path in pythons():
+    for path, source in pythons():
+        canonical = read(source)
         if read(path) != canonical:
             stale.append(path)
             if not args.check:
@@ -107,7 +118,7 @@ def main(argv=None):
             for p in rel:
                 print(f"{p}: differs from shared/; run scripts/sync-shared.py")
             return 1
-        print(f"OK shared copies match: {len(pythons())} aidlc_ids.py, {len(pages())} pages")
+        print(f"OK shared copies match: {len([1 for p, _ in pythons() if p.endswith(PY)])} aidlc_ids.py, {len(pages())} pages")
         return 0
     for p in rel:
         print(f"synced {p}")

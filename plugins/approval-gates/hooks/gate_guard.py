@@ -68,6 +68,8 @@ except ImportError:  # no advisory locks on this platform: the unique temp file 
 PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import findings_round  # noqa: E402  (review findings at the gate: cards on the page, no Findings question)
+sys.path.append(os.path.join(PLUGIN_ROOT, "scripts"))
+import aidlc_links  # noqa: E402  (the registry of the pages published for each stage: the project panel lists them)
 STALE_DAYS = 14  # another session's state file untouched for this long is removed when a state is saved
 GATE_LABELS = {"approve", "approve plan", "accept as-is"}
 CLOSING = {"approved", "rejected", "accepted"}
@@ -1451,6 +1453,23 @@ def record_bash(event, project, state, tool_input):
     return changed
 
 
+SESSION = [""]  # the session id of the call in hand, for the registry's entries
+
+
+def register_link(project, kind, url, doc_id, stage, unit=None, rhythm=None, revision=None, data=None):
+    """Write the publication's entry to the shared registry (scripts/aidlc_links.py). Never fails the call."""
+    try:
+        intent, root = intent_root(project)
+        space = first_line(os.path.join(project, "aidlc", "active-space"))
+        if not (intent and space and stage and url):
+            return
+        title = (data or {}).get("title") if isinstance(data, dict) else ""
+        aidlc_links.record(project, space, intent, kind, url, doc_id, stage, aidlc_links.phase_of(root, stage), unit, rhythm,
+                           revision, title if isinstance(title, str) else "", SESSION[0])
+    except Exception:
+        pass
+
+
 def record_artifact(project, state, tool_input, response):
     if failed(response):
         return False
@@ -1466,6 +1485,10 @@ def record_artifact(project, state, tool_input, response):
         if collection == "plans":
             if op == "set" and doc_id:
                 state["plans"][doc_id] = {"id": doc_id, "url": str(url or "").rstrip("/"), "at": time.time()}
+                found = aidlc_links.test_plan_revision(doc_id)
+                if found:
+                    unit = _data.get("unit") if isinstance(_data, dict) and isinstance(_data.get("unit"), str) else claimed_unit(project)
+                    register_link(project, "test-plan", url, doc_id, UNIT_END_STAGE, unit, "unit-end", found[0], _data)
                 if doc_id not in plan_ids:
                     plan_ids.append(doc_id)
                 changed = True
@@ -1483,13 +1506,16 @@ def record_artifact(project, state, tool_input, response):
         if wrong:
             say("PostToolUse", wrong_flow_message(doc_id, *wrong).replace("Nothing was written.", "It does not count for the gate."))
             continue
-        key = next((make_key(stage, unit) for stage, unit in candidates if id_matches(doc_id, intent, stage, unit)), None)
+        cand = next(((stage, unit) for stage, unit in candidates if id_matches(doc_id, intent, stage, unit)), None)
+        key = make_key(*cand) if cand else None
         if key is None and not candidates and re.fullmatch(r"\d{6}-[a-z0-9-]+-\d{8}[Tt]\d{4}", doc_id or ""):
             key = "id:" + doc_id  # no stage is known here: the row is kept by its id and matched by it later
         if key is None:
             continue
         pub = {"id": doc_id, "url": str(url or "").rstrip("/"), "at": time.time()}
         state["published"][key] = pub
+        if cand:
+            register_link(project, "gate", url, doc_id, cand[0], cand[1], "per-stage", None, _data)
         rnd = state["findings"]
         if rnd and id_matches(doc_id, intent, rnd.get("stage"), rnd.get("unit")):
             note = findings_round.on_page(state, doc_id, pub["url"])
@@ -1556,6 +1582,8 @@ def record_bundle(state, project, intent, doc_id, url):
         return False
     pub = {"id": doc_id, "url": str(url or "").rstrip("/"), "at": time.time(), "page": page}
     state["published"][make_key(pending["stage"], unit) + "@" + page] = pub
+    kind, revision, _head = aidlc_links.bundle_page(doc_id)
+    register_link(project, kind, url, doc_id, UNIT_END_STAGE, unit, "unit-end", revision)
     say("PostToolUse", f"bundles/{doc_id} is published in the AI-DLC unit approvals artifact. Send the developer the link `{link_of(pub)}` in a message of its "
                        "own, then ask the engine's Approval question with no link in it; the question is refused until "
                        "that message was sent. Do both in ONE response: a text block with the link first, then the "
@@ -1839,6 +1867,7 @@ def main():
         project = project_dir(event)
         if not os.path.isdir(os.path.join(project, "aidlc", "spaces")):
             return 0
+        SESSION[0] = str(event.get("session_id") or "")
         findings_round.write_owner(state_dir(), plugin_version())
         if name == "PreToolUse":
             guarded_pre(event, project)

@@ -29,6 +29,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "scripts"))
 
+import aidlc_links  # noqa: E402  (the registry of the pages published for each stage: the project panel lists them)
 import preference as pf  # noqa: E402
 
 MAX_BLOCKS = 3
@@ -166,6 +167,32 @@ def form_rows(ti):
     return found or None
 
 
+def register_forms(event, project, ti):
+    """Each `forms` row the call writes, when its `file` is a questions file under a stage's folder of this project,
+    goes into the shared registry (scripts/aidlc_links.py) as that stage's questions form. Never fails the call."""
+    try:
+        writes = ti.get("writes") if ti.get("action") == "batch" else [ti]
+        artifact = str(ti.get("url") or "")
+        for w in writes if isinstance(writes, list) else []:
+            if not isinstance(w, dict) or w.get("collection") != "forms" or not w.get("doc_id"):
+                continue
+            if w.get("op", w.get("action")) not in ("set", "update"):
+                continue
+            data = payload(w)
+            file = data.get("file") if isinstance(data, dict) else None
+            if not file:
+                continue
+            where = aidlc_links.questions_location(file if os.path.isabs(file) else os.path.join(project, file))
+            if not where or os.path.abspath(where[0]) != os.path.abspath(project):
+                continue
+            _project, space, intent, phase, stage, unit = where
+            title = data.get("title")
+            aidlc_links.record(project, space, intent, "questions-form", artifact, str(w["doc_id"]), stage, phase, unit, None,
+                               None, title if isinstance(title, str) else "", str(event.get("session_id") or ""))
+    except Exception:
+        pass
+
+
 def same_file(project, form_file, rel, entry):
     """Whether the form row's `file` is the pending file: relative to the project or absolute."""
     given = os.path.abspath(form_file if os.path.isabs(form_file) else os.path.join(project, form_file))
@@ -251,6 +278,7 @@ def post(event, project):
     elif tool == "ArtifactData":
         if ti.get("action") in ("get", "list", "query", "delete"):
             return
+        register_forms(event, project, ti)
         rows = form_rows(ti)
         if rows is None:  # no structured write of a form row: look for one in the call's text
             text = json.dumps(ti)

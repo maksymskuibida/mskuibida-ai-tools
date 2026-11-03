@@ -291,3 +291,7 @@ those points through a guided test plan:
 
 Only the unit-end rhythm has a test plan; per-stage gates are unchanged. The contract is in
 [`contract/README.md`](contract/README.md#the-test-plan-unit-end-page-only).
+
+## Registry of published pages (1.24.0)
+
+Every gate page, unit plan or unit-end page and test plan this plugin's hook sees published is also written, by the hook, to the shared registry of AI-DLC artifact links (`scripts/aidlc_links.py`; see `shared/aidlc-links/`), so the project panel can list it under its stage.

@@ -5,6 +5,7 @@ import { CARD_FILL, isRich, safely, uniqueIds } from './kit'
 import { emptyRing, pill } from './look'
 import type { Ctx, El } from './kit'
 import { foldGutters, foldRow, gateCard, itemRow, openCap } from './item'
+import { linksBlock } from './links'
 import { clampPercent, mixOf, ring, strip } from './ring'
 import { isEmptySection, numbered } from './stepper'
 
@@ -348,6 +349,7 @@ function sectionBody(ctx: Ctx, section: Section, id: string, gates: Gate[], expa
       {drawn.map(index => (
         <Box flexDirection="column">
           {itemRow(ctx, section.items[index]!, folds.get(index) ?? '')}
+          {linksBlock(ctx, section.items[index]!, id, expanded)}
           {afterIndex(index).map(gate => gateCard(ctx, gate))}
         </Box>
       ))}
