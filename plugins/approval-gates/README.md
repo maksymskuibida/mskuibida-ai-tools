@@ -164,6 +164,7 @@ folded):
   linked, accepted with a reason, new in this stage, and settled earlier; hover a segment for its count.
 - **Traceability**: when the stage has a traceability.json, a matrix of what is traced (rows) against what covers it
   (columns), a dot for covered and a cross for not.
+- **Read dots** sit at the right end of every row and card, in the same column as the block summaries' dots.
 - **One lane per kind**: one line per item (its id, its title in plain words, a chip saying where it is handled or that
   it was accepted, and the reason under the line when it is one); pressing the title opens what it says, what it relates
   to (the ids it names, so you see how decisions connect) and a jump to its document. Items an earlier stage settled are

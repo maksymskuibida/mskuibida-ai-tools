@@ -399,7 +399,7 @@ details[open] > summary > .caret, details[open] > summary .caret { transform: ro
 .block > summary .file { font: 400 12px var(--mono); color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40ch; direction: rtl; text-align: left; }
 .block > summary .file > span { direction: ltr; unicode-bidi: isolate; }
 .block > summary .end { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.block > .body { padding: 6px 16px 16px 44px; border-top: 1px solid var(--line); min-width: 0; }
+.block > .body { --body-r: 16px; padding: 6px 16px 16px 44px; border-top: 1px solid var(--line); min-width: 0; }
 .block.sum > .body { padding-top: 12px; }
 .block.rev2 > summary { background: var(--r2-tint); } .block.rev3 > summary { background: var(--r3-tint); } .block.rev4 > summary { background: var(--r4-tint); } .block.rev5 > summary { background: var(--r5-tint); }
 .rdot { flex: none; width: 32px; height: 32px; min-height: 32px; padding: 0; border: 0; border-radius: 6px; background: transparent; display: inline-flex; align-items: center; justify-content: center; }
@@ -617,7 +617,7 @@ figure.screen > details.sub { margin: 0; padding: 4px 12px 6px; border-top: 1px 
   .head { padding: 16px; }
   h1 { font-size: 20px; }
   .block > summary .file, .wide { display: none; }
-  .block > .body { padding: 6px 12px 14px; }
+  .block > .body { padding: 6px 12px 14px; --body-r: 12px; }
   details.sec > summary { margin-left: 0; }
   .tools { margin-left: 0; gap: 6px 8px; }
   .filters { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; scrollbar-width: none; }
@@ -685,8 +685,11 @@ figure.screen > details.sub { margin: 0; padding: 4px 12px 6px; border-top: 1px 
 .dcard { display: grid; gap: 8px; align-content: start; min-width: 0; padding: 12px; border: 1px solid var(--line); border-left-width: 3px; border-radius: 8px; background: var(--surface); }
 .dcard.notmet { border-left-color: var(--crit-fg); } .dcard.unverified { border-left-color: var(--warn-dot); }
 .dcard.chosen { background: var(--accent-tint); }
+.dcard > .dtop { --pad-r: 13px; }
 .dtop { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .dtop .hint { margin-left: auto; font-size: 12px; }
+.dtop .hint + .idot { margin-left: 0; }
+.fnd .dcards { grid-template-columns: minmax(0, 1fr); } /* one column, so every card's read dot sits at the right edge */
 .dwhy { margin: 0; font-size: 13px; color: var(--fg-2); display: grid; gap: 3px; overflow-wrap: anywhere; }
 .dwhy b { font-weight: 500; color: var(--muted); margin-right: 6px; }
 .dpick { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -733,22 +736,24 @@ figure.screen > details.sub { margin: 0; padding: 4px 12px 6px; border-top: 1px 
 .tmx .hit { color: var(--ok-fg); font-weight: 700; } .tmx .miss { color: var(--crit-fg); font-weight: 700; }
 .lane { display: grid; gap: 2px; }
 .irow { border-radius: 8px; } .irow:hover { background: var(--hover); }
-.irow .ih { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 2px 4px; }
+.irow .ih { --pad-r: 4px; display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 2px 4px; }
 .irow .iid { flex: none; font: 500 12px var(--mono); color: var(--accent); min-width: 64px; }
 .irow .ititle { flex: 1 1 auto; min-width: 0; border: 0; background: none; padding: 4px 0; text-align: left; font: inherit; font-size: 14px; color: var(--fg); cursor: pointer; overflow-wrap: anywhere; }
 .irow.read .ititle { color: var(--muted); }
-.irow .ichips { display: inline-flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.irow .ichips { display: inline-flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; flex: 0 1 auto; min-width: 0; }
 .irow .ib { padding: 0 8px 10px 108px; display: grid; gap: 6px; font-size: 13px; color: var(--fg-2); line-height: 1.5; }
 .irow .rel { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; } .irow .rel > span { font-size: 12px; color: var(--muted); }
 .ireason { margin: 0 4px 8px 108px; padding: 6px 10px; border-radius: 6px; background: var(--warn-bg); color: var(--warn-fg); font-size: 13px; line-height: 1.5; }
 .ireason q { font-style: italic; }
-.idot { flex: none; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 6px; background: transparent; display: inline-flex; align-items: center; justify-content: center; }
+/* Read dots share one column with the block summaries: 12px is where a summary's .rdot ends (its right padding);
+   each row pulls its dot out by whatever padding sits between that edge and the dot. */
+.idot { margin-left: auto; margin-right: calc(12px - var(--body-r, 16px) - var(--pad-r, 0px)); flex: none; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 6px; background: transparent; display: inline-flex; align-items: center; justify-content: center; }
 .idot i { width: 10px; height: 10px; border-radius: 5px; background: var(--accent); border: 2px solid var(--accent); }
 .irow.read .idot i, .dcard.read .idot i { background: transparent; border-color: var(--control); }
 .idot:focus-visible, .ititle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 details.settled > summary { cursor: pointer; font-size: 13px; color: var(--muted); padding: 6px 4px; }
 .jump { font-size: 12px; }
-@media (max-width: 640px) { .irow .ib, .ireason { padding-left: 8px; margin-left: 4px; } .irow .ih { flex-wrap: wrap; } .irow .iid { min-width: 0; } }
+@media (max-width: 640px) { .irow .ib, .ireason { padding-left: 8px; margin-left: 4px; } .irow .iid { min-width: 0; } }
 .refgrp > .body { display: grid; gap: 12px; padding-left: 12px; }
 @media (max-width: 767px) {
   .bt-strip { grid-template-columns: minmax(0, 1fr); }
@@ -2868,7 +2873,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     const p = view.fpicks[f.id] || {}; const note = (p.note || "").trim(); const id = esc(f.id);
     const sev = `<span class="tag" style="background:var(--${f.blocking ? "crit" : "warn"}-bg);color:var(--${f.blocking ? "crit" : "warn"}-fg)" data-tip="${esc(f.why || "")}">${esc(f.severity)}${f.blocking ? " · blocks approval" : ""}</span>`;
     const by = f.actionBy === "model" ? "suggested by a model" : f.actionBy === "reviewer" ? "the reviewer's action" : "";
-    return `<div class="dcard fcard ${f.blocking ? "blocking" : "carried"}${p.pick ? " chosen" : ""}${isRead("finding:" + f.id) ? " read" : ""}" data-fid="${id}" data-item="finding:${id}"><div class="dtop">${idot("finding:" + f.id, f.id)}${sev}<span class="mono">${id}</span>${f.proposed ? `<span class="hint" data-tip="${esc(f.why || "")}">suggested: ${esc(f.proposed)}</span>` : ""}</div>` +
+    return `<div class="dcard fcard ${f.blocking ? "blocking" : "carried"}${p.pick ? " chosen" : ""}${isRead("finding:" + f.id) ? " read" : ""}" data-fid="${id}" data-item="finding:${id}"><div class="dtop">${sev}<span class="mono">${id}</span>${f.proposed ? `<span class="hint" data-tip="${esc(f.why || "")}">suggested: ${esc(f.proposed)}</span>` : ""}${idot("finding:" + f.id, f.id)}</div>` +
       `<h3>${inline(f.title)}</h3>${f.plain ? `<p class="fplain">${inline(f.plain)}</p>` : ""}` +
       `<p class="faction"><b>Suggested</b>${inline(f.action || "")}${by ? ` <span class="fsugg">(${esc(by)})</span>` : ""}</p>` +
       (f.where ? `<span class="fwhere">${esc(f.where)}</span>` : "") +
@@ -2936,8 +2941,8 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     const key = "item:" + it.key, read = isRead(key), open = view.iopen.has(it.key);
     const doc = docs.find((d) => d.key === it.doc);
     const rel = (it.mentions || []).length ? `<div class="rel"><span>Relates to</span>${it.mentions.map((m) => `<span class="chip">${esc(m)}</span>`).join("")}</div>` : "";
-    return `<div class="irow${read ? " read" : ""}" id="item-${esc(it.key)}" data-item="${esc(key)}" data-aidlc-id="${esc(it.id)}"><div class="ih">${idot(key, it.id)}<span class="iid">${esc(it.id)}</span>` +
-      `<button type="button" class="ititle" data-iopen="${esc(it.key)}" aria-expanded="${open}">${esc(it.title)}</button><span class="ichips">${handledChip(it)}</span></div>` + reasonHtml(it) +
+    return `<div class="irow${read ? " read" : ""}" id="item-${esc(it.key)}" data-item="${esc(key)}" data-aidlc-id="${esc(it.id)}"><div class="ih"><span class="iid">${esc(it.id)}</span>` +
+      `<button type="button" class="ititle" data-iopen="${esc(it.key)}" aria-expanded="${open}">${esc(it.title)}</button><span class="ichips">${handledChip(it)}</span>${idot(key, it.id)}</div>` + reasonHtml(it) +
       (open ? `<div class="ib">${it.body ? `<p>${inline(it.body)}</p>` : ""}${rel}${doc ? `<a class="jump" href="#" data-go="d-${esc(doc.key)}">In ${esc(doc.title || doc.key)}</a>` : ""}</div>` : "") + "</div>";
   }
   function coverageHtml(D) {
