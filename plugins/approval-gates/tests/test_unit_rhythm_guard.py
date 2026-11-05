@@ -178,8 +178,11 @@ class TestPlanAskOfTheEngine(UnitCase):
         self.assertEqual(code, 2)
         self.assertIn("plan page", err)
 
-    def test_an_approve_plan_question_with_no_gate_open_is_left_alone(self):
-        self.assertEqual(self.plan_question()[0], 0)
+    def test_an_approve_plan_question_with_no_gate_open_opens_one_and_is_refused(self):
+        code, _out, err = self.plan_question()
+        self.assertEqual(code, 2)
+        self.assertIn("Every Approve Plan question, at every stage", err)
+        self.assertEqual(self.state_of()["pending"]["kind"], "plan")
 
 
 class TestRefusedReport(UnitCase):

@@ -335,7 +335,7 @@ def directive_unit_gate(project, stage, unit):
 
 
 def directive_plan_ask(project):
-    """(stage, unit, written at) when the active directive is the engine's plan-approval ask for a Unit, else None."""
+    """(stage, unit or None, written at) when the active directive is the engine's plan-approval ask, for any stage, else None."""
     _intent, root = intent_root(project)
     if not root:
         return None
@@ -349,10 +349,13 @@ def directive_plan_ask(project):
     if not isinstance(directive, dict) or directive.get("kind") != "ask" or directive.get("ask_type") != "plan-approval":
         return None
     unit = directive.get("unit")
-    if not isinstance(unit, str) or not unit.strip():
-        return None
-    stage = directive.get("stage") if isinstance(directive.get("stage"), str) and directive.get("stage") else UNIT_END_STAGE
-    return stage, unit.strip(), written
+    unit = unit.strip() if isinstance(unit, str) and unit.strip() else None
+    stage = directive.get("stage")
+    if not isinstance(stage, str) or not stage.strip():
+        if not unit:
+            return None
+        stage = UNIT_END_STAGE
+    return stage.strip(), unit, written
 
 
 def sync_pending(state, project):
@@ -362,11 +365,38 @@ def sync_pending(state, project):
         return False
     stage, unit, written = ask
     pending = state["pending"]
-    if pending and pending.get("kind") == "plan" and pending.get("stage") == stage and pending.get("unit") == unit:
+    if pending and pending.get("kind") == "plan" and pending.get("stage") == stage and (pending.get("unit") or None) == unit:
         return False
     state["pending"] = {"stage": stage, "unit": unit, "opened_at": written, "kind": "plan",
                         "rhythm": unit_rhythm(project, unit, stage)}
     return True
+
+
+def is_plan_question(question):
+    """A question that offers Approve Plan (any header) and names no pull request: the plan approval of a stage."""
+    return "approve plan" in labels(question) and not names_pull_request(str(question.get("question", "")))
+
+
+def open_plan_gate(state, project, questions):
+    """A plan approval asked with no gate open (the plan decision was never logged and the engine's ask was not seen):
+    open a plan gate for the stage the engine is at. True when it opened."""
+    if state["pending"] or not any(is_plan_question(q) for q in questions):
+        return False
+    cur = current_stage(project)
+    if not cur:
+        return False
+    stage, unit = cur
+    state["pending"] = {"stage": stage, "unit": unit, "opened_at": time.time(), "kind": "plan",
+                        "rhythm": unit_rhythm(project, unit, stage), "asked_first": True}
+    return True
+
+
+def plan_steps(pending, stage, unit):
+    """The step that comes before publishing, when the plan approval was asked before its decision was recorded."""
+    if not (pending and pending.get("asked_first")):
+        return []
+    return [f"Record the plan decision: `aidlc engine log decision --stage {stage}"
+            + (f" --unit {unit}" if unit else "") + " --checkpoint plan-approval --value presented`."]
 
 
 def page_of(pending):
@@ -659,6 +689,10 @@ def tested_first(pub, stage, unit):
                       published_check("unit-end"))
 
 
+PLAN_NOTE = (" Every Approve Plan question, at every stage, needs the stage's page and its visible link first, whatever its "
+             "header.")
+
+
 def require_published(state, project, stage, unit, opened, call="the Approval question"):
     """The record of this stage's gate page, or a Refusal when it was not published since the gate opened. A row
     recorded by its id alone (the stage was unknown when it was written) counts when its id names this stage. Under the
@@ -669,8 +703,8 @@ def require_published(state, project, stage, unit, opened, call="the Approval qu
         pub = state["published"].get(make_key(stage, unit) + "@" + page)
         if not pub or (isinstance(opened, (int, float)) and pub.get("at", 0) < opened):
             raise Refusal(f"{call} for {unit}, because the developer reads the Unit's {page} page before being asked, and it "
-                          "was not published since the gate opened. Publish it first.",
-                          publish_steps(stage, unit, page), published_check(page))
+                          "was not published since the gate opened. Publish it first." + PLAN_NOTE * (page == "plan"),
+                          plan_steps(pending, stage, unit) + publish_steps(stage, unit, page), published_check(page))
         return pub
     if not (pending and pending.get("stage") == stage and (pending.get("unit") or None) == (unit or None)) \
             and unit_rhythm(project, unit, stage) == "unit-end":
@@ -688,8 +722,8 @@ def require_published(state, project, stage, unit, opened, call="the Approval qu
     if not pub or (isinstance(opened, (int, float)) and pub.get("at", 0) < opened):
         raise Refusal(f"{call} for {stage}{(' (' + unit + ')') if unit else ''}, because the developer reads the stage's "
                       "documents in the AI-DLC approval gates page before being asked, and no page was published since the "
-                      "gate opened. Publish them first.",
-                      publish_steps(stage, unit), published_check())
+                      "gate opened. Publish them first." + PLAN_NOTE * bool(pending and pending.get("kind") == "plan"),
+                      (plan_steps(pending, stage, unit) if pending else []) + publish_steps(stage, unit), published_check())
     return pub
 
 
@@ -1040,7 +1074,8 @@ def is_approval_question(question):
     if names_pull_request(str(question.get("question", ""))):
         return False
     ls = labels(question)
-    return norm(question.get("header", "")) in APPROVAL_HEADERS or ("approve" in ls and "request changes" in ls)
+    return norm(question.get("header", "")) in APPROVAL_HEADERS or ("approve" in ls and "request changes" in ls) \
+        or "approve plan" in ls
 
 
 def shown_text(text):
@@ -1341,8 +1376,14 @@ def pre(event, project):
     if tool == "AskUserQuestion":
         state = load(event)
         guard_plan_links(event, state)
-        sync_pending(state, project)
         questions = questions_of(ti)
+        opened = sync_pending(state, project)
+        unrecorded = [q for q in questions if not (not state["pending"] and is_plan_question(q)
+                                                   and recoverable(event, state, project, q))]
+        if open_plan_gate(state, project, unrecorded):
+            opened = True
+        if opened:
+            save(event, state)
         gates = gate_questions(state, questions)
         pubs = guard_question(event, state, project, gates) if gates else {}
         visible = [q for q in questions if q in gates or is_approval_question(q)]

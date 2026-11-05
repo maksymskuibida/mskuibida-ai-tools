@@ -243,6 +243,59 @@ class TestOpening(Case):
         self.assertIn("--stage code-generation --unit u1-core", self.context(out))
 
 
+class TestPlanApprovalAtAnyStage(Case):
+    """An Inception stage's plan approval asked under the header "Plan", with no plan decision logged and no gate open
+    (Units Generation, Step 4): it needs the stage's page and its visible link like every other approval."""
+
+    def plan_question(self, header="Plan"):
+        return self.pre("AskUserQuestion", gate_question("Units plan ready. How would you like to proceed?", header=header,
+                                                         labels=("Approve Plan", "Revise Plan")))
+
+    def test_a_plan_header_question_with_no_gate_open_is_refused_and_opens_the_plan_gate(self):
+        code, _out, err = self.plan_question()
+        self.assertEqual(code, 2)
+        self.assertIn("Every Approve Plan question, at every stage", err)
+        self.assertIn("aidlc engine log decision --stage user-stories --checkpoint plan-approval", err)
+        self.assertIn("--stage user-stories", err)
+        self.assertIn(os.path.join(PLUGIN, "scripts", "gate_bundle.py"), err)
+        pending = self.state_of()["pending"]
+        self.assertEqual((pending["stage"], pending["unit"], pending["kind"]), ("user-stories", None, "plan"))
+
+    def test_it_is_allowed_once_the_page_is_published_and_its_link_is_visible(self):
+        self.assertEqual(self.plan_question()[0], 2)
+        gate_id = self.publish(link=False)
+        code, _out, err = self.plan_question()
+        self.assertEqual(code, 2)
+        self.assertIn("no text message of yours", err)
+        self.said(f"**Read:** {URL}#{gate_id}")
+        code, _out, err = self.plan_question()
+        self.assertEqual(code, 0, err)
+
+    def test_the_gate_is_opened_once_so_a_published_page_stays_current(self):
+        self.plan_question()
+        opened = self.state_of()["pending"]["opened_at"]
+        self.publish()
+        self.plan_question()
+        self.assertEqual(self.state_of()["pending"]["opened_at"], opened)
+
+    def test_a_pull_request_approve_plan_question_is_not_a_gate(self):
+        question = gate_question("Approve Plan for acme/app#12?", header="Plan", labels=("Approve Plan", "Revise Plan"))
+        self.assertEqual(self.pre("AskUserQuestion", question)[0], 0)
+        self.assertIsNone(self.state_of())
+
+    def test_the_engines_plan_approval_ask_opens_a_gate_for_an_inception_stage(self):
+        path = os.path.join(self.record, ".aidlc-engine", "active-directive.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"kind": "ask", "ask_type": "plan-approval", "stage": "units-generation"}, f)
+        code, out, err = self.post("Bash", {"command": "aidlc engine orchestrate next"}, {"stdout": "{}"})
+        self.assertEqual(code, 0, err)
+        pending = self.state_of()["pending"]
+        self.assertEqual((pending["stage"], pending["unit"], pending["kind"]), ("units-generation", None, "plan"))
+        code, _out, err = self.plan_question()
+        self.assertEqual(code, 2)
+        self.assertIn("--stage units-generation", err)
+
+
 class TestTheQuestion(Case):
     def test_refused_before_the_documents_are_published(self):
         self.open_gate()

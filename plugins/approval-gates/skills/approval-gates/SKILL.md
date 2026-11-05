@@ -293,6 +293,18 @@ no test plan.
 
 ## 6. The guard
 
+### A plan approval asked with no page (Inception Units Generation, 2026-11-05)
+
+The Units Generation session reached Step 4 (Get Plan Approval) and went straight to AskUserQuestion with the header "Plan" and
+the options Approve Plan / Revise Plan. It had not logged `--checkpoint plan-approval`, and the guard only looked at questions
+headed "Approval", so the plan was approved with no page and no link.
+
+**Every Approve Plan question, at every stage and under any header, needs the stage's page and its visible link first.** The
+guard now opens a plan gate for the stage the engine is at when such a question comes with no gate open, and refuses it until
+you have recorded the plan decision (`aidlc engine log decision --stage <stage> --checkpoint plan-approval --value presented`),
+published the page (the plan is in the stage's folder, so `gate_bundle.py draft` shows it), and sent the link as visible text.
+The engine's `plan-approval` ask opens the gate for any stage, not only a Unit's Code Generation.
+
 ### The link is always shown, even after a restart (u20-timeline, 2026-11-03)
 
 The unit-end bundle was written, the tool result was lost, the session restarted (a new session id: the guard's record of the
