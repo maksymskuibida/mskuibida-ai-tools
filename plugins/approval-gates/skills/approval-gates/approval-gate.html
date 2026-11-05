@@ -762,6 +762,17 @@ figure.screen > details.sub { margin: 0; padding: 4px 12px 6px; border-top: 1px 
 .idot i { width: 10px; height: 10px; border-radius: 5px; background: var(--accent); border: 2px solid var(--accent); }
 .irow.read .idot i, .dcard.read .idot i { background: transparent; border-color: var(--control); }
 .idot:focus-visible, .ititle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* element read marks: the dot sits where the other read dots do; a table's own column keeps it inside the table */
+.card { --pad-r: 13px; } .card.flat { --pad-r: 0px; }
+details.sec > summary { --pad-r: 4px; }
+details.sub > summary.hasdot { display: flex; align-items: center; gap: 6px; --pad-r: 0px; }
+.idot.isread i { background: transparent; border-color: var(--control); }
+.tablewrap.edots { margin-right: calc(12px - var(--body-r, 16px)); max-width: calc(100% + var(--body-r, 16px) - 12px); }
+table.grid th.edotc, table.grid td.edotc { width: 32px; min-width: 32px; padding: 0; vertical-align: middle; }
+td.edotc .idot { margin: 0; display: flex; }
+.unit.hasdot { position: relative; padding-right: 30px; } .unit.hasdot > .edot { position: absolute; top: 0; right: 0; margin: 0; width: 28px; height: 28px; }
+.er .chead h3, .er .chead h4, tr.er td, details.sec.er > summary h3 { color: var(--muted); }
+.eh { display: none !important; }
 details.settled > summary { cursor: pointer; font-size: 13px; color: var(--muted); padding: 6px 4px; }
 .jump { font-size: 12px; }
 @media (max-width: 640px) { .irow .ib, .ireason { padding-left: 8px; margin-left: 4px; } .irow .iid { min-width: 0; } }
@@ -904,7 +915,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
   let db = null, uid = null, tipOn = null;
   const fresh = () => ({ unsub: [], gate: null, docs: new Map(), docsLoaded: false, notes: {}, dirty: new Set(), noteStat: {}, unsaved: false, saving: false, failed: false,
     noteTimer: null, painted: "", openNotes: new Set(), railSig: "", mode: {}, picks: {}, fpicks: {}, iopen: new Set(), bt: { v: new Set(), u: new Set(), q: "", rows: new Set() }, refs: new Map(), ids: {}, railOpen: {},
-    reads: {}, readKey: "", hashes: {}, filter: "all", prev: null, prevDocs: null, changed: {}, changedSecs: {} });
+    reads: {}, readKey: "", hashes: {}, groups: {}, filter: "all", prev: null, prevDocs: null, changed: {}, changedSecs: {} });
   const view = Object.assign({ id: "", diagrams: 0 }, fresh());
   const hasMd = () => typeof marked !== "undefined" && typeof DOMPurify !== "undefined";
 
@@ -1038,8 +1049,15 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     try { localStorage.setItem(localKey(), JSON.stringify(marks)); } catch { /* storage refused: the db copy still holds */ }
     try { if (db && uid) readsDoc().set({ marks }).catch(() => { /* kept locally */ }); } catch { /* kept locally */ }
   }
-  const isRead = (key) => !!view.hashes[key] && view.reads[key] === view.hashes[key];
-  function setRead(keys, on) { keys.forEach((k) => { if (on && view.hashes[k]) view.reads[k] = view.hashes[k]; else delete view.reads[k]; }); saveReads(); paintChrome(docList()); }
+  /* A block with marks of its own parts (a document's elements, the findings, the stage's items) is read when every part is;
+     its own dot then marks every part. view.groups: block key -> the keys of its parts, filled as the page is drawn. */
+  const rawRead = (key) => !!view.hashes[key] && view.reads[key] === view.hashes[key];
+  const isRead = (key) => { const g = view.groups[key]; return g && g.length ? g.every(rawRead) : rawRead(key); };
+  function setRead(keys, on) {
+    const mark = (k) => { if (on && view.hashes[k]) view.reads[k] = view.hashes[k]; else delete view.reads[k]; };
+    keys.forEach((k) => { mark(k); (view.groups[k] || []).forEach(mark); });
+    saveReads(); paintChrome(docList());
+  }
 
   /* The previous presentation of the same stage (and Unit), to mark what changed since: read only, never written. */
   async function loadPrevious() {
@@ -1123,12 +1141,12 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     const sig = JSON.stringify([view.id, g.summary, g.brief, g.review, docs.map((d) => [d.key, d.title, d.kind, d.text, !!d.pending, !!d.partial, !!d.covered]), g.buildTest || null, g.findings || null, g.digest || null, g.evaluation || null, g.criteria || null, isDark(), view.mode, view.changed]);
     if (sig === view.painted) { paintChrome(docs); return; }
     view.painted = sig; view.refs = new Map();
-    view.hashes = {}; if (g.summary) view.hashes.summary = hash(g.summary); if (g.brief) view.hashes.review = hash(g.brief);
+    view.hashes = {}; view.groups = {}; if (g.summary) view.hashes.summary = hash(g.summary); if (g.brief) view.hashes.review = hash(g.brief);
     const E = ev(), covered = new Set(coveredDocs().map((d) => d.key));
     if (E) view.hashes.evaluation = hash(JSON.stringify([E, g.criteria || []]));
     docs.forEach((d) => { if (!d.pending && !covered.has(d.key)) view.hashes[d.key] = hash(d.text); });
-    const FN = fnd(); if (FN) { view.hashes.findings = hash(JSON.stringify(FN.items)); FN.items.forEach((f) => { view.hashes["finding:" + f.id] = hash(JSON.stringify(f)); }); }
-    const DG = dg(); if (DG) DG.items.forEach((it) => { view.hashes["item:" + it.key] = hash(JSON.stringify([it.title, it.body || "", it.coveredBy || null, it.summary || "", it.label || ""])); });
+    const FN = fnd(); if (FN) { view.hashes.findings = hash(JSON.stringify(FN.items)); FN.items.forEach((f) => { view.hashes["finding:" + f.id] = hash(JSON.stringify(f)); }); view.groups.findings = FN.items.map((f) => "finding:" + f.id); }
+    const DG = dg(); if (DG) { DG.items.forEach((it) => { view.hashes["item:" + it.key] = hash(JSON.stringify([it.title, it.body || "", it.coveredBy || null, it.summary || "", it.label || ""])); }); view.groups[E ? "items" : "digest"] = DG.items.map((it) => "item:" + it.key); }
     const B = bt(); if (B && B.targets) { view.hashes["bt-matrix"] = hash(JSON.stringify(B.targets)); if (openTargets(B).length) view.hashes["bt-decide"] = hash(JSON.stringify(openTargets(B))); }
     const frag = [];
     if (B) frag.push(btStrip(B));
@@ -1220,7 +1238,8 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     if (!view.gate) return;
     const g = view.gate, blocks = blocksOf(docs);
     const ip = itemProgress();
-    const total = blocks.filter((b) => view.hashes[b.key]).length + ip.total, read = blocks.filter((b) => isRead(b.key)).length + ip.read;
+    const own = blocks.filter((b) => view.hashes[b.key] && !view.groups[b.key]), ep = elProgress();
+    const total = own.length + ip.total + ep.total, read = own.filter((b) => isRead(b.key)).length + ip.read + ep.read;
     const nChanged = Object.keys(view.changed).length, nNotes = noted().length;
     const filters = [["all", "All", blocks.length], ["unread", "Unread", total - read]].concat(nChanged ? [["changed", "Changed", nChanged]] : []).concat(nNotes ? [["notes", "With notes", nNotes]] : []);
     if (!filters.some((f) => f[0] === view.filter)) view.filter = "all";
@@ -1241,7 +1260,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     const f = document.activeElement; const keep = f && el.bar.contains(f) ? [...f.attributes].map((a) => a.name).find((n) => /^data-(?!tip)/.test(n)) : null; const keepVal = keep ? f.getAttribute(keep) : null;
     const pct = total ? Math.round(read / total * 100) : 100;
     el.bar.innerHTML = `<div class="barrow"><div class="filters" role="group" aria-label="Show">${filters.map((x) => `<button type="button" class="fpill" data-filter="${x[0]}" aria-pressed="${view.filter === x[0]}">${x[1]}<span class="n">${x[2]}</span></button>`).join("")}</div>` +
-      `<div class="tools"><span class="savestat" id="savestat" role="status" aria-live="polite"></span><span class="progress-r" data-tip="Blocks you marked read with their dot. A block you read turns unread again only when its text changes."><span class="num">Read ${read}/${total}</span><span class="meter" aria-hidden="true"><i style="width:${pct}%"></i></span></span>` +
+      `<div class="tools"><span class="savestat" id="savestat" role="status" aria-live="polite"></span><span class="progress-r" data-tip="Blocks, items and elements you marked read with their dot. A block you read turns unread again only when its text changes."><span class="num">Read ${read}/${total}</span><span class="meter" aria-hidden="true"><i style="width:${pct}%"></i></span></span>` +
       `<button type="button" data-all="open">Expand all</button><button type="button" data-all="close">Collapse all</button><button type="button" class="wide" data-allread="1">Mark all read</button><button type="button" class="railtoggle" data-outline="1" aria-controls="rail" aria-expanded="${el.rail.classList.contains("show")}">Outline</button></div></div>` +
       `<nav class="chips" aria-label="Jump to">${blocks.filter((x) => passes(x.key)).map((x) => `<a class="jchip${isRead(x.key) ? " read" : ""}" href="#" data-go="${esc(x.go)}" data-tip="${esc("Jump to " + x.tip + (isRead(x.key) ? " (read)" : " (unread)"))}"><span class="udot" aria-hidden="true"></span>${esc(x.short)}${revTag(x.key)}${x.count ? `<span class="count">${esc(x.count)}</span>` : ""}${x.extra || ""}<span class="sr">${isRead(x.key) ? ", read" : ", unread"}</span></a>`).join("")}</nav>`;
     if (keep) { const back = el.bar.querySelector(`[${keep}="${CSS.escape(keepVal)}"]`); if (back) back.focus(); }
@@ -1258,6 +1277,12 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
       const r = isRead(n.dataset.item); n.classList.toggle("read", r); n.hidden = view.filter === "unread" && r;
       const d = n.querySelector(":scope > .ih > .idot, :scope > .dtop > .idot"); if (d) { d.dataset.tip = r ? "Read. Press to mark unread" : "Mark as read"; d.setAttribute("aria-label", (r ? "Mark unread: " : "Mark read: ") + (n.dataset.item.split(":")[1] || "")); }
     });
+    /* a tier or a folded group whose items are all read leaves with them */
+    el.col.querySelectorAll(".dsec, details.settled").forEach((c) => {
+      const its = c.querySelectorAll("[data-item]");
+      c.hidden = view.filter === "unread" && its.length > 0 && [...its].every((n) => isRead(n.dataset.item));
+    });
+    paintElems();
     const rgp = $("b-reference"); if (rgp) rgp.hidden = [...rgp.querySelectorAll("details.doc")].every((n) => n.hidden);
     const nm = $("nomatch"); if (nm) { nm.hidden = !!shown || !blocks.length; nm.textContent = view.filter === "unread" ? "You marked everything read. Choose All to see it again." : "Nothing here for this filter. Choose All to see every block."; }
     /* the band */
@@ -1349,6 +1374,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
       let built = null;
       try { built = vf.render(d, i); } catch (e) { built = null; console.warn("view failed", d.key, e); }
       if (built) {
+        markElements(built, d);
         $("seg-" + d.key).hidden = false; setSeg(d.key, "view");
         body.appendChild(built);
         body.querySelectorAll("details.sec").forEach((s) => s.addEventListener("toggle", () => { if (s.open) drawDiagrams(s); }));
@@ -1708,7 +1734,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     ents.forEach((e, i) => {
       const sec = section(d, 10 + i, str(e.name), i < 8, `${list(e.attributes).length} attributes`);
       if (e.owner) sec.querySelector("summary").insertAdjacentHTML("beforeend", `<span class="chip muted">${esc(str(e.owner))}</span>`);
-      regRef(str(e.name), sec, str(e.description));
+      regRef(str(e.name), sec, str(e.description)); sec.dataset.elem = "1";
       let html = e.description ? `<p class="desc">${inline(str(e.description))}</p>` : "";
       if (e.identifier) html += `<dl class="facts"><dt>Identifier</dt><dd>${inline(str(e.identifier))}</dd></dl>`;
       const attrs = list(e.attributes);
@@ -1977,7 +2003,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
       const status = statusOf(a.body); const date = (a.body.match(/\*\*Date:?\*\*:?\s*([0-9-]+)/) || [])[1];
       const sec = section(d, n++, `${id} ${title}`, false);
       sec.querySelector("summary").insertAdjacentHTML("beforeend", `${status ? `<span class="chip ${/accept/i.test(status) ? "ok" : /propos/i.test(status) ? "accent" : "muted"}">${esc(status)}</span>` : ""}${date ? `<span class="hint mono">${esc(date)}</span>` : ""}`);
-      regRef(id, sec, title);
+      regRef(id, sec, title); sec.dataset.elem = "1";
       const subs = splitHeadings(a.body, "###");
       if (subs.length > 1) { sec.secbody.appendChild(mdDiv(subs[0].body)); subs.slice(1).forEach((s) => { const det = node(`<details class="sub"${/decision/i.test(s.title) ? " open" : ""}><summary>${esc(s.title)}</summary></details>`); det.appendChild(mdDiv(s.body)); sec.secbody.appendChild(det); }); }
       else { a.body.split(/(?=^\*\*(?:Context|Decision|Consequences|Alternatives[^*]*|Status|Security|Rationale)[.:]?\*\*)/m).forEach((p) => { const mm = p.match(/^\*\*([^*]+?)[.:]?\*\*[.:]?\s*([\s\S]*)$/); if (!mm) { if (p.trim()) sec.secbody.appendChild(mdDiv(p)); return; } if (/^status$/i.test(mm[1])) return; const det = node(`<details class="sub"${/decision/i.test(mm[1]) ? " open" : ""}><summary>${esc(mm[1])}</summary></details>`); det.appendChild(mdDiv(mm[2])); sec.secbody.appendChild(det); }); }
@@ -2011,7 +2037,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
       const sm = title.match(/^`?([a-z0-9][a-z0-9-]+)`?\s*[—–:-]?\s*(.*)$/); if (!slug && sm && /-/.test(sm[1])) { slug = sm[1]; title = sm[2] || sm[1]; }
       const sec = section(d, n++, `${id} ${title}`, true, slug);
       if (u.group) sec.querySelector("summary").insertAdjacentHTML("beforeend", `<span class="chip muted" data-tip="${esc("Under the heading " + u.group)}">${esc(u.group)}</span>`);
-      regRef(id, sec, title); if (slug) regRef(slug, sec, title);
+      regRef(id, sec, title); if (slug) regRef(slug, sec, title); sec.dataset.elem = "1";
       const facts = factsOf(u.body); const rest = stripFacts(u.body);
       if (facts.length) sec.secbody.insertAdjacentHTML("beforeend", `<dl class="facts">${facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${inline(v)}</dd>`).join("")}</dl>`);
       sec.secbody.appendChild(mdDiv(rest)); root.appendChild(sec);
@@ -2052,7 +2078,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     const max = Math.max(1, ...info.map((i) => i.pts));
     root.insertAdjacentHTML("beforeend", `<div class="bolts">${info.map((i) => `<div class="bolt"><b>${inline(i.title)}</b><span class="hint">${i.count ? i.count + " units" : ""}${i.pts ? ` · ${i.pts} points` : ""}</span>${i.pts ? `<div class="bar"><i style="width:${Math.round(100 * i.pts / max)}%"></i></div>` : ""}</div>`).join("")}</div>`);
     let n = 10;
-    secs.slice(1).forEach((s) => { if (!s.title) return; const isBolt = /^bolt\s*\d+/i.test(s.title); const sec = section(d, n++, s.title, isBolt); if (s.group) sec.querySelector("summary").insertAdjacentHTML("beforeend", `<span class="chip muted" data-tip="${esc("Under the heading " + s.group)}">${esc(s.group)}</span>`); const facts = isBolt ? factsOf(s.body) : []; const rest = isBolt ? stripFacts(s.body) : s.body; if (facts.length) sec.secbody.insertAdjacentHTML("beforeend", `<dl class="facts">${facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${inline(v)}</dd>`).join("")}</dl>`); sec.secbody.appendChild(mdDiv(rest)); if (isBolt) { const m = s.title.match(/^(Bolt)\s*(\d+)/i); if (m) regRef("Bolt " + m[2], sec, s.title); } root.appendChild(sec); });
+    secs.slice(1).forEach((s) => { if (!s.title) return; const isBolt = /^bolt\s*\d+/i.test(s.title); const sec = section(d, n++, s.title, isBolt); if (s.group) sec.querySelector("summary").insertAdjacentHTML("beforeend", `<span class="chip muted" data-tip="${esc("Under the heading " + s.group)}">${esc(s.group)}</span>`); const facts = isBolt ? factsOf(s.body) : []; const rest = isBolt ? stripFacts(s.body) : s.body; if (facts.length) sec.secbody.insertAdjacentHTML("beforeend", `<dl class="facts">${facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${inline(v)}</dd>`).join("")}</dl>`); sec.secbody.appendChild(mdDiv(rest)); if (isBolt) { const m = s.title.match(/^(Bolt)\s*(\d+)/i); if (m) regRef("Bolt " + m[2], sec, s.title); sec.dataset.elem = "1"; } root.appendChild(sec); });
     return root;
   }
 
@@ -2067,7 +2093,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
       if (sc && sc.description) det.insertAdjacentHTML("beforeend", `<p class="desc">${inline(str(sc.description))}</p>`);
       if (props.length) det.insertAdjacentHTML("beforeend", `<div class="tablewrap"><table class="grid"><tbody>${props.map(([f, p]) => `<tr><td class="id">${esc(f)}</td><td class="ty">${esc(tyOf(p))}</td><td>${req.has(f) ? '<span class="chip muted">required</span>' : ""}</td><td class="dim">${inline(str((p && p.description) || ""))}</td></tr>`).join("")}</tbody></table></div>`);
       else if (sc && !sc.enum) { const pre = document.createElement("pre"); pre.className = "src"; pre.textContent = JSON.stringify(sc, null, 2); det.appendChild(pre); }
-      root.appendChild(det); regRef(name, det, str((sc && sc.description) || ""));
+      root.appendChild(det); regRef(name, det, str((sc && sc.description) || "")); det.dataset.elem = "1";
     });
     return root;
   }
@@ -2762,7 +2788,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     const covered = new Set(coveredDocs().map((d) => d.key));
     docs.filter((d) => passes(d.key) && !covered.has(d.key)).forEach((d) => {
       const shown = el.col.querySelector(`#d-${CSS.escape(d.key)} summary h2`); const title = (shown && shown.textContent.trim()) || d.title || d.key;
-      const secs = [...el.col.querySelectorAll(`#d-${CSS.escape(d.key)} details.sec`)].filter((x) => !x.hidden);
+      const secs = [...el.col.querySelectorAll(`#d-${CSS.escape(d.key)} details.sec`)].filter((x) => !x.hidden && !x.classList.contains("eh"));
       const block = $("d-" + d.key); const open = Object.prototype.hasOwnProperty.call(view.railOpen, d.key) ? view.railOpen[d.key] : !!(block && block.open);
       html += `<details class="rgroup" data-key="${esc(d.key)}"${open ? " open" : ""}><summary tabindex="-1"><span class="rdoc${isRead(d.key) ? " read" : ""}" data-go="d-${esc(d.key)}" role="button" tabindex="0"><span class="rcaret${secs.length ? "" : " none"}" aria-label="${secs.length ? "Show or hide its sections" : ""}">${secs.length ? CHEV : ""}</span><span class="rtitle">${esc(title)}</span>${(view.notes[d.key] || "").trim() ? '<i class="notedot" aria-label="has your note"></i>' : ""}</span></summary>` +
         secs.map((s) => `<button type="button" class="rsec${s.classList.contains("changed") ? " changed" : ""}" data-go="${esc(s.id)}">${esc(s.dataset.title)}</button>`).join("") + `</details>`;
@@ -2832,6 +2858,73 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     }
   });
   el.col.addEventListener("toggle", (e) => { const d = e.target; if (d.open) drawDiagrams(d); }, true);
+
+  /* ---------- elements: every component, entity, rule, unit, bolt, operation, story and requirement has its own read mark ----------
+     A view builds its cards, table rows and sections as it always did; markElements then finds them in what the view made
+     (a section a view flags with data-elem, a .card, a table row, a unit tile), gives each a dot at the right edge, and
+     stores the mark as el:<doc key>:<element id>, hashed on the element's text. The document's block is read when all are. */
+  const elProgress = () => { const keys = Object.keys(view.hashes).filter((k) => k.startsWith("el:")); return { total: keys.length, read: keys.filter(isRead).length }; };
+  function markElements(root, d) {
+    const nodes = [...root.querySelectorAll("[data-elem], .card, table.grid > tbody > tr, .layer > .unit")].filter((n) => {
+      if (n.matches("tr")) return n.cells.length && !n.classList.contains("rdet") && !n.classList.contains("fdet") && !n.closest("table.attr") && !n.parentElement.closest(".card, details.sub, [data-elem], .vtools");
+      return !n.parentElement.closest(".card, [data-elem]");
+    });
+    if (!nodes.length) return;
+    const norm = (t) => String(t || "").replace(/\s+/g, " ").trim();
+    const seen = new Map(), keys = [];
+    nodes.forEach((n, i) => {
+      let det = null;
+      if (n.matches("tr.rrow")) { det = n.nextElementSibling; if (!det || !det.classList.contains("rdet")) det = null; }
+      else if (n.matches("tr.frow")) det = n.parentElement.querySelector(`tr.fdet[data-for="${n.dataset.i}"]`);
+      const lead = n.dataset.elemId || n.dataset.ref || (n.matches("tr") ? (n.cells[0] || {}).textContent : ((n.querySelector("h1, h2, h3, h4, .iid, b") || {}).textContent));
+      let id = norm(lead).slice(0, 80) || "n" + (i + 1);
+      const c = (seen.get(id) || 0) + 1; seen.set(id, c); if (c > 1) id += "#" + c;
+      const key = "el:" + d.key + ":" + id;
+      view.hashes[key] = hash(norm(n.textContent) + (det ? "\n" + norm(det.textContent) : "")); keys.push(key);
+      n.dataset.ekey = key; if (det) det.dataset.ekeyOf = key;
+      const dot = document.createElement("button"); dot.type = "button"; dot.className = "idot edot"; dot.dataset.eread = key;
+      dot.innerHTML = '<i aria-hidden="true"></i>'; dot.dataset.id = id;
+      dot.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); toggleElem(key, dot); });
+      if (n.matches("tr")) {
+        const td = document.createElement("td"); td.className = "edotc"; td.appendChild(dot); n.appendChild(td);
+        const table = n.closest("table");
+        if (table && !table.dataset.edots) {
+          table.dataset.edots = "1"; const wrap = table.closest(".tablewrap"); if (wrap) wrap.classList.add("edots");
+          table.querySelectorAll("thead tr").forEach((tr) => { const th = document.createElement("th"); th.className = "edotc"; tr.appendChild(th); });
+        }
+        if (det) det.querySelectorAll("td[colspan]").forEach((x) => { x.colSpan = (parseInt(x.getAttribute("colspan"), 10) || 1) + 1; });
+      } else if (n.matches("details")) {
+        const sum = n.querySelector(":scope > summary"); if (sum) { sum.classList.add("hasdot"); sum.appendChild(dot); }
+      } else if (n.matches(".card")) {
+        let h = n.querySelector(":scope > .chead"); if (!h) { h = document.createElement("div"); h.className = "chead"; n.insertBefore(h, n.firstChild); }
+        (h.querySelector(":scope > .end") || h).appendChild(dot);
+      } else { n.classList.add("hasdot"); n.appendChild(dot); }
+    });
+    view.groups[d.key] = keys;
+  }
+  /* an element's mark; when Unread hides it, focus moves to the next element still showing, or to the block's header */
+  function toggleElem(key, dot) {
+    const all = [...el.col.querySelectorAll("[data-ekey]")]; const at = all.findIndex((n) => n.dataset.ekey === key);
+    const block = dot.closest("details.block");
+    setRead([key], !isRead(key));
+    if (view.filter !== "unread" || !isRead(key)) { dot.focus(); return; }
+    const next = all.slice(at + 1).concat(all.slice(0, at)).find((n) => n.dataset.ekey.split(":")[1] === key.split(":")[1] && !n.closest(".eh, [hidden]"));
+    const to = next && next.querySelector("[data-eread]");
+    if (to) to.focus(); else { const sum = block && !block.hidden && block.querySelector(":scope > summary"); if (sum) { sum.tabIndex = -1; sum.focus(); } else { const f = el.bar.querySelector("[data-filter]"); if (f) f.focus(); } }
+  }
+  function paintElems() {
+    const unread = view.filter === "unread";
+    el.col.querySelectorAll("[data-ekey]").forEach((n) => {
+      const key = n.dataset.ekey, r = isRead(key); n.classList.toggle("er", r);
+      const hide = unread && r; n.classList.toggle("eh", hide);
+      const det = n.matches("tr.rrow") ? n.nextElementSibling : n.matches("tr.frow") ? n.parentElement.querySelector(`tr.fdet[data-for="${n.dataset.i}"]`) : null;
+      if (det && det.dataset.ekeyOf === key) det.classList.toggle("eh", hide);
+      const dot = n.querySelector("[data-eread]");
+      if (dot) { const lab = (r ? "Mark unread: " : "Mark read: ") + (dot.dataset.id || ""); dot.classList.toggle("isread", r); dot.setAttribute("aria-label", lab); dot.dataset.tip = r ? "Read. Press to mark unread" : "Mark as read"; }
+    });
+    const allRead = (root) => { const its = root.querySelectorAll("[data-ekey]"); return its.length > 0 && [...its].every((n) => isRead(n.dataset.ekey)); };
+    el.col.querySelectorAll("details.sec, .tablewrap").forEach((c) => { c.classList.toggle("eh", unread && !c.matches("[data-ekey]") && allRead(c)); });
+  }
 
   /* ---------- Build and Test: only when the gate row carries buildTest ---------- */
   const bt = () => (view.gate && view.gate.buildTest) || null;
@@ -2998,7 +3091,16 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
   }
   el.col.addEventListener("click", (e) => {
     const pk = e.target.closest("[data-fpick]");
-    if (pk && !pk.disabled) { e.preventDefault(); const id = pk.dataset.fid; const same = (view.fpicks[id] || {}).pick === pk.dataset.fpick; fpickEdited(id, { pick: same ? undefined : pk.dataset.fpick }); repaintCard(id); const ta = el.col.querySelector(`.fnote[data-fid="${CSS.escape(id)}"]`); if (ta && !ta.hidden && (view.fpicks[id] || {}).pick === "reject") ta.focus(); return; }
+    if (pk && !pk.disabled) { e.preventDefault(); const id = pk.dataset.fid; const same = (view.fpicks[id] || {}).pick === pk.dataset.fpick; const cards = [...el.col.querySelectorAll(".fcard")], at = cards.findIndex((c) => c.dataset.fid === id);
+      fpickEdited(id, { pick: same ? undefined : pk.dataset.fpick });
+      if (!same) setRead(["finding:" + id], true);  /* answering a card is proof it was read; un-picking leaves the mark alone */
+      repaintCard(id);
+      if (view.filter === "unread" && isRead("finding:" + id)) {  /* the card left the page: focus goes to the next card, or the block header */
+        const next = cards.slice(at + 1).concat(cards.slice(0, at)).find((c) => !c.hidden && !isRead(c.dataset.item));
+        const to = next && next.querySelector("[data-fpick]:not([disabled])"); const b = $("b-findings"); const sum = b && !b.hidden && b.querySelector(":scope > summary");
+        if (to) to.focus(); else if (sum) { sum.tabIndex = -1; sum.focus(); } else { const f = el.bar.querySelector("[data-filter]"); if (f) f.focus(); }
+        return;
+      } const ta = el.col.querySelector(`.fnote[data-fid="${CSS.escape(id)}"]`); if (ta && !ta.hidden && (view.fpicks[id] || {}).pick === "reject") ta.focus(); return; }
     const pn = e.target.closest("[data-fnote]");
     if (pn) { e.preventDefault(); const card = pn.closest(".fcard"), ta = card.querySelector(".fnote"), id = pn.dataset.fnote; ta.hidden = !ta.hidden; if (ta.hidden) view.openNotes.delete("fpick:" + id); else { view.openNotes.add("fpick:" + id); ta.focus(); } pn.setAttribute("aria-pressed", String(!ta.hidden || !!(ta.value || "").trim())); }
   });

@@ -16,6 +16,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PLUGIN = os.path.dirname(HERE)
 PAGE = os.path.join(PLUGIN, "skills", "approval-gates", "approval-gate.html")
 HARNESS = os.path.join(HERE, "render_gate_page.js")
+DRIVER = os.path.join(HERE, "drive_gate_page.js")
 FIXTURE = os.path.join(HERE, "fixtures", "project")
 JUDGMENT = os.path.join(HERE, "fixtures", "judgment", "user-stories.json")
 NODE = shutil.which("node")
@@ -119,6 +120,139 @@ class TestTheJudgedPage(unittest.TestCase):
 
     def test_rendering_writes_nothing(self):
         self.assertEqual(self.r["writes"], 0, "opening the page never writes to the gate")
+
+
+COMPONENTS = """# Components
+
+```yaml
+components:
+  - name: OrderService
+    summary: Takes and closes the preorders.
+    responsibilities: [accept an order, close orders at 18:00]
+  - name: LoafStock
+    summary: Counts the loaves left for tomorrow.
+    responsibilities: [reserve a loaf]
+```
+"""
+ENTITIES = """# Entities
+
+```yaml
+entities:
+  - name: Order
+    owner: orders
+    description: One customer's reservation.
+    attributes:
+      - {name: id, type: uuid, required: true}
+  - name: Loaf
+    owner: stock
+    description: A loaf type.
+    attributes:
+      - {name: sku, type: string, required: true}
+```
+"""
+RULES = """# Rules
+
+```yaml
+rules:
+  - id: BR1.1
+    statement: Orders for tomorrow close at 18:00.
+    category: timing
+    logic: IF now > 18:00 THEN reject
+  - id: BR1.2
+    statement: One loaf type per order line.
+    category: ordering
+```
+"""
+FINDINGS = {"blocking": 0, "carried": [], "items": [
+    {"id": "F%d" % i, "title": "Finding %d" % i, "severity": "medium", "blocking": False, "action": "Do something %d" % i,
+     "actionBy": "reviewer", "why": "because"} for i in (1, 2, 3)]}
+
+
+def drive(tmp, scenario, edit):
+    """Run a scenario of drive_gate_page.js on the sample with edit(sample) applied to it."""
+    with open(os.path.join(tmp, "sample.json"), encoding="utf-8") as f:
+        sample = json.load(f)
+    edit(sample)
+    path = os.path.join(tmp, scenario + ".json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(sample, f)
+    done = subprocess.run([NODE, DRIVER, PAGE, path, scenario], capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+    out = json.loads(done.stdout)
+    assert "error" not in out, out["error"]
+    return out
+
+
+def add_docs(sample):
+    for n, (key, title, text) in enumerate((("components", "Components", COMPONENTS), ("entities", "Entities", ENTITIES), ("rules", "Rules", RULES)), 10):
+        sample["row"]["documents"].append({"key": key, "title": title, "path": "x/%s.md" % key, "kind": "markdown", "bytes": len(text), "covered": False})
+        sample["documents"][key] = {"n": n, "key": key, "title": title, "path": "x/%s.md" % key, "kind": "markdown", "text": text, "part": 1, "parts": 1}
+
+
+@unittest.skipUnless(has_jsdom(), "node and the jsdom package are not installed")
+class TestReadMarks(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        build_sample(cls.tmp)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_a_block_whose_items_are_all_read_leaves_under_unread(self):
+        r = drive(self.tmp, "items", lambda s: None)
+        self.assertTrue(r["unreadAllShown"]["block"])
+        self.assertTrue(all(t["shown"] for t in r["unreadAllShown"]["tiers"]))
+        first, other = r["firstTierRead"]["tiers"][0], r["firstTierRead"]["tiers"][1:]
+        self.assertEqual(first["name"], "Look at first")
+        self.assertFalse(first["shown"], "a tier whose items are all read hides")
+        self.assertTrue(all(t["shown"] for t in other))
+        self.assertTrue(r["firstTierRead"]["block"])
+        done = r["allRead"]
+        self.assertFalse(done["block"], "the whole block hides: header, tiers and folded groups")
+        self.assertFalse(any(t["shown"] for t in done["tiers"]))
+        self.assertFalse(any(done["folds"]))
+        self.assertFalse(any(c.startswith("Items") for c in done["chips"]), "its chip leaves the bar with it")
+        self.assertTrue(r["back"]["block"] and all(t["shown"] for t in r["back"]["tiers"]), "All brings everything back")
+        self.assertTrue(any(c.startswith("Items") for c in r["back"]["chips"]))
+
+    def test_answering_a_finding_card_marks_it_read(self):
+        r = drive(self.tmp, "finding", lambda s: s["row"].update(findings=FINDINGS))
+        self.assertFalse(r["before"]["read"])
+        self.assertTrue(r["picked"]["read"] and r["picked"]["pick"])
+        self.assertFalse(r["picked"]["other"], "only the answered card")
+        self.assertFalse(r["unpicked"]["pick"])
+        self.assertTrue(r["unpicked"]["read"], "un-picking leaves the read mark alone")
+        self.assertEqual(r["unread"], {"f1": False, "f2": True, "f3": True})
+        self.assertFalse(r["afterF2"]["f2"], "an answered card disappears under Unread")
+        self.assertEqual(r["afterF2"]["focus"], "card:F3", "focus moves to the next card")
+        self.assertFalse(r["afterAll"]["block"], "the findings block leaves when every card is read")
+        self.assertFalse(r["afterAll"]["chip"])
+        self.assertEqual(r["afterAll"]["focus"], "bar", "no card and no header left: focus stays in the bar")
+        self.assertTrue(r["back"]["block"] and r["back"]["f1"] and r["back"]["f1Read"])
+
+    def test_every_element_of_a_structured_view_has_its_own_mark(self):
+        r = drive(self.tmp, "elements", add_docs)
+        self.assertEqual(r["counts"], {"components": 2, "entities": 2, "rules": 2})
+        self.assertIn("el:components:OrderService", r["keys"])
+        self.assertIn("el:rules:BR1.1", r["keys"])
+        self.assertIn("el:entities:Order", r["keys"])
+        self.assertTrue(all("edotc" in c for c in r["dotRows"]), "a rule row ends in its dot cell")
+        one = r["afterOne"]
+        self.assertTrue(one["card"] and not one["blockRead"])
+        self.assertTrue(any(k.startswith("el:components:") for k in one["stored"]), "stored as el:<doc>:<element>")
+        self.assertNotEqual(r["progress0"], one["progress"], "elements count in the bar's progress")
+        self.assertEqual(r["unreadOne"], {"hiddenCards": 1, "total": 2, "blockShown": True})
+        self.assertFalse(r["unreadAll"]["blockShown"], "all elements read: the block rolls up to read and leaves")
+        self.assertTrue(r["unreadAll"]["blockRead"])
+        self.assertEqual(r["unreadAll"]["chip"], [])
+        self.assertTrue(r["unreadAll"]["entities"])
+        self.assertTrue(r["entityMark"]["read"] and r["entityMark"]["key"].startswith("el:entities:Order"))
+        self.assertTrue(r["rule"]["read"] and r["rule"]["det"])
+        self.assertEqual(r["rulesUnread"], {"shownRows": 1, "rows": 2, "detEh": 1}, "the read rule and its detail row hide")
+        self.assertTrue(r["blockDot"]["elements"] and r["blockDot"]["blockRead"], "the block dot marks every element")
+        self.assertFalse(r["blockDotOff"]["elements"] or r["blockDotOff"]["blockRead"])
 
 
 if __name__ == "__main__":

@@ -7,44 +7,11 @@
    <out.html> it also writes the page as rendered (styles kept, scripts removed) for a person to open.
    Needs the jsdom package (NODE_PATH or a local node_modules); marked, dompurify and js-yaml are used when found. */
 const fs = require("fs");
-const { JSDOM } = require("jsdom");
 const [pagePath, samplePath, outPath] = process.argv.slice(2);
 const sample = JSON.parse(fs.readFileSync(samplePath, "utf8"));
-const optional = (name) => { try { return require(name); } catch { return null; } };
 
-const html = fs.readFileSync(pagePath, "utf8").replace(/<script src=[^>]*><\/script>/g, "");
-const dom = new JSDOM("<!doctype html><html><head></head><body>" + html + "</body></html>", {
-  runScripts: "outside-only", pretendToBeVisual: true, url: "https://claude.ai/artifact/x#" + sample.id,
-});
-const w = dom.window;
-w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
-w.scrollTo = () => {};
-w.CSS = { escape: (v) => String(v).replace(/[^\w-]/g, (c) => "\\" + c) };
-w.Element.prototype.scrollIntoView = function () {};
-const marked = optional("marked"), purify = optional("dompurify"), yaml = optional("js-yaml");
-if (marked && purify) { w.marked = marked.marked || marked; w.DOMPurify = (purify.default || purify)(w); }
-if (yaml) w.jsyaml = yaml;
-
-const writes = [];
-const snap = (id, data) => ({ id, exists: data !== undefined, data: () => data });
-const query = (docs) => {
-  const q = { orderBy: () => q, limit: () => q, where: () => q,
-    onSnapshot: (cb) => { setTimeout(() => cb({ empty: !docs.length, docs: docs.map(([id, d]) => snap(id, d)) })); return () => {}; },
-    get: async () => ({ empty: !docs.length, docs: docs.map(([id, d]) => snap(id, d)) }),
-    doc: (id) => ({ get: async () => snap(id, undefined), set: async (v) => { writes.push(v); } }) };
-  return q;
-};
-const db = {
-  collection: (name) => query(name === "gates" ? [[sample.id, sample.row]] : []),
-  doc: (path) => ({
-    onSnapshot: (cb) => { setTimeout(() => cb(snap(sample.id, sample.row))); return () => {}; },
-    collection: () => query(Object.entries(sample.documents)),
-    update: async (v) => { writes.push(v); },
-  }),
-};
-w.claude = { use: async (what) => (what === "db" ? db : { id: async () => "viewer" }) };
-
-for (const m of html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)) w.eval(m[1]);
+const { boot } = require("./gate_page_env");
+const { w, writes, html } = boot(pagePath, sample);
 
 setTimeout(() => {
   const d = w.document, $ = (sel) => d.querySelector(sel), all = (sel) => [...d.querySelectorAll(sel)];
