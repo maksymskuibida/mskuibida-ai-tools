@@ -58,6 +58,10 @@ PER_UNIT_STAGES = ("functional-design", "nfr-requirements", "nfr-design", "infra
 # Construction stages that keep their name in the title outside a Unit's checkout; every other Construction stage is
 # titled just `Construction` there.
 NAMED_CONSTRUCTION_STAGES = ("build-and-test", "ci-pipeline")
+# The plugin was renamed from aidlc-session-titles to session-titles, but the next two names stay as they were: the
+# state folder holds live per-session files, and the source value is matched against questions already asked.
+# Only plugin names matter to the AI-DLC engine, so there is nothing to gain from moving them. No other plugin or hook
+# in this repo matches the source string.
 CHECKOUT_SOURCE = "aidlc-session-titles:checkout"  # metadata.source of the question asked about a checkout
 CHECKOUT_UNIT, CHECKOUT_OTHER = "Unit checkout", "Something else"  # its two option labels
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -563,7 +567,7 @@ def emit(event_name, title=None, context=None):
     if title:
         out["sessionTitle"] = title
     if context:
-        out["additionalContext"] = "aidlc-session-titles: " + context
+        out["additionalContext"] = "session-titles: " + context
     print(json.dumps({"hookSpecificOutput": out}))
 
 
@@ -647,7 +651,7 @@ def on_stop(event, state):
     if not title or title in (state["applied"], state["declined"], state["blocked"]):
         return False
     state["blocked"] = title
-    print(json.dumps({"decision": "block", "reason": "aidlc-session-titles: " + rename_instruction(title)}))
+    print(json.dumps({"decision": "block", "reason": "session-titles: " + rename_instruction(title)}))
     return True
 
 

@@ -26,6 +26,10 @@ class Registry(unittest.TestCase):
         self.data = Path(self.tmp.name) / "data"
         self.clone = Path(self.tmp.name) / "clone"
         subprocess.run(["git", "init", "-q", str(self.clone)], check=True)
+        # Never read (or copy from) the real saved forks in the home folder.
+        patcher = mock.patch.object(forks, "LEGACY_DATA", [])
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -97,6 +101,36 @@ class Registry(unittest.TestCase):
             self.assertEqual(forks.data_dir("${CLAUDE_PLUGIN_DATA}"), self.data)
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(forks.data_dir(None), forks.FALLBACK)
+
+    def test_old_registry_is_copied_when_the_new_one_is_missing(self):
+        old = Path(self.tmp.name) / "old"
+        stale = Path(self.tmp.name) / "older"
+        old.mkdir()
+        stale.mkdir()
+        (old / "forks.json").write_text('{"version": 1, "forks": [{"repo": "alice/aidlc-workflows", "clone": null}]}')
+        (stale / "forks.json").write_text('{"version": 1, "forks": []}')
+        with mock.patch.object(forks, "LEGACY_DATA", [old, stale]):
+            code, out, _ = run(self.data, "resolve")
+        self.assertEqual(code, 0)
+        self.assertIn("alice/aidlc-workflows", out)
+        self.assertEqual((self.data / "forks.json").read_text(), (old / "forks.json").read_text())
+        self.assertTrue((old / "forks.json").exists())  # the old file is kept
+
+    def test_new_registry_wins_over_the_old_one(self):
+        old = Path(self.tmp.name) / "old"
+        old.mkdir()
+        (old / "forks.json").write_text('{"version": 1, "forks": [{"repo": "old/fork", "clone": null}]}')
+        self.data.mkdir()
+        (self.data / "forks.json").write_text('{"version": 1, "forks": [{"repo": "new/fork", "clone": null}]}')
+        with mock.patch.object(forks, "LEGACY_DATA", [old]):
+            code, out, _ = run(self.data, "resolve")
+        self.assertIn("new/fork", out)
+        self.assertNotIn("old/fork", out)
+
+    def test_no_old_registry_leaves_no_file(self):
+        with mock.patch.object(forks, "LEGACY_DATA", [Path(self.tmp.name) / "none"]):
+            self.assertEqual(run(self.data, "resolve")[0], 3)
+        self.assertFalse((self.data / "forks.json").exists())
 
 
 if __name__ == "__main__":

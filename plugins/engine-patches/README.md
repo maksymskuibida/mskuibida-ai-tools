@@ -1,4 +1,4 @@
-# aidlc-patches
+# engine-patches
 
 For people who keep their own fork of the AI-DLC engine
 ([awslabs/aidlc-workflows](https://github.com/awslabs/aidlc-workflows)) and patch it. The fork's
@@ -11,22 +11,22 @@ It is not tied to one fork. It asks for yours the first time and remembers it.
 ## Install
 
 ```bash
-/plugin install aidlc-patches --marketplace maksymskuibida/mskuibida-ai-tools
+/plugin install engine-patches --marketplace maksymskuibida/mskuibida-ai-tools
 ```
 
-Or, with the marketplace already added: `/plugin install aidlc-patches@mskuibida-tooling`.
+Or, with the marketplace already added: `/plugin install engine-patches@mskuibida-tooling`.
 
 ## Skills
 
 | Skill | What it does |
 |---|---|
-| `/aidlc-patches:fix` | The whole run for one bug, in order: investigate, check upstream, patch, release, roll out, offer an upstream PR. |
-| `/aidlc-patches:investigate` | Reproduce the bug, find the cause in `core/tools/*.ts`, write a test that fails for that cause. |
-| `/aidlc-patches:check-upstream` | Upstream main since the fork's base tag, newer stable and preview releases, open and merged upstream PRs and issues on the same code. Decides: drop, carry upstream's PR, or write our own. |
-| `/aidlc-patches:series` | Add, change or drop a patch (fixup and autosquash), check every commit typechecks and lints, land on `main` with `--force-with-lease`, move to a newer upstream release with `rebase --onto`. |
-| `/aidlc-patches:release` | Run the fork's preview release from `main` (versions are next-patch previews from `.101`), install it, pin projects to it. |
-| `/aidlc-patches:upstream-pr` | Issue first, then a branch from `upstream/main`, the patch cherry-picked, the PR against upstream. |
-| `/aidlc-patches:forks` | See, add or remove the saved forks. |
+| `/engine-patches:fix` | The whole run for one bug, in order: investigate, check upstream, patch, release, roll out, offer an upstream PR. |
+| `/engine-patches:investigate` | Reproduce the bug, find the cause in `core/tools/*.ts`, write a test that fails for that cause. |
+| `/engine-patches:check-upstream` | Upstream main since the fork's base tag, newer stable and preview releases, open and merged upstream PRs and issues on the same code. Decides: drop, carry upstream's PR, or write our own. |
+| `/engine-patches:series` | Add, change or drop a patch (fixup and autosquash), check every commit typechecks and lints, land on `main` with `--force-with-lease`, move to a newer upstream release with `rebase --onto`. |
+| `/engine-patches:release` | Run the fork's preview release from `main` (versions are next-patch previews from `.101`), install it, pin projects to it. |
+| `/engine-patches:upstream-pr` | Issue first, then a branch from `upstream/main`, the patch cherry-picked, the PR against upstream. |
+| `/engine-patches:forks` | See, add or remove the saved forks. |
 
 Every step that publishes something waits for your yes: the force-push to `main`, a release, an
 upstream issue or PR.
@@ -34,9 +34,9 @@ upstream issue or PR.
 ## Your forks
 
 The list of forks is one JSON file in the plugin's data folder, `${CLAUDE_PLUGIN_DATA}/forks.json`
-(normally `~/.claude/plugins/data/aidlc-patches-mskuibida-tooling/forks.json`). Claude Code keeps
+(normally `~/.claude/plugins/data/engine-patches-mskuibida-tooling/forks.json`). Claude Code keeps
 that folder across plugin updates, unlike the install folder. On a Claude Code build without
-`${CLAUDE_PLUGIN_DATA}`, the script falls back to `~/.claude/plugins/data/aidlc-patches/`.
+`${CLAUDE_PLUGIN_DATA}`, the script falls back to `~/.claude/plugins/data/engine-patches/`.
 
 - No fork saved: the agent asks which fork (`owner/name`) and where its local clone is, and saves it.
 - One saved: it is used without asking.
@@ -84,5 +84,5 @@ a public fork free of private names.
 ## Tests
 
 ```bash
-python3 -m unittest discover -s plugins/aidlc-patches/tests
+python3 -m unittest discover -s plugins/engine-patches/tests
 ```

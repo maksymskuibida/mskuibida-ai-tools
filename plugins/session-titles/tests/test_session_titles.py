@@ -1,5 +1,5 @@
 """Tests for hooks/session_titles.py and hooks/hooks.json.
-Run: python3 -m unittest discover -s plugins/aidlc-session-titles/tests
+Run: python3 -m unittest discover -s plugins/session-titles/tests
 
 The hook runs as a subprocess, as the harness runs it, with AIDLC_SESSION_TITLES_DIR pointing into a temporary folder
 and the event's cwd at a project built in that folder. No `aidlc` binary is needed: the hook reads the project's files

@@ -65,6 +65,8 @@ sessions in the same repository keep their titles.
 
 If you renamed the session yourself, the desktop app asks you before replacing your title; declining keeps it.
 
+(The plugin was called `aidlc-session-titles` before 0.3.0; the state folder and the `metadata.source` value keep that name so existing state and open questions keep working.)
+
 State per session lives in `~/.claude/aidlc-session-titles/<session>.json` (`AIDLC_SESSION_TITLES_DIR`
 overrides it); files untouched for 14 days are swept. Subagents are left alone (they cannot rename the session
 they run in). Outside an AI-DLC project (no `aidlc/spaces`) the hook exits before Python starts.
@@ -72,7 +74,7 @@ they run in). Outside an AI-DLC project (no `aidlc/spaces`) the hook exits befor
 ## Install
 
 ```bash
-/plugin install aidlc-session-titles@mskuibida-tooling
+/plugin install session-titles@mskuibida-tooling
 ```
 
 Needs `python3` (standard library only). Takes effect from the next session.
@@ -80,9 +82,9 @@ Needs `python3` (standard library only). Takes effect from the next session.
 ## Develop
 
 ```bash
-python3 -m unittest discover -s plugins/aidlc-session-titles/tests
+python3 -m unittest discover -s plugins/session-titles/tests
 ```
 
 ```bash
-claude plugin validate plugins/aidlc-session-titles
+claude plugin validate plugins/session-titles
 ```

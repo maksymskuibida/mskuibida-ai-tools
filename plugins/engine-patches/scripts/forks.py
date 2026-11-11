@@ -11,7 +11,7 @@ plugin's data directory, which survives plugin updates.
     forks.py [--data DIR] path                 the registry file's path
 
 REPO is `owner/name`. The data directory is --data, else $CLAUDE_PLUGIN_DATA, else
-~/.claude/plugins/data/aidlc-patches (an empty --data counts as unset, so a skill that passes an
+~/.claude/plugins/data/engine-patches (an empty --data counts as unset, so a skill that passes an
 unexpanded variable still lands in the same place). The file is <data>/forks.json:
 
     {"version": 1, "forks": [{"repo": "owner/name", "clone": "/abs/path" | null,
@@ -28,13 +28,18 @@ import argparse
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 from pathlib import Path
 
 UPSTREAM = "awslabs/aidlc-workflows"
 REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$")
-FALLBACK = Path.home() / ".claude" / "plugins" / "data" / "aidlc-patches"
+_DATA = Path.home() / ".claude" / "plugins" / "data"
+FALLBACK = _DATA / "engine-patches"
+# This plugin was called aidlc-patches until 0.2.0. Its saved forks live in the old data folders: the one Claude Code
+# made for the marketplace install, and the no-${CLAUDE_PLUGIN_DATA} fallback. Newest first.
+LEGACY_DATA = [_DATA / "aidlc-patches-mskuibida-tooling", _DATA / "aidlc-patches"]
 
 
 class Refused(Exception):
@@ -49,7 +54,24 @@ def data_dir(arg):
 
 
 def registry_path(arg):
-    return data_dir(arg) / "forks.json"
+    path = data_dir(arg) / "forks.json"
+    migrate_legacy(path)
+    return path
+
+
+def migrate_legacy(path):
+    """When the registry is missing, copy the one the plugin saved under its old name; the old file stays."""
+    if path.exists():
+        return
+    for old in LEGACY_DATA:
+        old_file = old / "forks.json"
+        if old_file.is_file() and old_file.resolve() != path.resolve():
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(old_file, path)
+            except OSError:
+                return  # cannot copy: the empty registry is used and `add` reports the real error
+            return
 
 
 def load(path):
