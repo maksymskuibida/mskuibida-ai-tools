@@ -46,7 +46,30 @@
         }
       }
     },
-    "documents": {"type": "object", "additionalProperties": {"enum": ["covered", "shown"]}}
+    "documents": {"type": "object", "additionalProperties": {"enum": ["covered", "shown"]}},
+    "revision": {
+      "description": "Required when the gate's why is revision: what the developer asked for at the last Request Changes and, for each piece of it, what was done and where it shows on the page. The page leads with it under \"What changed in round N\".",
+      "type": "object",
+      "required": ["feedback", "changes"],
+      "properties": {
+        "feedback": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "changes": {
+          "type": "array", "minItems": 1, "maxItems": 30,
+          "items": {
+            "type": "object",
+            "required": ["asked", "what", "where"],
+            "properties": {
+              "asked": {"type": "string", "minLength": 1, "maxLength": 600},
+              "what": {"type": "string", "minLength": 1, "maxLength": 600},
+              "where": {
+                "description": "Places on the page: doc:<key>, doc:<key>#<section heading or element id>, an item id, a criterion key, a finding id, evaluation or summary.",
+                "oneOf": [{"type": "string", "minLength": 1}, {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}]
+              }
+            }
+          }
+        }
+      }
+    }
   },
   "$defs": {
     "point": {

@@ -27,13 +27,19 @@ function boot(pagePath, sample) {
       doc: (id) => ({ get: async () => snap(id, undefined), set: async (v) => { writes.push(v); } }) };
     return q;
   };
+  /* sample.others: earlier rounds of the same stage, [{id, row, documents}], for the page to compare with */
+  const others = sample.others || [];
+  const docsOf = (id) => id === sample.id ? sample.documents : ((others.find((o) => o.id === id) || {}).documents || {});
   const db = {
-    collection: (name) => query(name === "gates" ? [[sample.id, sample.row]] : []),
-    doc: (path) => ({
-      onSnapshot: (cb) => { setTimeout(() => cb(snap(sample.id, sample.row))); return () => {}; },
-      collection: () => query(Object.entries(sample.documents)),
-      update: async (v) => { writes.push(v); },
-    }),
+    collection: (name) => query(name === "gates" ? [[sample.id, sample.row]].concat(others.map((o) => [o.id, o.row])) : []),
+    doc: (path) => {
+      const id = String(path).replace(/^gates\//, "");
+      return {
+        onSnapshot: (cb) => { setTimeout(() => cb(snap(sample.id, sample.row))); return () => {}; },
+        collection: () => query(Object.entries(docsOf(id))),
+        update: async (v) => { writes.push(v); },
+      };
+    },
   };
   w.claude = { use: async (what) => (what === "db" ? db : { id: async () => "viewer" }) };
 
