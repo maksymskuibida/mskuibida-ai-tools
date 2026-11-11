@@ -218,12 +218,18 @@ Not part of the bundle: the judgment of a per-stage `gates/<id>` row (1.24.0). `
              gaps[] {text, sources[]}, conflicts[] {text, sources[]}},
  criteria   {<key>: {verdict: holds|fails|n/a, note?}},
  items      {<item id>: {summary, label: critical|high|medium|low, lookFirst?, relates[], unchanged?}},
- documents  {<document key>: covered|shown}}
+ documents  {<document key>: covered|shown},
+ revision?  {feedback, changes[] {asked, what, where: string | string[]}}}
 ```
+
+`revision` (1.28.0) is required when the row's `why` is `revision`. On a revision round draft pre-fills
+`revision.feedback` from the audit trail's last `GATE_REJECTED` of the stage (and Unit), and lists under
+`revision._changed` every `##` / `###` section that differs from the last finalize of the stage (finalize keeps each
+document's section hashes in the stage's judgment memory) and under `_changedItems` the items whose text changed.
 
 Keys starting with `_` are notes for the agent and never reach the row. `gate_bundle.py finalize` merges it into the row
 (`evaluation`; `criteria` with each verdict and note; each digest item's `summary`, `label`, `lookFirst`, `relates`,
-`unchanged`; each `documents[]` entry's `covered`) and holds the row to `scripts/judgment.py` `row_problems`, which the
+`unchanged`; each `documents[]` entry's `covered`; `revision`, with a single `where` made a list) and holds the row to `scripts/judgment.py` `row_problems`, which the
 guard applies to every `gates/` row it sees written:
 
 - `verdict` is one of the three; `decides` is written; `lookFirst` (each with `why`) and `solid` have at least one point.
@@ -232,6 +238,15 @@ guard applies to every `gates/` row it sees written:
 - Every criterion has a verdict; a `fails` has a note and is a source of a lookFirst, risks, gaps or conflicts point.
 - Every digest item but those an earlier stage settled (`settled` with no `coveredBy`) has a `summary` (whole, at most 300
   characters) and a `label`; `lookFirst` only on critical and high.
+- A revision round has `revision`: `feedback` written (at most 2000 characters), at least one change (at most 30), each
+  with `asked`, `what` and at least one `where`: `doc:<document key>`, `doc:<key>#<heading or id>`, a digest item id, a
+  criterion key, a finding id, `evaluation`, `summary` or `items`. Finalize, which has the texts, also checks that the
+  heading or id after `#` is in that document; the guard checks the rest.
+
+The page compares a row with the earlier rows of the same intent, stage and Unit it can read (`createdAt` before its
+own), by default the newest; nothing about the comparison is stored. The diff is `shared/rev-diff/rev-diff.js`
+(`scripts/sync-shared.py` copies it into both pages): the base round's documents are drawn off screen by the same views,
+sections are matched by title, elements by id then title, items by id, and words by a Myers diff.
 
 ## The test plan (unit-end page only)
 

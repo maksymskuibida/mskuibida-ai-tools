@@ -280,6 +280,63 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
 .aidlc-flash { animation: aidlc-flash 1.6s ease-out; border-radius: 6px; }
 @media (prefers-reduced-motion: reduce) { .aidlc-flash { animation: none; outline: 2px solid var(--accent, #3b82f6); } }
 /* aidlc-ids.css:end */
+.rvstrip { padding: 14px 16px; display: grid; gap: 10px; border-color: color-mix(in srgb, var(--rv-chg) 45%, var(--line)); }
+.rvtop { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.rvtop h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.rvtop .hint { color: var(--muted); font-size: 12.5px; }
+.rvpick { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-left: auto; }
+.rvpick select { font: 500 13px var(--body); color: var(--fg); background: var(--surface); border: 1px solid var(--control); border-radius: 6px; min-height: 30px; padding: 0 8px; max-width: 100%; }
+.rvnav { display: inline-flex; align-items: center; gap: 6px; }
+.rvnav .num { min-width: 46px; text-align: center; font-size: 12px; color: var(--muted); }
+.rvstrip { min-width: 0; }
+.rvstrip ul.rvlist { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; max-height: 280px; overflow: auto; }
+.rvstrip ul.rvlist a, .rvstrip ul.rvlist li.gone > span { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 3px 8px; border-radius: 6px; color: var(--fg); text-decoration: none; }
+.rvstrip ul.rvlist a:hover { background: var(--hover); }
+.rvstrip .rv-tag { min-width: 64px; justify-content: center; }
+.rvstrip .rvt { flex: 1; min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.rvstrip ul.rvlist a, .rvstrip .rv-n { min-width: 0; }
+.rvstrip li.gone .rvt { text-decoration: line-through; color: var(--rv-del-fg); }
+.rowhead .rv-tags { display: inline-flex; gap: 6px; align-items: center; flex: none; }
+.row.rv-chg { box-shadow: inset 3px 0 0 var(--rv-chg); } .row.rv-new { box-shadow: inset 3px 0 0 var(--rv-new); }
+[data-rv="clean"] .row.rv-chg, [data-rv="clean"] .row.rv-new { box-shadow: none; }
+@media (max-width: 640px) { .rvpick { margin-left: 0; width: 100%; } .rvpick select { flex: 1; } }
+[data-rv="clean"] #rvstrip :is(.rv-tag, .rv-n) { display: inline-flex !important; }  /* the list of changes keeps its tags in Clean */
+/* rev-diff.css:begin */
+/* Shared: the canonical copy is shared/rev-diff/rev-diff.css; scripts/sync-shared.py copies it into every page that
+   carries the block. What changed since an earlier round: inserted words on a soft green wash with a thin underline,
+   removed words struck and muted, a new block with a green edge, a changed one with an amber edge, a gone one as a struck
+   ghost. [data-rv="clean"] on any ancestor hides every mark and shows the page as it is now. */
+:root { --rv-ins-bg: #DDF3E4; --rv-ins-line: #2F8F55; --rv-del-fg: #9A4A43; --rv-del-bg: #FBEDEB; --rv-new: #2F8F55; --rv-chg: #C98A1B; --rv-gone: #B5544B; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --rv-ins-bg: #173A26; --rv-ins-line: #6FCB93; --rv-del-fg: #E3A39C; --rv-del-bg: #3A1F1D; --rv-new: #6FCB93; --rv-chg: #E9B65A; --rv-gone: #E3897F; } }
+:root[data-theme="dark"] { --rv-ins-bg: #173A26; --rv-ins-line: #6FCB93; --rv-del-fg: #E3A39C; --rv-del-bg: #3A1F1D; --rv-new: #6FCB93; --rv-chg: #E9B65A; --rv-gone: #E3897F; }
+ins.rv-ins { background: var(--rv-ins-bg); text-decoration: underline; text-decoration-color: var(--rv-ins-line); text-decoration-thickness: 1px; text-underline-offset: 3px; border-radius: 3px; padding: 0 1px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+del.rv-del { color: var(--rv-del-fg); background: var(--rv-del-bg); text-decoration: line-through; text-decoration-thickness: 1px; border-radius: 3px; padding: 0 1px; opacity: .9; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+div.rv-gone, li.rv-gone { margin: 6px 0; padding: 4px 10px; border-left: 3px solid var(--rv-gone); border-radius: 0 6px 6px 0; background: color-mix(in srgb, var(--rv-del-bg) 60%, transparent); }
+li.rv-gone { list-style: none; }
+tr.rv-gone > td { border-left: 3px solid var(--rv-gone); background: color-mix(in srgb, var(--rv-del-bg) 60%, transparent); }
+div.rv-gone del.rv-del, li.rv-gone del.rv-del, tr.rv-gone del.rv-del { background: transparent; padding: 0; }
+.rv-addblk { box-shadow: inset 3px 0 0 var(--rv-new); padding-left: 8px; }
+li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
+.rv-new { box-shadow: inset 3px 0 0 var(--rv-new); }
+.rv-chg { box-shadow: inset 3px 0 0 var(--rv-chg); }
+.rv-removed { box-shadow: inset 3px 0 0 var(--rv-gone); opacity: .78; }
+.rv-removed :is(h1, h2, h3, h4, .rv-title) { text-decoration: line-through; text-decoration-thickness: 1px; }
+.rv-tag { display: inline-flex; align-items: center; gap: 4px; flex: none; font: 600 11px/1.3 var(--body, system-ui); padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+.rv-tag.new { background: var(--rv-ins-bg); color: var(--rv-new); }
+.rv-tag.chg { background: color-mix(in srgb, var(--rv-chg) 18%, transparent); color: var(--rv-chg); }
+.rv-tag.gone { background: var(--rv-del-bg); color: var(--rv-del-fg); }
+.rv-tag.same { background: transparent; color: var(--muted, currentColor); font-weight: 500; padding-left: 0; padding-right: 0; }
+.rv-n { font: 600 11px/1 var(--mono, ui-monospace, monospace); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rv-n .p { color: var(--rv-new); } .rv-n .m { color: var(--rv-del-fg); }
+.rv-same > summary { opacity: .72; }
+@keyframes rv-flash { from { outline: 2px solid var(--rv-chg); outline-offset: 2px; } to { outline: 2px solid transparent; outline-offset: 6px; } }
+.rv-flash { animation: rv-flash 1.4s ease-out; border-radius: 4px; }
+@media (prefers-reduced-motion: reduce) { .rv-flash { animation: none; outline: 2px solid var(--rv-chg); outline-offset: 2px; } }
+[data-rv="clean"] :is(del.rv-del, .rv-gone, .rv-removed, .rv-tag, .rv-n, .rv-only) { display: none !important; }
+[data-rv="clean"] ins.rv-ins { background: none; text-decoration: none; padding: 0; }
+[data-rv="clean"] :is(.rv-addblk, .rv-new, .rv-chg) { box-shadow: none; }
+[data-rv="clean"] .rv-same > summary { opacity: 1; }
+/* rev-diff.css:end */
 </style>
 
 <div class="wrap">
@@ -445,6 +502,359 @@ var AidlcIds = (function () {
 /* aidlc-ids.js:end */
 </script>
 <script>
+/* rev-diff.js:begin */
+/* Shared: the canonical copy is shared/rev-diff/rev-diff.js; scripts/sync-shared.py copies it into every page that
+   carries the block. What changed between two rounds of a page, shown in the page itself: words inserted are
+   highlighted (.rv-ins), words removed are struck and muted (.rv-del), a block or element that is gone stays as a struck
+   ghost (.rv-gone / .rv-removed), a new one is marked (.rv-new). It works on what a page already drew, so every view a
+   page has gets the same diff: the page draws the earlier round the same way, off screen, and hands both trees here.
+
+     RevDiff.diff(a, b, maxD)        Myers diff of two arrays of strings: [{t: "=" | "-" | "+", a0, a1, b0, b1}], or
+                                     null when they differ in more than maxD places (the caller shows a whole replacement)
+     RevDiff.words(old, now)         word-level segments [{t, s}] of two strings, cleaned up to read well
+     RevDiff.markText(el, old, o)    mark the words of el that differ from the string old, in place; {ins, del}
+     RevDiff.markTree(now, old, o)   mark every text block of the tree now against the tree old; {ins, del}
+     RevDiff.diffKeyed(now, old, o)  match keyed parts (sections, elements) by key, then title; changed ones recurse,
+                                     new ones are marked, gone ones are handed to o.onRemoved; the rest goes to markTree
+     RevDiff.stops(root)             the changes in reading order, one stop per block, for next / previous
+     RevDiff.reveal(node)            open every <details> around node, scroll to it and flash it
+     RevDiff.pref() / setPref(v)     "show" | "clean": the viewer's choice, kept in this browser
+   Standard browser APIs only; a page must not load a diff library for it. */
+var RevDiff = (function () {
+  "use strict";
+  var WORD = /[\p{L}\p{N}_]+|\s+|[^\s\p{L}\p{N}_]/gu;
+  var IS_WORD = /[\p{L}\p{N}]/u;
+  var BLOCK = "p, li, td, th, h1, h2, h3, h4, h5, h6, pre, dt, dd, blockquote, figcaption, summary, caption, div";
+  var CHROME = "button, svg, script, style, textarea, input, select, .rv-del, .rv-gone, .rv-removed, .rv-tag, [data-rv-skip]";
+  var MAX_D = 1500;
+
+  /* ---------- the core: Myers' O(ND) diff, prefix and suffix trimmed first ---------- */
+  function diff(a, b, maxD) {
+    maxD = maxD == null ? MAX_D : maxD;
+    var n = a.length, m = b.length, pre = 0, suf = 0;
+    while (pre < n && pre < m && a[pre] === b[pre]) pre++;
+    while (suf < n - pre && suf < m - pre && a[n - 1 - suf] === b[m - 1 - suf]) suf++;
+    var A = a.slice(pre, n - suf), B = b.slice(pre, m - suf), N = A.length, M = B.length;
+    var moves = [];  /* [t, count] in order, over A and B */
+    if (!N && !M) moves = [];
+    else if (!N) moves = [["+", M]];
+    else if (!M) moves = [["-", N]];
+    else {
+      var max = N + M, off = max + 1, v = new Int32Array(2 * max + 3), trace = [], d, k, x, y, found = -1;
+      v[off + 1] = 0;
+      for (d = 0; d <= max; d++) {
+        if (d > maxD) return null;
+        var snap = new Int32Array(2 * d + 3);
+        for (k = -d - 1; k <= d + 1; k++) snap[k + d + 1] = v[off + k];
+        trace.push(snap);
+        for (k = -d; k <= d; k += 2) {
+          if (k === -d || (k !== d && v[off + k - 1] < v[off + k + 1])) x = v[off + k + 1];
+          else x = v[off + k - 1] + 1;
+          y = x - k;
+          while (x < N && y < M && A[x] === B[y]) { x++; y++; }
+          v[off + k] = x;
+          if (x >= N && y >= M) { found = d; break; }
+        }
+        if (found >= 0) break;
+      }
+      /* walk back: each d adds one insert or delete, then a snake of equal items */
+      var path = []; x = N; y = M;
+      for (d = found; d > 0; d--) {
+        var t = trace[d], at = function (kk) { return t[kk + d + 1]; };
+        k = x - y;
+        var down = k === -d || (k !== d && at(k - 1) < at(k + 1));
+        var pk = down ? k + 1 : k - 1, px = at(pk), py = px - pk;
+        while (x > px + (down ? 0 : 1) && y > py + (down ? 1 : 0)) { path.push("="); x--; y--; }
+        path.push(down ? "+" : "-");
+        x = px; y = py;
+      }
+      while (x > 0 && y > 0) { path.push("="); x--; y--; }
+      path.reverse();
+      path.forEach(function (p) { var last = moves[moves.length - 1]; if (last && last[0] === p) last[1]++; else moves.push([p, 1]); });
+    }
+    var out = [], ia = 0, ib = 0;
+    var push = function (t, c) {
+      var r = { t: t, a0: ia, a1: ia, b0: ib, b1: ib };
+      if (t !== "+") { ia += c; r.a1 = ia; }
+      if (t !== "-") { ib += c; r.b1 = ib; }
+      var last = out[out.length - 1];
+      if (last && last.t === t) { last.a1 = r.a1; last.b1 = r.b1; } else out.push(r);
+    };
+    if (pre) push("=", pre);
+    moves.forEach(function (mv) { push(mv[0], mv[1]); });
+    if (suf) push("=", suf);
+    return out;
+  }
+
+  /* ---------- words ---------- */
+  function tokens(s) { return String(s || "").match(WORD) || []; }
+  var keyOf = function (t) { return /^\s+$/.test(t) ? " " : t; };
+  function countWords(s) { return tokens(s).filter(function (t) { return IS_WORD.test(t); }).length; }
+  function norm(s) { return String(s || "").replace(/\s+/g, " ").trim(); }
+
+  /* Segments of now against old: "=" kept, "-" removed (from old), "+" added. A short run kept between two changes
+     (a space, a comma, one short word) joins them, so a reworded phrase reads as one removal and one insertion. */
+  function words(old, now) {
+    var a = tokens(old), b = tokens(now);
+    var runs = diff(a.map(keyOf), b.map(keyOf));
+    if (!runs) return [{ t: "-", s: a.join("") }, { t: "+", s: b.join("") }];
+    var segs = runs.map(function (r) { return { t: r.t, s: r.t === "-" ? a.slice(r.a0, r.a1).join("") : b.slice(r.b0, r.b1).join("") }; });
+    var changed = function (s) { return s && s.t !== "="; };
+    for (var i = 1; i < segs.length - 1; i++) {
+      var s = segs[i];
+      if (s.t !== "=" || !changed(segs[i - 1]) || !changed(segs[i + 1])) continue;
+      if (/^\s*$/.test(s.s) || (s.s.length <= 3 && !/\s/.test(s.s.trim()))) s.t = "~";  /* both sides keep it, as part of the change */
+    }
+    /* group each maximal change run into one removal then one insertion */
+    var out = [], del = "", ins = "";
+    var flush = function () { if (del) out.push({ t: "-", s: del }); if (ins) out.push({ t: "+", s: ins }); del = ins = ""; };
+    segs.forEach(function (sg) {
+      if (sg.t === "=") { flush(); out.push(sg); }
+      else if (sg.t === "-") del += sg.s;
+      else if (sg.t === "+") ins += sg.s;
+      else { del += sg.s; ins += sg.s; }
+    });
+    flush();
+    return out;
+  }
+  function similar(x, y) {
+    var nx = norm(x).toLowerCase(), ny = norm(y).toLowerCase();
+    if (nx && ny && (nx.indexOf(ny) >= 0 || ny.indexOf(nx) >= 0)) return 1;  /* one extends the other */
+    var a = tokens(x).filter(function (t) { return IS_WORD.test(t); }), b = tokens(y).filter(function (t) { return IS_WORD.test(t); });
+    if (!a.length || !b.length) return a.length === b.length ? 1 : 0;
+    var seen = {}, hit = 0; a.forEach(function (t) { seen[t.toLowerCase()] = (seen[t.toLowerCase()] || 0) + 1; });
+    b.forEach(function (t) { var k = t.toLowerCase(); if (seen[k]) { seen[k]--; hit++; } });
+    return 2 * hit / (a.length + b.length);
+  }
+
+  /* ---------- the DOM ---------- */
+  function skipped(node, root, o) {
+    var e = node.nodeType === 1 ? node : node.parentElement;
+    while (e && e !== root) { if (e.matches(CHROME) || (o.skip && e.matches(o.skip)) || (o.keyed && e.matches(o.keyed))) return true; e = e.parentElement; }
+    return false;
+  }
+  function textNodes(root, o) {
+    var out = [], doc = root.ownerDocument, w = doc.createTreeWalker(root, 4, null), n;
+    while ((n = w.nextNode())) if (n.nodeValue && !skipped(n, root, o || {})) out.push(n);
+    return out;
+  }
+  function textOf(root, o) { return joined(textNodes(root, o)).text; }
+  /* The text blocks of a tree: runs of text nodes under the same nearest block, in reading order. */
+  /* The joined text of a run of text nodes, with a space where two elements' words would otherwise run together
+     (a tag "Fails" and a title "Is it…" read as two words, not "FailsIs"): {text, starts[]}, the start of each node. */
+  function joined(nodes) {
+    var text = "", starts = [];
+    nodes.forEach(function (n, i) {
+      var v = n.nodeValue;
+      if (i && n.parentElement !== nodes[i - 1].parentElement && /\S$/.test(text) && /^\S/.test(v)) text += " ";
+      starts.push(text.length); text += v;
+    });
+    return { text: text, starts: starts };
+  }
+  function units(root, o) {
+    var out = [], cur = null;
+    textNodes(root, o).forEach(function (n) {
+      var owner = n.parentElement.closest(BLOCK);
+      if (!owner || !root.contains(owner)) owner = root;
+      if (!cur || cur.owner !== owner) { cur = { owner: owner, nodes: [] }; out.push(cur); }
+      cur.nodes.push(n);
+    });
+    out.forEach(function (u) { u.text = joined(u.nodes).text; u.key = norm(u.text); });
+    return out.filter(function (u) { return u.key; });
+  }
+  function el(doc, tag, cls, text) {
+    var e = doc.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text;
+    if (/rv-(del|gone)/.test(cls || "")) e.setAttribute("data-aidlc-noids", "");  /* removed text links nothing */
+    return e;
+  }
+
+  /* Rewrite the text nodes of one block: ranges [from, to) of the joined text get <ins>, removed text goes in as <del>
+     at its position. */
+  function apply(nodes, ins, dels) {
+    var starts = joined(nodes).starts, prevEnd = 0;
+    nodes.forEach(function (n, idx) {
+      var s = n.nodeValue, start = starts[idx], end = start + s.length, last = idx === nodes.length - 1, gap = prevEnd;
+      prevEnd = end;
+      var cuts = [];
+      ins.forEach(function (r) { var a = Math.max(r[0], start), b = Math.min(r[1], end); if (a < b) cuts.push({ at: a - start, to: b - start, ins: true }); });
+      /* a removal in the space joined() put between two nodes goes at the start of the second */
+      dels.forEach(function (d) { if ((d[0] >= start && d[0] < end) || (d[0] >= gap && d[0] < start) || (last && d[0] >= end) || (d[0] === start && start === end)) cuts.push({ at: Math.min(Math.max(d[0] - start, 0), s.length), del: d[1] }); });
+      if (!cuts.length) return;
+      cuts.sort(function (x, y) { return x.at - y.at || (x.del ? -1 : 1); });
+      var doc = n.ownerDocument, frag = doc.createDocumentFragment(), p = 0;
+      cuts.forEach(function (c) {
+        if (c.at > p) { frag.appendChild(doc.createTextNode(s.slice(p, c.at))); p = c.at; }
+        if (c.del != null) frag.appendChild(el(doc, "del", "rv-del", c.del));
+        else { frag.appendChild(el(doc, "ins", "rv-ins", s.slice(c.at, c.to))); p = c.to; }
+      });
+      if (p < s.length) frag.appendChild(doc.createTextNode(s.slice(p)));
+      n.parentNode.replaceChild(frag, n);
+    });
+  }
+  function markNodes(nodes, old) {
+    var now = joined(nodes).text;
+    var segs = words(old, now), p = 0, ins = [], dels = [], c = { ins: 0, del: 0 };
+    var changedChars = 0;
+    segs.forEach(function (s) { if (s.t !== "=") changedChars += s.s.length; });
+    if (now.length > 60 && old.length > 60 && changedChars > 1.4 * Math.max(now.length, old.length)) segs = [{ t: "-", s: old }, { t: "+", s: now }];
+    segs.forEach(function (s) {
+      if (s.t === "=") p += s.s.length;
+      else if (s.t === "+") { if (s.s.trim()) { ins.push([p, p + s.s.length]); c.ins += countWords(s.s); } p += s.s.length; }
+      else if (s.s.trim()) { dels.push([p, s.s]); c.del += countWords(s.s); }
+    });
+    apply(nodes, ins, dels);
+    return c;
+  }
+  function markText(root, old, o) { var nodes = textNodes(root, o || {}); if (!nodes.length) { if (norm(old)) { root.appendChild(el(root.ownerDocument, "del", "rv-del", old)); return { ins: 0, del: countWords(old) }; } return { ins: 0, del: 0 }; } return markNodes(nodes, String(old || "")); }
+  function markAllNew(u) {
+    apply(u.nodes, [[0, joined(u.nodes).text.length]], []);
+    return countWords(u.text);
+  }
+
+  /* Where a ghost of removed text stands: as a row in a table, an item in a list, a block elsewhere. */
+  function ghostFor(oldOwner, anchor, before, root) {
+    var doc = root.ownerDocument, text = norm(oldOwner.text);
+    var tr = anchor && anchor.closest("tr"), li = anchor && anchor.closest("li");
+    var g, at;
+    if (oldOwner.row && tr && root.contains(tr)) {
+      g = el(doc, "tr", "rv-gone"); var td = el(doc, "td"); td.colSpan = Math.max(1, tr.cells.length); td.appendChild(el(doc, "del", "rv-del", text)); g.appendChild(td);
+      at = tr;
+      if (!before) { var nx = tr.nextElementSibling; while (nx && /\b(rdet|fdet)\b/.test(nx.className)) { at = nx; nx = nx.nextElementSibling; } }
+    } else if (oldOwner.item && li && root.contains(li)) {
+      g = el(doc, "li", "rv-gone"); g.appendChild(el(doc, "del", "rv-del", text)); at = li;
+    } else {
+      g = el(doc, "div", "rv-gone"); g.appendChild(el(doc, "del", "rv-del", text));
+      at = anchor || null;
+      while (at && at.parentElement && at.parentElement !== root && at.parentElement.matches("table, thead, tbody, tr, ul, ol, dl, .tablewrap, summary")) at = at.parentElement;
+      if (at && at.matches("summary")) at = at.parentElement;
+      if (at === root) at = null;
+    }
+    if (!at) { root.appendChild(g); return g; }
+    if (before) at.parentNode.insertBefore(g, at); else at.parentNode.insertBefore(g, at.nextSibling);
+    return g;
+  }
+
+  /* Every text block of now against old; keyed parts (o.keyed) are left to diffKeyed. */
+  function markTree(now, old, o) {
+    o = o || {};
+    var A = units(old, o), B = units(now, o), c = { ins: 0, del: 0 };
+    A.forEach(function (u) { u.row = !!u.owner.closest("tr"); u.item = !!u.owner.closest("li"); });
+    var runs = diff(A.map(function (u) { return u.key; }), B.map(function (u) { return u.key; }), 4000)
+      || [{ t: "-", a0: 0, a1: A.length, b0: 0, b1: 0 }, { t: "+", a0: A.length, a1: A.length, b0: 0, b1: B.length }];
+    for (var i = 0; i < runs.length; i++) {
+      var r = runs[i];
+      if (r.t === "=") continue;
+      /* a hunk: the removals and insertions between two kept runs */
+      var gone = [], added = [];
+      while (i < runs.length && runs[i].t !== "=") { var h = runs[i]; if (h.t === "-") for (var a = h.a0; a < h.a1; a++) gone.push(A[a]); else for (var b = h.b0; b < h.b1; b++) added.push(B[b]); i++; }
+      i--;
+      var after = (runs[i + 1] && runs[i + 1].t === "=") ? B[runs[i + 1].b0] : null;
+      /* pair a removed block with the inserted block it most resembles, in order */
+      var pairs = [], used = {};
+      gone.forEach(function (g, gi) {
+        var best = -1, score = 0.34;
+        added.forEach(function (n, ni) { if (used[ni]) return; if (pairs.length && ni < pairs[pairs.length - 1][1]) return; var s = similar(g.text, n.text); if (s > score) { score = s; best = ni; } });
+        if (best >= 0) { used[best] = 1; pairs.push([gi, best]); }
+      });
+      var pairedGone = {}; pairs.forEach(function (p) { pairedGone[p[0]] = p[1]; });
+      added.forEach(function (n, ni) {
+        if (used[ni]) return;
+        c.ins += markAllNew(n);
+        var whole = textNodes(n.owner, o).length === n.nodes.length;
+        if (whole && n.owner !== now) n.owner.classList.add("rv-addblk");
+      });
+      pairs.forEach(function (p) { var m = markNodes(added[p[1]].nodes, gone[p[0]].text); c.ins += m.ins; c.del += m.del; });
+      /* ghosts: each removed block stands before the next block that is still here */
+      var ghosts = [];
+      gone.forEach(function (g, gi) {
+        if (pairedGone[gi] !== undefined) return;
+        var anchor = null, before = true;
+        for (var k = gi + 1; k < gone.length && !anchor; k++) if (pairedGone[k] !== undefined) anchor = added[pairedGone[k]];
+        if (!anchor) anchor = after;
+        if (!anchor) { anchor = added.length ? added[added.length - 1] : (r.b0 > 0 ? B[r.b0 - 1] : null); before = false; }
+        /* one ghost per removed row or list item: its cells join */
+        var gkey = g.row ? g.owner.closest("tr") : g.item ? g.owner.closest("li") : g.owner;
+        var hit = (g.row || g.item) ? ghosts.filter(function (x) { return x.key === gkey; })[0] : null;
+        if (hit) hit.node.querySelector("del").appendChild(now.ownerDocument.createTextNode(" · " + norm(g.text)));
+        else ghosts.push({ key: gkey, node: ghostFor(g, anchor && anchor.owner, before, now) });
+        c.del += countWords(g.text);
+      });
+    }
+    /* drawn diagrams keep their source in data-src: a changed one is marked as a whole */
+    var srcs = function (root) { return [].slice.call(root.querySelectorAll(".diagram[data-src]")).map(function (d) { return d.getAttribute("data-src"); }); };
+    var before = srcs(old);
+    [].slice.call(now.querySelectorAll(".diagram[data-src]")).forEach(function (d) { if (before.indexOf(d.getAttribute("data-src")) < 0 && !skipped(d, now, o)) { d.classList.add("rv-chg"); c.ins++; } });
+    return c;
+  }
+
+  /* Keyed parts first (o.keyed: a selector; o.keyOf(node): its key; o.titleOf(node): the fallback match), then the rest. */
+  function tops(root, sel) { return [].slice.call(root.querySelectorAll(sel)).filter(function (n) { var p = n.parentElement; while (p && p !== root) { if (p.matches(sel)) return false; p = p.parentElement; } return true; }); }
+  function diffKeyed(now, old, o) {
+    var c = { ins: 0, del: 0 };
+    if (!o.keyed) { var t = markTree(now, old, o); c.ins += t.ins; c.del += t.del; return c; }
+    var N = tops(now, o.keyed), O = tops(old, o.keyed), match = new Map(), taken = new Set();
+    var byKey = {}; O.forEach(function (x) { var k = o.keyOf(x); if (k != null && !byKey[k]) byKey[k] = x; });
+    N.forEach(function (n) { var k = o.keyOf(n), x = k != null ? byKey[k] : null; if (x && !taken.has(x)) { match.set(n, x); taken.add(x); } });
+    if (o.titleOf) N.forEach(function (n) {
+      if (match.has(n)) return; var tt = norm(o.titleOf(n)); if (!tt) return;
+      var x = O.filter(function (y) { return !taken.has(y) && norm(o.titleOf(y)) === tt; })[0]; if (x) { match.set(n, x); taken.add(x); }
+    });
+    var inner = Object.assign({}, o, { keyed: null });
+    N.forEach(function (n) {
+      var x = match.get(n);
+      if (!x) { var w = countWords(textOf(n, inner)); c.ins += w; if (o.onNew) o.onNew(n, { ins: w, del: 0 }); return; }
+      if (norm(textOf(n, inner)) === norm(textOf(x, inner)) && srcsEqual(n, x)) { if (o.onSame) o.onSame(n, x); return; }
+      var sub = o.keyedInner ? diffKeyed(n, x, Object.assign({}, o, { keyed: o.keyedInner(n) })) : markTree(n, x, inner);
+      c.ins += sub.ins; c.del += sub.del;
+      if (o.onChanged) o.onChanged(n, sub, x);
+    });
+    /* gone: after the part that came before it in the old tree, or before the first part */
+    O.forEach(function (x, i) {
+      if (taken.has(x)) return;
+      var w = countWords(textOf(x, inner)); c.del += w;
+      var prev = null; for (var j = i - 1; j >= 0 && !prev; j--) { if (taken.has(O[j])) { match.forEach(function (ov, nv) { if (ov === O[j]) prev = nv; }); } }
+      if (o.onRemoved) o.onRemoved(x, prev, N[0] || null, { ins: 0, del: w }, now);
+    });
+    var rest = markTree(now, old, o);
+    c.ins += rest.ins; c.del += rest.del;
+    return c;
+  }
+  function srcsEqual(a, b) {
+    var s = function (r) { return [].slice.call(r.querySelectorAll(".diagram[data-src]")).map(function (d) { return d.getAttribute("data-src"); }).join("\u0000"); };
+    return s(a) === s(b);
+  }
+
+  /* ---------- reading the changes ---------- */
+  var STOP = ".rv-ins, .rv-del, .rv-gone, .rv-new, .rv-removed, .rv-addblk, .rv-chg.diagram, .rv-stop";
+  function stops(root) {
+    var out = [], lastOwner = null;
+    [].slice.call(root.querySelectorAll(STOP)).forEach(function (n) {
+      if (n.parentElement && n.parentElement.closest(".rv-new, .rv-removed, .rv-gone, .rv-addblk, .rv-stop")) return;
+      if (n.closest("[hidden]")) return;
+      var owner = n.matches(".rv-ins, .rv-del") ? (n.parentElement.closest(BLOCK) || n.parentElement) : n;
+      if (owner === lastOwner) return;
+      lastOwner = owner; out.push(owner);
+    });
+    return out;
+  }
+  function reveal(node) {
+    var d = node.closest("details");
+    while (d) { d.open = true; d = d.parentElement && d.parentElement.closest("details"); }
+    var reduce = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    try { node.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" }); } catch (e) { /* old browsers */ }
+    node.classList.remove("rv-flash"); void node.offsetWidth; node.classList.add("rv-flash");
+  }
+  var PREF = "aidlc-rev:view";
+  function pref() { try { return localStorage.getItem(PREF) === "clean" ? "clean" : "show"; } catch (e) { return "show"; } }
+  function setPref(v) { try { localStorage.setItem(PREF, v === "clean" ? "clean" : "show"); } catch (e) { /* kept for this visit */ } }
+
+  return { diff: diff, words: words, tokens: tokens, countWords: countWords, norm: norm, similar: similar, textOf: textOf,
+    markText: markText, markTree: markTree, diffKeyed: diffKeyed, stops: stops, reveal: reveal, pref: pref, setPref: setPref };
+})();
+if (typeof module !== "undefined" && module.exports) module.exports = RevDiff;
+/* rev-diff.js:end */
+</script>
+<script>
 /* RENDER-START: no DOM below, until RENDER-END */
 var GateView = (function () {
   "use strict";
@@ -519,6 +929,7 @@ var GateView = (function () {
     if (/^v\d+$/.test(f)) { var v = +f.slice(1); return item.rev === v || (isStep && (item.subs || []).some(function (s) { return s.rev === v; })); }
     if (isStep) return false;
     if (f === "look") return !!item.lookFirst;
+    if (f === "changed") return !!(st.rvKeys && st.rvKeys[key]);
     if (f === "top") return item.label === "critical" || item.label === "high" || item.label === "core";
     return true;
   }
@@ -821,7 +1232,7 @@ var GateView = (function () {
     var items = itemsOf(bundle), read = items.filter(function (x) { return isRead(st, x.key, x.item); }).length;
     var pct = items.length ? Math.round(read / items.length * 100) : 100;
     var unitEnd = bundle.page === "unit-end";
-    var filters = [["all", "All"], ["look", "Look first"], ["unread", "Unread"], ["top", unitEnd ? "High and core" : "High and critical"]];
+    var filters = [["all", "All"], ["look", "Look first"], ["unread", "Unread"], ["top", unitEnd ? "High and core" : "High and critical"]].concat(st.rvKeys && Object.keys(st.rvKeys).length ? [["changed", "Changed"]] : []);
     return '<div class="bar" id="bar"><div class="barrow">' +
       '<div class="seg" role="group" aria-label="Detail"><button type="button" data-act="mode" data-val="summary" aria-pressed="' + (st.mode === "summary") + '">Summary</button><button type="button" data-act="mode" data-val="full" aria-pressed="' + (st.mode === "full") + '">Full</button></div>' +
       '<div class="filters" role="group" aria-label="Show">' + filters.map(function (f) { return '<button type="button" class="pill" data-act="filter" data-val="' + f[0] + '" aria-pressed="' + (st.filter === f[0]) + '">' + f[1] + "</button>"; }).join("") + "</div>" +
@@ -884,7 +1295,7 @@ if (typeof module !== "undefined") module.exports = GateView;
   "use strict";
   var app = document.getElementById("app"), toastEl = document.getElementById("toast");
   var db = null, user = null, uid = null;
-  var view = { id: "", row: null, bundle: null, ids: {}, unsub: [], st: null, readKey: "", saving: false, unsaved: false, timer: 0 };
+  var view = { id: "", row: null, bundle: null, ids: {}, unsub: [], st: null, readKey: "", saving: false, unsaved: false, timer: 0, rounds: [], base: null, rvAt: -1 };
 
   function freshState() { return { mode: "full", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {} }; }
   function toast(text) { toastEl.textContent = text; toastEl.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(function () { toastEl.hidden = true; }, 2400); }
@@ -901,7 +1312,9 @@ if (typeof module !== "undefined") module.exports = GateView;
     if (!view.bundle) return;
     hideTip();
     var y = window.scrollY, active = document.activeElement, focusKey = active && (active.dataset.note || null);
+    rvKeys();
     app.innerHTML = GateView.render(view.bundle, view.st);
+    rvMark();
     barHeight();
     window.scrollTo(0, y);
     if (focusKey) { var t = document.getElementById("nt-" + focusKey); if (t) { t.focus(); t.selectionStart = t.selectionEnd = t.value.length; } }
@@ -1042,6 +1455,92 @@ if (typeof module !== "undefined") module.exports = GateView;
   /* every id on the page: a link with a tooltip, by the shared AidlcIds */
   AidlcIds.observe(app, function () { return view.ids; }, { toast: toast });
 
+
+  /* ---------- what changed since an earlier version of this page (RevDiff, shared/rev-diff) ----------
+     The earlier versions of the same Unit page (same intent, Unit and page) are read, never written. Each row and step is
+     matched by its read-mark key with the one in the base version (the version before, or any earlier one the viewer
+     picks): a new one is tagged, a changed one has its words marked, a gone one is listed. Read marks are untouched. */
+  function loadEarlier() {
+    var id = view.id, row = view.row, b = view.bundle; if (!db || !b) return;
+    var h = b.header || {}, unit = row.unit || h.unit, at = String(row.createdAt || b.createdAt || "");
+    Promise.resolve().then(function () { return db.collection("bundles").where("intent", "==", row.intent || h.intent || "").limit(300).get(); }).then(function (snap) {
+      if (view.id !== id) return;
+      view.rounds = snap.docs.map(function (d) { return { id: d.id, row: d.data() }; }).filter(function (x) {
+        var xb = x.row.bundle; return x.id !== id && xb && xb.header && (x.row.unit || xb.header.unit) === unit && xb.page === b.page && String(x.row.createdAt || xb.createdAt || "") < at;
+      }).sort(function (x, y) { return String(y.row.createdAt || "").localeCompare(String(x.row.createdAt || "")); });
+      view.base = view.rounds[0] || null; view.rvAt = -1; paint();
+    }).catch(function () { /* no comparison: the page reads as it is */ });
+  }
+  function rvSig(it) { return JSON.stringify([it.title || "", it.body || "", (it.subs || []).map(function (s) { return s.text; }), it.label || "", it.layer || ""]); }
+  function rvDelta() {
+    var base = view.base && view.base.row.bundle; if (!base) return null;
+    var old = {}; GateView.itemsOf(base).forEach(function (x) { old[x.key] = x; });
+    var seen = {}, out = { items: [], removed: [] };
+    GateView.itemsOf(view.bundle).forEach(function (x) {
+      seen[x.key] = 1; var o = old[x.key] && old[x.key].item;
+      var t = !o ? "new" : rvSig(o) === rvSig(x.item) ? "" : "changed";
+      if (t) out.items.push({ key: x.key, anchor: x.anchor, item: x.item, old: o, t: t });
+    });
+    GateView.itemsOf(base).forEach(function (x) { if (!seen[x.key]) out.removed.push(x.item); });
+    return out;
+  }
+  function rvKeys() { var D = rvDelta(); view.st.rvKeys = {}; if (D) D.items.forEach(function (x) { view.st.rvKeys[x.key] = 1; }); if (!D && view.st.filter === "changed") view.st.filter = "all"; }
+  function wordsOf(a, b) { var c = { ins: 0, del: 0 }; RevDiff.words(a || "", b || "").forEach(function (s) { if (s.t === "+") c.ins += RevDiff.countWords(s.s); if (s.t === "-") c.del += RevDiff.countWords(s.s); }); return c; }
+  function itemName(it) { return (it.id || ("Step " + (it.n || "?"))) + " · " + (it.title || ""); }
+  function rvCount(c) { return c && (c.ins || c.del) ? '<span class="rv-n">' + (c.ins ? '<span class="p">+' + c.ins + "</span>" : "") + (c.ins && c.del ? " " : "") + (c.del ? '<span class="m">−' + c.del + "</span>" : "") + "</span>" : ""; }
+  function rvTagHtml(t) { return '<span class="rv-tag ' + (t === "new" ? "new" : t === "gone" ? "gone" : "chg") + '">' + (t === "new" ? "new" : t === "gone" ? "removed" : "changed") + "</span>"; }
+  function rvMark() {
+    var D = rvDelta(), main = app.querySelector("main"), esc = GateView.esc;
+    app.dataset.rv = RevDiff.pref();
+    if (!D || !main) return;
+    var baseV = (view.base.row.bundle.header || {}).revision || 1, show = RevDiff.pref() === "show";
+    var total = { ins: 0, del: 0 };
+    D.items.forEach(function (x) {
+      var o = x.old || {}, it = x.item;
+      var c = x.t === "new" ? { ins: RevDiff.countWords([it.title, it.body].concat((it.subs || []).map(function (s) { return s.text; })).join(" ")), del: 0 }
+        : (function () { var a = wordsOf(o.title, it.title), b = wordsOf(o.body, it.body), s = wordsOf((o.subs || []).map(function (q) { return q.text; }).join("\n"), (it.subs || []).map(function (q) { return q.text; }).join("\n")); return { ins: a.ins + b.ins + s.ins, del: a.del + b.del + s.del }; })();
+      x.c = c; total.ins += c.ins; total.del += c.del;
+      var node = document.getElementById(x.anchor); if (!node) return;
+      node.classList.add(x.t === "new" ? "rv-new" : "rv-chg", "rv-stop");
+      var head = node.querySelector(".rowhead"), span = document.createElement("span");
+      span.className = "rv-tags"; span.setAttribute("data-rv-skip", ""); span.innerHTML = rvTagHtml(x.t) + rvCount(c);
+      if (head) head.insertBefore(span, head.querySelector(".lab, .layer, .dot"));
+      if (x.t !== "changed") return;
+      var tt = node.querySelector(".rtitle"); if (tt && (o.title || "") !== (it.title || "")) RevDiff.markText(tt, o.title || "");
+      var p = node.querySelector(".rowbody > p:not(.revnote)"); if (p && (o.body || "") !== (it.body || "")) RevDiff.markText(p, o.body || "");
+      var subs = node.querySelector(".rowbody > ol.subs");
+      if (subs) { var was = document.createElement("ol"); (o.subs || []).forEach(function (q) { var li = document.createElement("li"); li.textContent = q.text; was.appendChild(li); }); RevDiff.markTree(subs, was, { skip: ".sv" }); }
+    });
+    var pick = view.rounds.map(function (r) { var h = r.row.bundle.header || {}; return '<option value="' + esc(r.id) + '"' + (view.base && view.base.id === r.id ? " selected" : "") + ">v" + (h.revision || 1) + " · " + esc(String(r.row.createdAt || "").replace("T", " ").replace(/:\d\d(\.\d+)?Z$/, " UTC")) + "</option>"; }).join("");
+    var n = D.items.length + D.removed.length;
+    var strip = document.createElement("section");
+    strip.className = "card rvstrip"; strip.id = "rvstrip"; strip.setAttribute("data-rv-skip", ""); strip.setAttribute("aria-label", "What changed since v" + baseV);
+    strip.innerHTML = '<div class="rvtop"><h2>What changed since v' + baseV + '</h2><span class="hint">' + (n ? n + (n === 1 ? " change" : " changes") + " · " + (rvCount(total) || "no words") : "Nothing differs from v" + baseV) + "</span>" +
+      '<label class="rvpick"><span>Compared with</span><select data-rvbase aria-label="The earlier version to compare with">' + pick + "</select></label>" +
+      '<span class="seg rvseg" role="group" aria-label="Changes"><button type="button" data-rvview="show" aria-pressed="' + show + '">Changes</button><button type="button" data-rvview="clean" aria-pressed="' + !show + '">Clean</button></span>' +
+      (show ? '<span class="rvnav"><button type="button" class="btn" data-rvstep="-1" aria-label="Previous change" title="Previous change (p)">↑</button><span class="num" id="rvpos">' + (view.rvAt >= 0 ? view.rvAt + 1 : "–") + " / " + rvStops().length + '</span><button type="button" class="btn" data-rvstep="1" aria-label="Next change" title="Next change (n)">↓</button></span>' : "") + "</div>" +
+      (n ? '<ul class="rvlist">' + D.items.map(function (x) { return '<li><a href="#' + esc(x.anchor) + '" data-jump="' + esc(x.anchor) + '">' + rvTagHtml(x.t) + '<span class="rvt">' + esc(itemName(x.item)) + "</span>" + rvCount(x.c) + "</a></li>"; }).join("") +
+        D.removed.map(function (it) { return '<li class="gone"><span>' + rvTagHtml("gone") + '<span class="rvt">' + esc(itemName(it)) + "</span></span></li>"; }).join("") + "</ul>" : "");
+    main.insertBefore(strip, main.firstChild);
+    var pos = document.getElementById("rvpos"); if (pos) pos.textContent = (view.rvAt >= 0 ? view.rvAt + 1 : "–") + " / " + rvStops().length;
+  }
+  function rvStops() { return RevDiff.stops(app).filter(function (n) { return !n.closest("#rvstrip"); }); }
+  function rvStep(dir) {
+    var s = rvStops(); if (!s.length) { toast("No marked change is showing."); return; }
+    view.rvAt = view.rvAt < 0 ? (dir > 0 ? 0 : s.length - 1) : (view.rvAt + dir + s.length) % s.length;
+    RevDiff.reveal(s[view.rvAt]);
+    var pos = document.getElementById("rvpos"); if (pos) pos.textContent = (view.rvAt + 1) + " / " + s.length;
+  }
+  app.addEventListener("click", function (e) {
+    var v = e.target.closest("[data-rvview]"); if (v) { e.preventDefault(); e.stopImmediatePropagation(); RevDiff.setPref(v.dataset.rvview); view.rvAt = -1; paint(); return; }
+    var s = e.target.closest("[data-rvstep]"); if (s) { e.preventDefault(); e.stopImmediatePropagation(); rvStep(+s.dataset.rvstep); }
+  }, true);
+  app.addEventListener("change", function (e) { if (e.target.matches && e.target.matches("[data-rvbase]")) { view.base = view.rounds.filter(function (r) { return r.id === e.target.value; })[0] || view.base; view.rvAt = -1; paint(); } });
+  document.addEventListener("keydown", function (e) {
+    if (!view.base || RevDiff.pref() !== "show" || e.metaKey || e.ctrlKey || e.altKey || (e.target.closest && e.target.closest("textarea, input, select, [contenteditable]"))) return;
+    if (e.key === "n" || e.key === "j") { e.preventDefault(); rvStep(1); } else if (e.key === "p" || e.key === "k") { e.preventDefault(); rvStep(-1); }
+  });
+
   /* ---------- views ---------- */
   function showList() {
     teardown(); view.id = ""; view.bundle = null;
@@ -1051,7 +1550,7 @@ if (typeof module !== "undefined") module.exports = GateView;
     }, function () { app.innerHTML = '<div class="card msg"><b>Couldn’t load the pages.</b><p>Reload the page.</p></div>'; }));
   }
   function showPage(id) {
-    teardown(); view.id = id; view.bundle = null; view.st = freshState();
+    teardown(); view.id = id; view.bundle = null; view.st = freshState(); view.rounds = []; view.base = null; view.rvAt = -1;
     if (!db) return;
     app.innerHTML = '<div class="card msg"><b>Loading this page…</b></div>';
     view.unsub.push(db.doc("bundles/" + id).onSnapshot(function (snap) {
@@ -1064,6 +1563,7 @@ if (typeof module !== "undefined") module.exports = GateView;
       if (!view.bundle) { app.innerHTML = '<div class="card msg"><b>This row holds no page.</b><p>Ask the agent to build it again.</p></div>'; return; }
       if (view.bundle.schema !== "aidlc-gate-bundle/1") { app.innerHTML = '<div class="card msg"><b>This page is newer than this view.</b><p>It uses ' + GateView.esc(view.bundle.schema) + '. Ask the agent to republish the unit approvals page from the plugin.</p></div>'; return; }
       if (first) {
+        loadEarlier();
         view.readKey = [row.intent || view.bundle.header.intent, row.unit || view.bundle.header.unit, view.bundle.page].join("--");
         view.st.read = loadLocalReads();
         if (db && uid) Promise.resolve().then(function () { return readsDoc().get(); }).then(function (d) {
@@ -1073,7 +1573,7 @@ if (typeof module !== "undefined") module.exports = GateView;
         }).catch(function () { /* local marks only */ });
       }
       if (!view.unsaved && !view.saving) { view.st.notes = Object.assign({}, row.notes || {}); view.st.picks = Object.assign({}, row.picks || {}); }
-      document.title = (pageTitle(view.bundle.header.unit, view.bundle.page, view.bundle.header.title) || "Unit approval") + " · AI-DLC unit approvals";
+      document.title = (GateView.pageTitle(view.bundle.header.unit, view.bundle.page, view.bundle.header.title) || "Unit approval") + " · AI-DLC unit approvals";
       paint();
     }, function () { app.innerHTML = '<div class="card msg"><b>Couldn’t load this page.</b><p>Reload the page.</p></div>'; }));
   }

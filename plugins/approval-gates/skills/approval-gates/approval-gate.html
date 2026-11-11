@@ -238,6 +238,359 @@ var AidlcIds = (function () {
 })();
 /* aidlc-ids.js:end */
 </script>
+<script>
+/* rev-diff.js:begin */
+/* Shared: the canonical copy is shared/rev-diff/rev-diff.js; scripts/sync-shared.py copies it into every page that
+   carries the block. What changed between two rounds of a page, shown in the page itself: words inserted are
+   highlighted (.rv-ins), words removed are struck and muted (.rv-del), a block or element that is gone stays as a struck
+   ghost (.rv-gone / .rv-removed), a new one is marked (.rv-new). It works on what a page already drew, so every view a
+   page has gets the same diff: the page draws the earlier round the same way, off screen, and hands both trees here.
+
+     RevDiff.diff(a, b, maxD)        Myers diff of two arrays of strings: [{t: "=" | "-" | "+", a0, a1, b0, b1}], or
+                                     null when they differ in more than maxD places (the caller shows a whole replacement)
+     RevDiff.words(old, now)         word-level segments [{t, s}] of two strings, cleaned up to read well
+     RevDiff.markText(el, old, o)    mark the words of el that differ from the string old, in place; {ins, del}
+     RevDiff.markTree(now, old, o)   mark every text block of the tree now against the tree old; {ins, del}
+     RevDiff.diffKeyed(now, old, o)  match keyed parts (sections, elements) by key, then title; changed ones recurse,
+                                     new ones are marked, gone ones are handed to o.onRemoved; the rest goes to markTree
+     RevDiff.stops(root)             the changes in reading order, one stop per block, for next / previous
+     RevDiff.reveal(node)            open every <details> around node, scroll to it and flash it
+     RevDiff.pref() / setPref(v)     "show" | "clean": the viewer's choice, kept in this browser
+   Standard browser APIs only; a page must not load a diff library for it. */
+var RevDiff = (function () {
+  "use strict";
+  var WORD = /[\p{L}\p{N}_]+|\s+|[^\s\p{L}\p{N}_]/gu;
+  var IS_WORD = /[\p{L}\p{N}]/u;
+  var BLOCK = "p, li, td, th, h1, h2, h3, h4, h5, h6, pre, dt, dd, blockquote, figcaption, summary, caption, div";
+  var CHROME = "button, svg, script, style, textarea, input, select, .rv-del, .rv-gone, .rv-removed, .rv-tag, [data-rv-skip]";
+  var MAX_D = 1500;
+
+  /* ---------- the core: Myers' O(ND) diff, prefix and suffix trimmed first ---------- */
+  function diff(a, b, maxD) {
+    maxD = maxD == null ? MAX_D : maxD;
+    var n = a.length, m = b.length, pre = 0, suf = 0;
+    while (pre < n && pre < m && a[pre] === b[pre]) pre++;
+    while (suf < n - pre && suf < m - pre && a[n - 1 - suf] === b[m - 1 - suf]) suf++;
+    var A = a.slice(pre, n - suf), B = b.slice(pre, m - suf), N = A.length, M = B.length;
+    var moves = [];  /* [t, count] in order, over A and B */
+    if (!N && !M) moves = [];
+    else if (!N) moves = [["+", M]];
+    else if (!M) moves = [["-", N]];
+    else {
+      var max = N + M, off = max + 1, v = new Int32Array(2 * max + 3), trace = [], d, k, x, y, found = -1;
+      v[off + 1] = 0;
+      for (d = 0; d <= max; d++) {
+        if (d > maxD) return null;
+        var snap = new Int32Array(2 * d + 3);
+        for (k = -d - 1; k <= d + 1; k++) snap[k + d + 1] = v[off + k];
+        trace.push(snap);
+        for (k = -d; k <= d; k += 2) {
+          if (k === -d || (k !== d && v[off + k - 1] < v[off + k + 1])) x = v[off + k + 1];
+          else x = v[off + k - 1] + 1;
+          y = x - k;
+          while (x < N && y < M && A[x] === B[y]) { x++; y++; }
+          v[off + k] = x;
+          if (x >= N && y >= M) { found = d; break; }
+        }
+        if (found >= 0) break;
+      }
+      /* walk back: each d adds one insert or delete, then a snake of equal items */
+      var path = []; x = N; y = M;
+      for (d = found; d > 0; d--) {
+        var t = trace[d], at = function (kk) { return t[kk + d + 1]; };
+        k = x - y;
+        var down = k === -d || (k !== d && at(k - 1) < at(k + 1));
+        var pk = down ? k + 1 : k - 1, px = at(pk), py = px - pk;
+        while (x > px + (down ? 0 : 1) && y > py + (down ? 1 : 0)) { path.push("="); x--; y--; }
+        path.push(down ? "+" : "-");
+        x = px; y = py;
+      }
+      while (x > 0 && y > 0) { path.push("="); x--; y--; }
+      path.reverse();
+      path.forEach(function (p) { var last = moves[moves.length - 1]; if (last && last[0] === p) last[1]++; else moves.push([p, 1]); });
+    }
+    var out = [], ia = 0, ib = 0;
+    var push = function (t, c) {
+      var r = { t: t, a0: ia, a1: ia, b0: ib, b1: ib };
+      if (t !== "+") { ia += c; r.a1 = ia; }
+      if (t !== "-") { ib += c; r.b1 = ib; }
+      var last = out[out.length - 1];
+      if (last && last.t === t) { last.a1 = r.a1; last.b1 = r.b1; } else out.push(r);
+    };
+    if (pre) push("=", pre);
+    moves.forEach(function (mv) { push(mv[0], mv[1]); });
+    if (suf) push("=", suf);
+    return out;
+  }
+
+  /* ---------- words ---------- */
+  function tokens(s) { return String(s || "").match(WORD) || []; }
+  var keyOf = function (t) { return /^\s+$/.test(t) ? " " : t; };
+  function countWords(s) { return tokens(s).filter(function (t) { return IS_WORD.test(t); }).length; }
+  function norm(s) { return String(s || "").replace(/\s+/g, " ").trim(); }
+
+  /* Segments of now against old: "=" kept, "-" removed (from old), "+" added. A short run kept between two changes
+     (a space, a comma, one short word) joins them, so a reworded phrase reads as one removal and one insertion. */
+  function words(old, now) {
+    var a = tokens(old), b = tokens(now);
+    var runs = diff(a.map(keyOf), b.map(keyOf));
+    if (!runs) return [{ t: "-", s: a.join("") }, { t: "+", s: b.join("") }];
+    var segs = runs.map(function (r) { return { t: r.t, s: r.t === "-" ? a.slice(r.a0, r.a1).join("") : b.slice(r.b0, r.b1).join("") }; });
+    var changed = function (s) { return s && s.t !== "="; };
+    for (var i = 1; i < segs.length - 1; i++) {
+      var s = segs[i];
+      if (s.t !== "=" || !changed(segs[i - 1]) || !changed(segs[i + 1])) continue;
+      if (/^\s*$/.test(s.s) || (s.s.length <= 3 && !/\s/.test(s.s.trim()))) s.t = "~";  /* both sides keep it, as part of the change */
+    }
+    /* group each maximal change run into one removal then one insertion */
+    var out = [], del = "", ins = "";
+    var flush = function () { if (del) out.push({ t: "-", s: del }); if (ins) out.push({ t: "+", s: ins }); del = ins = ""; };
+    segs.forEach(function (sg) {
+      if (sg.t === "=") { flush(); out.push(sg); }
+      else if (sg.t === "-") del += sg.s;
+      else if (sg.t === "+") ins += sg.s;
+      else { del += sg.s; ins += sg.s; }
+    });
+    flush();
+    return out;
+  }
+  function similar(x, y) {
+    var nx = norm(x).toLowerCase(), ny = norm(y).toLowerCase();
+    if (nx && ny && (nx.indexOf(ny) >= 0 || ny.indexOf(nx) >= 0)) return 1;  /* one extends the other */
+    var a = tokens(x).filter(function (t) { return IS_WORD.test(t); }), b = tokens(y).filter(function (t) { return IS_WORD.test(t); });
+    if (!a.length || !b.length) return a.length === b.length ? 1 : 0;
+    var seen = {}, hit = 0; a.forEach(function (t) { seen[t.toLowerCase()] = (seen[t.toLowerCase()] || 0) + 1; });
+    b.forEach(function (t) { var k = t.toLowerCase(); if (seen[k]) { seen[k]--; hit++; } });
+    return 2 * hit / (a.length + b.length);
+  }
+
+  /* ---------- the DOM ---------- */
+  function skipped(node, root, o) {
+    var e = node.nodeType === 1 ? node : node.parentElement;
+    while (e && e !== root) { if (e.matches(CHROME) || (o.skip && e.matches(o.skip)) || (o.keyed && e.matches(o.keyed))) return true; e = e.parentElement; }
+    return false;
+  }
+  function textNodes(root, o) {
+    var out = [], doc = root.ownerDocument, w = doc.createTreeWalker(root, 4, null), n;
+    while ((n = w.nextNode())) if (n.nodeValue && !skipped(n, root, o || {})) out.push(n);
+    return out;
+  }
+  function textOf(root, o) { return joined(textNodes(root, o)).text; }
+  /* The text blocks of a tree: runs of text nodes under the same nearest block, in reading order. */
+  /* The joined text of a run of text nodes, with a space where two elements' words would otherwise run together
+     (a tag "Fails" and a title "Is it…" read as two words, not "FailsIs"): {text, starts[]}, the start of each node. */
+  function joined(nodes) {
+    var text = "", starts = [];
+    nodes.forEach(function (n, i) {
+      var v = n.nodeValue;
+      if (i && n.parentElement !== nodes[i - 1].parentElement && /\S$/.test(text) && /^\S/.test(v)) text += " ";
+      starts.push(text.length); text += v;
+    });
+    return { text: text, starts: starts };
+  }
+  function units(root, o) {
+    var out = [], cur = null;
+    textNodes(root, o).forEach(function (n) {
+      var owner = n.parentElement.closest(BLOCK);
+      if (!owner || !root.contains(owner)) owner = root;
+      if (!cur || cur.owner !== owner) { cur = { owner: owner, nodes: [] }; out.push(cur); }
+      cur.nodes.push(n);
+    });
+    out.forEach(function (u) { u.text = joined(u.nodes).text; u.key = norm(u.text); });
+    return out.filter(function (u) { return u.key; });
+  }
+  function el(doc, tag, cls, text) {
+    var e = doc.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text;
+    if (/rv-(del|gone)/.test(cls || "")) e.setAttribute("data-aidlc-noids", "");  /* removed text links nothing */
+    return e;
+  }
+
+  /* Rewrite the text nodes of one block: ranges [from, to) of the joined text get <ins>, removed text goes in as <del>
+     at its position. */
+  function apply(nodes, ins, dels) {
+    var starts = joined(nodes).starts, prevEnd = 0;
+    nodes.forEach(function (n, idx) {
+      var s = n.nodeValue, start = starts[idx], end = start + s.length, last = idx === nodes.length - 1, gap = prevEnd;
+      prevEnd = end;
+      var cuts = [];
+      ins.forEach(function (r) { var a = Math.max(r[0], start), b = Math.min(r[1], end); if (a < b) cuts.push({ at: a - start, to: b - start, ins: true }); });
+      /* a removal in the space joined() put between two nodes goes at the start of the second */
+      dels.forEach(function (d) { if ((d[0] >= start && d[0] < end) || (d[0] >= gap && d[0] < start) || (last && d[0] >= end) || (d[0] === start && start === end)) cuts.push({ at: Math.min(Math.max(d[0] - start, 0), s.length), del: d[1] }); });
+      if (!cuts.length) return;
+      cuts.sort(function (x, y) { return x.at - y.at || (x.del ? -1 : 1); });
+      var doc = n.ownerDocument, frag = doc.createDocumentFragment(), p = 0;
+      cuts.forEach(function (c) {
+        if (c.at > p) { frag.appendChild(doc.createTextNode(s.slice(p, c.at))); p = c.at; }
+        if (c.del != null) frag.appendChild(el(doc, "del", "rv-del", c.del));
+        else { frag.appendChild(el(doc, "ins", "rv-ins", s.slice(c.at, c.to))); p = c.to; }
+      });
+      if (p < s.length) frag.appendChild(doc.createTextNode(s.slice(p)));
+      n.parentNode.replaceChild(frag, n);
+    });
+  }
+  function markNodes(nodes, old) {
+    var now = joined(nodes).text;
+    var segs = words(old, now), p = 0, ins = [], dels = [], c = { ins: 0, del: 0 };
+    var changedChars = 0;
+    segs.forEach(function (s) { if (s.t !== "=") changedChars += s.s.length; });
+    if (now.length > 60 && old.length > 60 && changedChars > 1.4 * Math.max(now.length, old.length)) segs = [{ t: "-", s: old }, { t: "+", s: now }];
+    segs.forEach(function (s) {
+      if (s.t === "=") p += s.s.length;
+      else if (s.t === "+") { if (s.s.trim()) { ins.push([p, p + s.s.length]); c.ins += countWords(s.s); } p += s.s.length; }
+      else if (s.s.trim()) { dels.push([p, s.s]); c.del += countWords(s.s); }
+    });
+    apply(nodes, ins, dels);
+    return c;
+  }
+  function markText(root, old, o) { var nodes = textNodes(root, o || {}); if (!nodes.length) { if (norm(old)) { root.appendChild(el(root.ownerDocument, "del", "rv-del", old)); return { ins: 0, del: countWords(old) }; } return { ins: 0, del: 0 }; } return markNodes(nodes, String(old || "")); }
+  function markAllNew(u) {
+    apply(u.nodes, [[0, joined(u.nodes).text.length]], []);
+    return countWords(u.text);
+  }
+
+  /* Where a ghost of removed text stands: as a row in a table, an item in a list, a block elsewhere. */
+  function ghostFor(oldOwner, anchor, before, root) {
+    var doc = root.ownerDocument, text = norm(oldOwner.text);
+    var tr = anchor && anchor.closest("tr"), li = anchor && anchor.closest("li");
+    var g, at;
+    if (oldOwner.row && tr && root.contains(tr)) {
+      g = el(doc, "tr", "rv-gone"); var td = el(doc, "td"); td.colSpan = Math.max(1, tr.cells.length); td.appendChild(el(doc, "del", "rv-del", text)); g.appendChild(td);
+      at = tr;
+      if (!before) { var nx = tr.nextElementSibling; while (nx && /\b(rdet|fdet)\b/.test(nx.className)) { at = nx; nx = nx.nextElementSibling; } }
+    } else if (oldOwner.item && li && root.contains(li)) {
+      g = el(doc, "li", "rv-gone"); g.appendChild(el(doc, "del", "rv-del", text)); at = li;
+    } else {
+      g = el(doc, "div", "rv-gone"); g.appendChild(el(doc, "del", "rv-del", text));
+      at = anchor || null;
+      while (at && at.parentElement && at.parentElement !== root && at.parentElement.matches("table, thead, tbody, tr, ul, ol, dl, .tablewrap, summary")) at = at.parentElement;
+      if (at && at.matches("summary")) at = at.parentElement;
+      if (at === root) at = null;
+    }
+    if (!at) { root.appendChild(g); return g; }
+    if (before) at.parentNode.insertBefore(g, at); else at.parentNode.insertBefore(g, at.nextSibling);
+    return g;
+  }
+
+  /* Every text block of now against old; keyed parts (o.keyed) are left to diffKeyed. */
+  function markTree(now, old, o) {
+    o = o || {};
+    var A = units(old, o), B = units(now, o), c = { ins: 0, del: 0 };
+    A.forEach(function (u) { u.row = !!u.owner.closest("tr"); u.item = !!u.owner.closest("li"); });
+    var runs = diff(A.map(function (u) { return u.key; }), B.map(function (u) { return u.key; }), 4000)
+      || [{ t: "-", a0: 0, a1: A.length, b0: 0, b1: 0 }, { t: "+", a0: A.length, a1: A.length, b0: 0, b1: B.length }];
+    for (var i = 0; i < runs.length; i++) {
+      var r = runs[i];
+      if (r.t === "=") continue;
+      /* a hunk: the removals and insertions between two kept runs */
+      var gone = [], added = [];
+      while (i < runs.length && runs[i].t !== "=") { var h = runs[i]; if (h.t === "-") for (var a = h.a0; a < h.a1; a++) gone.push(A[a]); else for (var b = h.b0; b < h.b1; b++) added.push(B[b]); i++; }
+      i--;
+      var after = (runs[i + 1] && runs[i + 1].t === "=") ? B[runs[i + 1].b0] : null;
+      /* pair a removed block with the inserted block it most resembles, in order */
+      var pairs = [], used = {};
+      gone.forEach(function (g, gi) {
+        var best = -1, score = 0.34;
+        added.forEach(function (n, ni) { if (used[ni]) return; if (pairs.length && ni < pairs[pairs.length - 1][1]) return; var s = similar(g.text, n.text); if (s > score) { score = s; best = ni; } });
+        if (best >= 0) { used[best] = 1; pairs.push([gi, best]); }
+      });
+      var pairedGone = {}; pairs.forEach(function (p) { pairedGone[p[0]] = p[1]; });
+      added.forEach(function (n, ni) {
+        if (used[ni]) return;
+        c.ins += markAllNew(n);
+        var whole = textNodes(n.owner, o).length === n.nodes.length;
+        if (whole && n.owner !== now) n.owner.classList.add("rv-addblk");
+      });
+      pairs.forEach(function (p) { var m = markNodes(added[p[1]].nodes, gone[p[0]].text); c.ins += m.ins; c.del += m.del; });
+      /* ghosts: each removed block stands before the next block that is still here */
+      var ghosts = [];
+      gone.forEach(function (g, gi) {
+        if (pairedGone[gi] !== undefined) return;
+        var anchor = null, before = true;
+        for (var k = gi + 1; k < gone.length && !anchor; k++) if (pairedGone[k] !== undefined) anchor = added[pairedGone[k]];
+        if (!anchor) anchor = after;
+        if (!anchor) { anchor = added.length ? added[added.length - 1] : (r.b0 > 0 ? B[r.b0 - 1] : null); before = false; }
+        /* one ghost per removed row or list item: its cells join */
+        var gkey = g.row ? g.owner.closest("tr") : g.item ? g.owner.closest("li") : g.owner;
+        var hit = (g.row || g.item) ? ghosts.filter(function (x) { return x.key === gkey; })[0] : null;
+        if (hit) hit.node.querySelector("del").appendChild(now.ownerDocument.createTextNode(" · " + norm(g.text)));
+        else ghosts.push({ key: gkey, node: ghostFor(g, anchor && anchor.owner, before, now) });
+        c.del += countWords(g.text);
+      });
+    }
+    /* drawn diagrams keep their source in data-src: a changed one is marked as a whole */
+    var srcs = function (root) { return [].slice.call(root.querySelectorAll(".diagram[data-src]")).map(function (d) { return d.getAttribute("data-src"); }); };
+    var before = srcs(old);
+    [].slice.call(now.querySelectorAll(".diagram[data-src]")).forEach(function (d) { if (before.indexOf(d.getAttribute("data-src")) < 0 && !skipped(d, now, o)) { d.classList.add("rv-chg"); c.ins++; } });
+    return c;
+  }
+
+  /* Keyed parts first (o.keyed: a selector; o.keyOf(node): its key; o.titleOf(node): the fallback match), then the rest. */
+  function tops(root, sel) { return [].slice.call(root.querySelectorAll(sel)).filter(function (n) { var p = n.parentElement; while (p && p !== root) { if (p.matches(sel)) return false; p = p.parentElement; } return true; }); }
+  function diffKeyed(now, old, o) {
+    var c = { ins: 0, del: 0 };
+    if (!o.keyed) { var t = markTree(now, old, o); c.ins += t.ins; c.del += t.del; return c; }
+    var N = tops(now, o.keyed), O = tops(old, o.keyed), match = new Map(), taken = new Set();
+    var byKey = {}; O.forEach(function (x) { var k = o.keyOf(x); if (k != null && !byKey[k]) byKey[k] = x; });
+    N.forEach(function (n) { var k = o.keyOf(n), x = k != null ? byKey[k] : null; if (x && !taken.has(x)) { match.set(n, x); taken.add(x); } });
+    if (o.titleOf) N.forEach(function (n) {
+      if (match.has(n)) return; var tt = norm(o.titleOf(n)); if (!tt) return;
+      var x = O.filter(function (y) { return !taken.has(y) && norm(o.titleOf(y)) === tt; })[0]; if (x) { match.set(n, x); taken.add(x); }
+    });
+    var inner = Object.assign({}, o, { keyed: null });
+    N.forEach(function (n) {
+      var x = match.get(n);
+      if (!x) { var w = countWords(textOf(n, inner)); c.ins += w; if (o.onNew) o.onNew(n, { ins: w, del: 0 }); return; }
+      if (norm(textOf(n, inner)) === norm(textOf(x, inner)) && srcsEqual(n, x)) { if (o.onSame) o.onSame(n, x); return; }
+      var sub = o.keyedInner ? diffKeyed(n, x, Object.assign({}, o, { keyed: o.keyedInner(n) })) : markTree(n, x, inner);
+      c.ins += sub.ins; c.del += sub.del;
+      if (o.onChanged) o.onChanged(n, sub, x);
+    });
+    /* gone: after the part that came before it in the old tree, or before the first part */
+    O.forEach(function (x, i) {
+      if (taken.has(x)) return;
+      var w = countWords(textOf(x, inner)); c.del += w;
+      var prev = null; for (var j = i - 1; j >= 0 && !prev; j--) { if (taken.has(O[j])) { match.forEach(function (ov, nv) { if (ov === O[j]) prev = nv; }); } }
+      if (o.onRemoved) o.onRemoved(x, prev, N[0] || null, { ins: 0, del: w }, now);
+    });
+    var rest = markTree(now, old, o);
+    c.ins += rest.ins; c.del += rest.del;
+    return c;
+  }
+  function srcsEqual(a, b) {
+    var s = function (r) { return [].slice.call(r.querySelectorAll(".diagram[data-src]")).map(function (d) { return d.getAttribute("data-src"); }).join("\u0000"); };
+    return s(a) === s(b);
+  }
+
+  /* ---------- reading the changes ---------- */
+  var STOP = ".rv-ins, .rv-del, .rv-gone, .rv-new, .rv-removed, .rv-addblk, .rv-chg.diagram, .rv-stop";
+  function stops(root) {
+    var out = [], lastOwner = null;
+    [].slice.call(root.querySelectorAll(STOP)).forEach(function (n) {
+      if (n.parentElement && n.parentElement.closest(".rv-new, .rv-removed, .rv-gone, .rv-addblk, .rv-stop")) return;
+      if (n.closest("[hidden]")) return;
+      var owner = n.matches(".rv-ins, .rv-del") ? (n.parentElement.closest(BLOCK) || n.parentElement) : n;
+      if (owner === lastOwner) return;
+      lastOwner = owner; out.push(owner);
+    });
+    return out;
+  }
+  function reveal(node) {
+    var d = node.closest("details");
+    while (d) { d.open = true; d = d.parentElement && d.parentElement.closest("details"); }
+    var reduce = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    try { node.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" }); } catch (e) { /* old browsers */ }
+    node.classList.remove("rv-flash"); void node.offsetWidth; node.classList.add("rv-flash");
+  }
+  var PREF = "aidlc-rev:view";
+  function pref() { try { return localStorage.getItem(PREF) === "clean" ? "clean" : "show"; } catch (e) { return "show"; } }
+  function setPref(v) { try { localStorage.setItem(PREF, v === "clean" ? "clean" : "show"); } catch (e) { /* kept for this visit */ } }
+
+  return { diff: diff, words: words, tokens: tokens, countWords: countWords, norm: norm, similar: similar, textOf: textOf,
+    markText: markText, markTree: markTree, diffKeyed: diffKeyed, stops: stops, reveal: reveal, pref: pref, setPref: setPref };
+})();
+if (typeof module !== "undefined" && module.exports) module.exports = RevDiff;
+/* rev-diff.js:end */
+</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
@@ -370,6 +723,9 @@ h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em; line
 .savestat i { width: 7px; height: 7px; border-radius: 4px; background: var(--ok-fg); }
 .savestat.busy i { background: var(--warn-dot); } .savestat.fail { color: var(--crit-fg); } .savestat.fail i { background: var(--crit-fg); }
 .chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
+/* the bar never widens the page: its chip strip scrolls inside it */
+#gate, .gbar, .gbar > *, .barrow, .barrow > *, .chips { min-width: 0; max-width: 100%; }
+.chips { position: relative; }  /* the chips' screen-reader text is placed inside the strip, never past the page's edge */
 .jchip { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border-radius: 16px; border: 1px solid var(--control); background: var(--surface); color: var(--fg); text-decoration: none; font-size: 13px; white-space: nowrap; font-weight: 500; }
 .jchip.read { font-weight: 400; color: var(--muted); }
 .jchip:hover { border-color: var(--accent); color: var(--fg); }
@@ -861,6 +1217,87 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
 .aidlc-flash { animation: aidlc-flash 1.6s ease-out; border-radius: 6px; }
 @media (prefers-reduced-motion: reduce) { .aidlc-flash { animation: none; outline: 2px solid var(--accent, #3b82f6); } }
 /* aidlc-ids.css:end */
+/* ---- What changed in round N: Claude's account first (what you asked, what changed, where), then every change as a jump ---- */
+.revb { border-color: color-mix(in srgb, var(--rv-chg) 45%, var(--line)); }
+.revb > summary { background: color-mix(in srgb, var(--rv-chg) 7%, var(--surface)); }
+.revb > .body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; padding-top: 14px; }
+.revb .esec { min-width: 0; }
+.rvhead { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: flex-start; justify-content: space-between; }
+.rvfb { margin: 0; flex: 1 1 380px; min-width: 0; padding: 10px 14px; border-left: 3px solid var(--rv-chg); border-radius: 0 10px 10px 0; background: var(--raised); color: var(--fg); }
+.rvfb > b { display: block; font-size: 11.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
+.rvfb > div { max-width: 72ch; text-wrap: pretty; overflow-wrap: anywhere; }
+.rvpick { display: inline-flex; flex-direction: column; gap: 4px; font-size: 11.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.rvpick select { font: 500 13px var(--body); letter-spacing: 0; text-transform: none; color: var(--fg); background: var(--surface); border: 1px solid var(--control); border-radius: 6px; min-height: 32px; padding: 0 8px; max-width: 100%; }
+ol.rvdone { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; counter-reset: rv; }
+ol.rvdone > li { counter-increment: rv; position: relative; padding: 10px 12px 10px 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); min-width: 0; }
+ol.rvdone > li::before { content: counter(rv); position: absolute; left: 12px; top: 11px; width: 22px; height: 22px; border-radius: 50%; background: color-mix(in srgb, var(--rv-chg) 22%, transparent); color: var(--fg); font: 600 12px/22px var(--mono); text-align: center; }
+ol.rvdone p { margin: 0; overflow-wrap: anywhere; }
+ol.rvdone .asked { font-size: 12.5px; color: var(--muted); margin-bottom: 3px; }
+ol.rvdone .what { color: var(--fg); max-width: 72ch; }
+ol.rvdone .where { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin-top: 6px; }
+ol.rvdone .where > span { font-size: 11.5px; color: var(--muted); }
+ul.rvlist, ul.rvlist ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; min-width: 0; }
+ul.rvlist li.rvsub { padding-left: 22px; border-left: 1px solid var(--line); margin: 2px 0 6px 12px; }
+.rvlink { min-width: 0; max-width: 100%; display: flex; align-items: flex-start; gap: 8px; width: 100%; min-height: 32px; padding: 4px 8px; border: 0; border-radius: 6px; background: transparent; text-align: left; font-weight: 400; color: var(--fg); }
+.rvlink:hover { background: var(--hover); }
+li.rvg > .rvlink { font-weight: 600; }
+.rvlink .rvt { flex: 1; min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.rvlink .rv-tag, .rvlink .rv-n { margin-top: 2px; flex: none; }
+#rv-total .rv-n { margin-left: 6px; font-size: 12px; }
+ol.rvdone .where .src { white-space: normal; text-align: left; max-width: 100%; overflow-wrap: anywhere; min-height: 24px; height: auto; padding-top: 2px; padding-bottom: 2px; }
+.rvlink .rv-tag { min-width: 64px; justify-content: center; }
+.rvbar { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rvbar .rvseg button { min-height: 28px; padding: 0 11px; }
+.rvstep { min-height: 30px; width: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.rvpos { min-width: 46px; text-align: center; font-size: 12px; color: var(--muted); }
+.block > summary .rv-tags, details.sec > summary .rv-tags, .imeta .rv-tags, .ichips .rv-tags { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.chead .rv-tags, td .rv-tags { display: inline-flex; gap: 6px; margin-left: 6px; vertical-align: middle; }
+details.sec.rv-chg, details.sec.rv-new, details.sec.rv-removed { border-radius: 8px; }
+.irow.rv-chg, .irow.rv-new { box-shadow: inset 3px 0 0 var(--rv-chg); }
+.irow.rv-new { box-shadow: inset 3px 0 0 var(--rv-new); }
+.irow.rv-removed .rv-title { color: var(--rv-del-fg); text-decoration: line-through; text-decoration-thickness: 1px; overflow-wrap: anywhere; }
+.irow.rv-removed .ih { display: flex; gap: 10px; align-items: baseline; padding: 6px 10px; }
+.only-changed .rv-same:not(.block) { display: none !important; }
+.rsec.changed::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--rv-chg); margin-left: 6px; vertical-align: middle; }
+[data-rv="clean"] .irow.rv-chg, [data-rv="clean"] .irow.rv-new { box-shadow: none; }
+@media (max-width: 640px) { .rvhead { flex-direction: column; } .rvpick { width: 100%; } .rvpick select { width: 100%; } ol.rvdone > li { padding-left: 38px; } ul.rvlist li.rvsub { padding-left: 10px; margin-left: 4px; } }
+[data-rv="clean"] #b-revision :is(.rv-tag, .rv-n) { display: inline-flex !important; }  /* the list of changes keeps its tags in Clean */
+/* rev-diff.css:begin */
+/* Shared: the canonical copy is shared/rev-diff/rev-diff.css; scripts/sync-shared.py copies it into every page that
+   carries the block. What changed since an earlier round: inserted words on a soft green wash with a thin underline,
+   removed words struck and muted, a new block with a green edge, a changed one with an amber edge, a gone one as a struck
+   ghost. [data-rv="clean"] on any ancestor hides every mark and shows the page as it is now. */
+:root { --rv-ins-bg: #DDF3E4; --rv-ins-line: #2F8F55; --rv-del-fg: #9A4A43; --rv-del-bg: #FBEDEB; --rv-new: #2F8F55; --rv-chg: #C98A1B; --rv-gone: #B5544B; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --rv-ins-bg: #173A26; --rv-ins-line: #6FCB93; --rv-del-fg: #E3A39C; --rv-del-bg: #3A1F1D; --rv-new: #6FCB93; --rv-chg: #E9B65A; --rv-gone: #E3897F; } }
+:root[data-theme="dark"] { --rv-ins-bg: #173A26; --rv-ins-line: #6FCB93; --rv-del-fg: #E3A39C; --rv-del-bg: #3A1F1D; --rv-new: #6FCB93; --rv-chg: #E9B65A; --rv-gone: #E3897F; }
+ins.rv-ins { background: var(--rv-ins-bg); text-decoration: underline; text-decoration-color: var(--rv-ins-line); text-decoration-thickness: 1px; text-underline-offset: 3px; border-radius: 3px; padding: 0 1px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+del.rv-del { color: var(--rv-del-fg); background: var(--rv-del-bg); text-decoration: line-through; text-decoration-thickness: 1px; border-radius: 3px; padding: 0 1px; opacity: .9; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+div.rv-gone, li.rv-gone { margin: 6px 0; padding: 4px 10px; border-left: 3px solid var(--rv-gone); border-radius: 0 6px 6px 0; background: color-mix(in srgb, var(--rv-del-bg) 60%, transparent); }
+li.rv-gone { list-style: none; }
+tr.rv-gone > td { border-left: 3px solid var(--rv-gone); background: color-mix(in srgb, var(--rv-del-bg) 60%, transparent); }
+div.rv-gone del.rv-del, li.rv-gone del.rv-del, tr.rv-gone del.rv-del { background: transparent; padding: 0; }
+.rv-addblk { box-shadow: inset 3px 0 0 var(--rv-new); padding-left: 8px; }
+li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
+.rv-new { box-shadow: inset 3px 0 0 var(--rv-new); }
+.rv-chg { box-shadow: inset 3px 0 0 var(--rv-chg); }
+.rv-removed { box-shadow: inset 3px 0 0 var(--rv-gone); opacity: .78; }
+.rv-removed :is(h1, h2, h3, h4, .rv-title) { text-decoration: line-through; text-decoration-thickness: 1px; }
+.rv-tag { display: inline-flex; align-items: center; gap: 4px; flex: none; font: 600 11px/1.3 var(--body, system-ui); padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+.rv-tag.new { background: var(--rv-ins-bg); color: var(--rv-new); }
+.rv-tag.chg { background: color-mix(in srgb, var(--rv-chg) 18%, transparent); color: var(--rv-chg); }
+.rv-tag.gone { background: var(--rv-del-bg); color: var(--rv-del-fg); }
+.rv-tag.same { background: transparent; color: var(--muted, currentColor); font-weight: 500; padding-left: 0; padding-right: 0; }
+.rv-n { font: 600 11px/1 var(--mono, ui-monospace, monospace); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rv-n .p { color: var(--rv-new); } .rv-n .m { color: var(--rv-del-fg); }
+.rv-same > summary { opacity: .72; }
+@keyframes rv-flash { from { outline: 2px solid var(--rv-chg); outline-offset: 2px; } to { outline: 2px solid transparent; outline-offset: 6px; } }
+.rv-flash { animation: rv-flash 1.4s ease-out; border-radius: 4px; }
+@media (prefers-reduced-motion: reduce) { .rv-flash { animation: none; outline: 2px solid var(--rv-chg); outline-offset: 2px; } }
+[data-rv="clean"] :is(del.rv-del, .rv-gone, .rv-removed, .rv-tag, .rv-n, .rv-only) { display: none !important; }
+[data-rv="clean"] ins.rv-ins { background: none; text-decoration: none; padding: 0; }
+[data-rv="clean"] :is(.rv-addblk, .rv-new, .rv-chg) { box-shadow: none; }
+[data-rv="clean"] .rv-same > summary { opacity: 1; }
+/* rev-diff.css:end */
 </style>
 
 <main class="wrap">
@@ -915,7 +1352,8 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
   let db = null, uid = null, tipOn = null;
   const fresh = () => ({ unsub: [], gate: null, docs: new Map(), docsLoaded: false, notes: {}, dirty: new Set(), noteStat: {}, unsaved: false, saving: false, failed: false,
     noteTimer: null, painted: "", openNotes: new Set(), railSig: "", mode: {}, picks: {}, fpicks: {}, iopen: new Set(), bt: { v: new Set(), u: new Set(), q: "", rows: new Set() }, refs: new Map(), ids: {}, railOpen: {},
-    reads: {}, readKey: "", hashes: {}, groups: {}, filter: "all", prev: null, prevDocs: null, changed: {}, changedSecs: {} });
+    reads: {}, readKey: "", hashes: {}, groups: {}, filter: "all", prev: null, prevDocs: null, changed: {},
+    rounds: [], roundsLoaded: false, baseDocs: {}, prevList: [], itemDelta: null, rv: { groups: [] }, rvSeq: 0, rvAt: -1 });
   const view = Object.assign({ id: "", diagrams: 0 }, fresh());
   const hasMd = () => typeof marked !== "undefined" && typeof DOMPurify !== "undefined";
 
@@ -1059,46 +1497,213 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     saveReads(); paintChrome(docList());
   }
 
-  /* The previous presentation of the same stage (and Unit), to mark what changed since: read only, never written. */
+  /* ---------- what changed since an earlier round (RevDiff, shared/rev-diff) ----------
+     The earlier rounds of the same stage (and Unit) are read, never written. The base defaults to the round before this
+     one; the viewer can pick any earlier round. The page draws the base round's documents, evaluation and summary off
+     screen the same way it draws this round's, and RevDiff marks the difference in place: words inserted and removed,
+     sections and elements new, changed or gone. Show changes / Clean is the viewer's own choice (RevDiff.pref). Read
+     marks stay hashes of the text as written, taken before any mark is drawn. */
   async function loadPrevious() {
     const g = view.gate, id = view.id;
     try {
       const snap = await db.collection("gates").where("intent", "==", g.intent || "").limit(300).get();
       if (view.id !== id) return;
-      const prev = snap.docs.map((d) => ({ id: d.id, g: d.data() }))
+      view.rounds = snap.docs.map((d) => ({ id: d.id, g: d.data() }))
         .filter((x) => x.id !== id && x.g.stage === g.stage && (x.g.unit || "") === (g.unit || "") && String(x.g.createdAt || "") < String(g.createdAt || ""))
-        .sort((a, b) => String(b.g.createdAt || "").localeCompare(String(a.g.createdAt || "")))[0];
-      if (!prev) return;
-      const ds = await db.doc("gates/" + prev.id).collection("documents").orderBy("n").get();
+        .sort((a, b) => String(b.g.createdAt || "").localeCompare(String(a.g.createdAt || "")));
+      view.roundsLoaded = true;
+      if (view.rounds.length) await useBase(view.rounds[0].id);
+      else { view.painted = ""; paintAll(); }
+    } catch { view.roundsLoaded = true; /* no comparison: every document reads as it is */ }
+  }
+  async function useBase(bid) {
+    const id = view.id, r = view.rounds.find((x) => x.id === bid); if (!r) return;
+    let docs = view.baseDocs[bid];
+    if (!docs) {
+      const ds = await db.doc("gates/" + bid).collection("documents").orderBy("n").get();
       if (view.id !== id) return;
       const rows = new Map(); ds.docs.forEach((d) => rows.set(d.id, d.data()));
-      const prevDocs = new Map(joinDocs(rows, prev.g.documents || []).filter((d) => !d.pending).map((d) => [d.key, d.text]));
-      if (!prevDocs.size) return;  /* nothing to compare with */
-      view.prev = prev; view.prevDocs = prevDocs;
-      computeChanges(); view.painted = ""; paintAll();
-    } catch { /* no comparison: every document reads as it is */ }
+      docs = joinDocs(rows, r.g.documents || []).filter((d) => !d.pending);
+      view.baseDocs[bid] = docs;
+    }
+    view.prev = r; view.prevDocs = new Map(docs.map((d) => [d.key, d.text])); view.prevList = docs; view.rvAt = -1;
+    computeChanges(); view.painted = ""; paintAll();
   }
   const plainTitle = (t) => String(t || "").replace(/[`*_]/g, "").replace(/\s+/g, " ").trim();
+  const evalSig = (g) => [g.evaluation || null, (g.criteria || []).map((c) => [c.key, c.verdict, c.note || "", c.title])];
+  function itemDeltaOf(g, b) {
+    const now = (g.digest || {}).items || [], before = (b.digest || {}).items || [];
+    const old = new Map(before.map((i) => [i.id, i])), out = { by: {}, removed: [], n: 0 };
+    now.forEach((i) => {
+      const o = old.get(i.id);
+      if (!o) { out.by[i.id] = { t: "new" }; out.n++; return; }
+      const text = o.title !== i.title || (o.body || "") !== (i.body || "");
+      const said = (o.summary || "") !== (i.summary || "") || (o.label || "") !== (i.label || "");
+      if (text || said) { out.by[i.id] = { t: "changed", text, said, old: o }; out.n++; }
+    });
+    const ids = new Set(now.map((i) => i.id));
+    out.removed = before.filter((i) => !ids.has(i.id) && !(i.settled && !i.coveredBy)); out.n += out.removed.length;
+    return out;
+  }
   function computeChanges() {
-    view.changed = {}; view.changedSecs = {};
+    view.changed = {}; view.itemDelta = null;
     if (!view.prevDocs) return;
+    const g = view.gate, b = view.prev.g;
     docList().forEach((d) => {
       if (d.pending || d.partial) return;
       const old = view.prevDocs.get(d.key);
-      if (old === undefined) { view.changed[d.key] = "new"; return; }
-      if (old === d.text) return;
-      view.changed[d.key] = "changed";
-      const before = new Map(splitHeadings(old, "##").map((s) => [plainTitle(s.title), s.body]));
-      view.changedSecs[d.key] = new Set(splitHeadings(d.text, "##").filter((s) => s.title && before.get(plainTitle(s.title)) !== s.body).map((s) => plainTitle(s.title)));
+      if (old === undefined) view.changed[d.key] = "new";
+      else if (old !== d.text) view.changed[d.key] = "changed";
     });
+    if (ev() && JSON.stringify(evalSig(g)) !== JSON.stringify(evalSig(b))) view.changed.evaluation = b.evaluation ? "changed" : "new";
+    if (g.summary && g.summary !== b.summary) view.changed.summary = b.summary ? "changed" : "new";
+    view.itemDelta = itemDeltaOf(g, b);
+    if (view.itemDelta.n && dg()) view.changed[ev() ? "items" : "digest"] = "changed";
   }
   const roundNo = () => (view.gate && view.gate.round) || 1;
   const sinceLabel = () => !view.prev ? "" : (view.prev.g.round && view.prev.g.round !== roundNo() ? "round " + view.prev.g.round : "the last page");
+  const rvOn = () => RevDiff.pref() === "show";
   function revTag(key) {
     const ch = view.changed[key]; if (!ch) return "";
     const t = revTone(roundNo());
-    const tip = ch === "new" ? `Not in the previous page of this stage (${sinceLabel()})` : `Differs from the previous page of this stage (${sinceLabel()}); the changed sections carry the same mark`;
+    const tip = ch === "new" ? `Not in ${sinceLabel()} of this stage` : `Differs from ${sinceLabel()} of this stage; open it to see the words that changed`;
     return `<span class="tag" style="background:var(--${t}-bg);color:var(--${t}-fg)" data-tip="${esc(tip)}">${ch === "new" ? "new" : "changed"} since ${esc(sinceLabel())}</span>`;
+  }
+  /* a part's tag: new, changed (+words −words) or removed since the base round */
+  const rvCount = (c) => c && (c.ins || c.del) ? `<span class="rv-n" data-tip="${esc("Words added and removed since " + sinceLabel())}">${c.ins ? `<span class="p">+${c.ins}</span>` : ""}${c.ins && c.del ? " " : ""}${c.del ? `<span class="m">−${c.del}</span>` : ""}</span>` : "";
+  const rvTag = (t, c) => `<span class="rv-tag ${t === "new" ? "new" : t === "gone" ? "gone" : "chg"}">${t === "new" ? "new" : t === "gone" ? "removed since " + esc(sinceLabel()) : "changed"}</span>` + (t === "gone" ? "" : rvCount(c));
+  function tagInto(n, html) {
+    const span = document.createElement("span"); span.className = "rv-tags"; span.dataset.rvSkip = ""; span.innerHTML = html;
+    if (n.matches("tr")) { const c = n.cells[0]; if (c) c.appendChild(span); return; }
+    const sum = n.matches("details") ? n.querySelector(":scope > summary") : null;
+    if (sum) { sum.insertBefore(span, sum.querySelector(":scope > .cnt, :scope > .edot, :scope > .end, :scope > .idot") || null); return; }
+    const head = n.matches(".card") ? n.querySelector(":scope > .chead") : null;
+    if (head) { head.insertBefore(span, head.querySelector(":scope > .end") || null); return; }
+    n.insertBefore(span, n.firstChild);
+  }
+  const RV_SKIP = ".edotc, .edot, .cnt, .rdot, .idot, .vtools, .notebox, .seg, .rv-tags, .notedot, h3 > .n, .count, .ctally, .lg";
+  const RV_KEYED = "details.sec, [data-ekey], [data-rvkey]";
+  const ekeyId = (n) => n.dataset.ekey ? n.dataset.ekey.split(":").slice(2).join(":") : (n.dataset.rvkey || "");
+  const rvKeyOf = (n) => (n.dataset.ekey || n.dataset.rvkey) ? "e:" + ekeyId(n) : n.matches("details.sec") ? "s:" + plainTitle(n.dataset.title).toLowerCase() : null;
+  const ID_LEAD = /^[A-Z]{1,5}-?\d+(?:\.\d+)*[a-z]?\b\s*[·:—–.-]?\s*/;
+  const rvTitleOf = (n) => {
+    if (!(n.dataset.ekey || n.dataset.rvkey)) return "";
+    const h = n.matches("tr") ? (n.cells[1] || n.cells[0]) : n.querySelector("h1, h2, h3, h4, .ctitle, b");
+    return h ? plainTitle(h.textContent).replace(ID_LEAD, "").toLowerCase() : "";
+  };
+  const rvName = (n) => n.matches("details.sec") && !(n.dataset.ekey || n.dataset.rvkey) ? plainTitle(n.dataset.title) : ekeyId(n) + ((() => { const t = rvTitleOf(n); return t && t !== ekeyId(n).toLowerCase() ? " · " + plainTitle((n.matches("tr") ? (n.cells[1] || n.cells[0]) : n.querySelector("h1, h2, h3, h4, .ctitle, b") || {}).textContent || "").replace(ID_LEAD, "") : ""; })());
+  /* the base round of a document, drawn like this one, off screen; its elements carry data-rvkey, never a read mark */
+  function rvBuild(d, i) {
+    const keep = view.refs; view.refs = new Map();
+    try {
+      const vf = d.covered && ev() ? null : viewFor(d), mode = view.mode[d.key] || "view";
+      let built = null;
+      if (vf && mode === "view") { try { built = vf.render(d, i); } catch { built = null; } }
+      if (!built) { built = document.createElement("div"); fillText(built, d, i, true); }
+      elemList(built).forEach((x) => { x.n.dataset.rvkey = x.id; });
+      return built;
+    } finally { view.refs = keep; }
+  }
+  function ghostOf(x, cc) {
+    const g = x.cloneNode(true); g.classList.add("rv-removed"); g.dataset.rvSkip = ""; g.dataset.aidlcNoids = "";
+    [g, ...g.querySelectorAll("[id], [data-aidlc-id], [data-rvkey], [data-ref]")].forEach((e) => { e.removeAttribute("id"); e.removeAttribute("data-aidlc-id"); e.removeAttribute("data-rvkey"); e.removeAttribute("data-ref"); });
+    g.querySelectorAll("button, textarea").forEach((b) => b.remove());
+    if (g.matches("details")) g.open = false;
+    tagInto(g, rvTag("gone", cc));
+    return g;
+  }
+  function placeGhost(g, prev, first, root) {
+    if (prev) { let at = prev; if (at.matches("tr")) { let nx = at.nextElementSibling; while (nx && (nx.classList.contains("rdet") || nx.classList.contains("fdet") || nx.matches("tr.rv-gone"))) { at = nx; nx = nx.nextElementSibling; } } at.after(g); }
+    else if (first) first.before(g);
+    else root.appendChild(g);
+  }
+  function rvGroup(key, title, go, t, c) { const grp = { key, title, go, t, ins: (c || {}).ins || 0, del: (c || {}).del || 0, items: [] }; view.rv.groups.push(grp); return grp; }
+  const rvId = (n) => { if (!n.id) n.id = "rv-" + (++view.rvSeq); return "#" + n.id; };
+  function rvKeyedOpts(grp, root, listed, nameOf) {
+    nameOf = nameOf || rvName;
+    return {
+      keyed: RV_KEYED, keyedInner: () => RV_KEYED, keyOf: rvKeyOf, titleOf: rvTitleOf, skip: RV_SKIP,
+      onSame: (n) => { n.classList.add("rv-same"); if (rvOn() && n.matches("details.sec")) n.open = false; },
+      onNew: (n, cc) => { n.classList.add("rv-new", "changed"); tagInto(n, rvTag("new", cc)); if (listed(n)) grp.items.push({ go: rvId(n), title: nameOf(n), t: "new", ins: cc.ins, del: 0 }); },
+      onChanged: (n, cc) => { n.classList.add("rv-chg", "changed"); tagInto(n, rvTag("changed", cc)); if (listed(n)) grp.items.push({ go: rvId(n), title: nameOf(n), t: "changed", ins: cc.ins, del: cc.del }); },
+      onRemoved: (x, prev, first, cc, at) => { const g = ghostOf(x, cc); placeGhost(g, prev, first, at || root); if (listed(g)) grp.items.push({ go: rvId(g), title: nameOf(x), t: "gone", ins: 0, del: cc.del }); },
+    };
+  }
+  function rvDoc(d, i) {
+    const body = $("db-" + d.key), block = $("d-" + d.key); if (!body || !block || d.pending || d.partial) return;
+    const ch = view.changed[d.key], title = ((block.querySelector("summary h2") || {}).textContent || d.title || d.key).trim();
+    if (!ch) { block.classList.add("rv-same"); return; }
+    if (ch === "new") { block.classList.add("rv-new"); rvGroup(d.key, title, rvId(block), "new", { ins: RevDiff.countWords(d.text) }); return; }
+    const old = view.prevList.find((x) => x.key === d.key); if (!old) return;
+    const grp = rvGroup(d.key, title, rvId(block), "changed", null);
+    const listed = (n) => n.matches("details.sec") || !(n.parentElement && n.parentElement.closest("details.sec"));
+    let c;
+    try { c = RevDiff.diffKeyed(body, rvBuild(old, i), rvKeyedOpts(grp, body, listed)); } catch (e) { console.warn("diff failed", d.key, e); c = { ins: 0, del: 0 }; }
+    /* a rule's or finding's detail row is not the row: a change there shows it and marks the row */
+    body.querySelectorAll("tr.rdet, tr.fdet").forEach((det) => {
+      if (!det.querySelector(".rv-ins, .rv-del, .rv-gone")) return;
+      det.hidden = false;
+      const row = det.classList.contains("rdet") ? det.previousElementSibling : det.parentElement.querySelector(`tr.frow[data-i="${det.dataset.for}"]`);
+      if (row && !row.classList.contains("rv-chg") && !row.classList.contains("rv-new")) { row.classList.remove("rv-same"); row.classList.add("rv-chg", "changed"); tagInto(row, rvTag("changed")); grp.items.push({ go: rvId(row), title: rvName(row), t: "changed" }); }
+    });
+    grp.ins = c.ins; grp.del = c.del;
+    const h = block.querySelector(":scope > summary h2"); if (h) { const s = document.createElement("span"); s.className = "rv-tags"; s.dataset.rvSkip = ""; s.innerHTML = rvCount(c); h.after(s); }
+  }
+  function rvEval() {
+    const blk = $("b-eval"); if (!blk || !view.changed.evaluation) return;
+    const body = blk.querySelector(":scope > .body"), b = view.prev.g;
+    const grp = rvGroup("evaluation", "Claude's evaluation", rvId(blk), view.changed.evaluation, null);
+    if (view.changed.evaluation === "new") return;
+    const keep = view.gate; let was;
+    view.gate = b; try { was = node(evalBlock(b.evaluation)).querySelector(":scope > .body"); fillMd(was); } finally { view.gate = keep; }
+    const nameOf = (n) => plainTitle((n.querySelector(".ctitle") || n).textContent);
+    const c = RevDiff.diffKeyed(body, was, Object.assign(rvKeyedOpts(grp, body, () => true, nameOf), { keyed: "details.crow", keyedInner: () => "details.crow", keyOf: (n) => n.id || null, titleOf: null }));
+    grp.ins = c.ins; grp.del = c.del;
+  }
+  function rvSummary() {
+    const box = $("summarymd"); if (!box || !view.changed.summary) return;
+    const grp = rvGroup("summary", "Completion summary", rvId($("b-summary")), view.changed.summary, null);
+    if (view.changed.summary === "new") return;
+    const was = document.createElement("div"); renderMarkdown(was, view.prev.g.summary);
+    const c = RevDiff.markTree(box, was, { skip: RV_SKIP }); grp.ins = c.ins; grp.del = c.del;
+  }
+  /* items: a tag per changed or new item, its words marked; the ones gone listed under the lanes */
+  function rvItems(root) {
+    const D = view.itemDelta; if (!D || !root || !view.prev) return;
+    root.querySelectorAll(".irow[data-item]").forEach((r) => {
+      const x = D.by[r.dataset.aidlcId]; if (!x) { r.classList.add("rv-same"); return; }
+      r.classList.add(x.t === "new" ? "rv-new" : "rv-chg");
+      const it = itemOf(r.dataset.aidlcId) || {};
+      const meta = r.querySelector(".imeta") || r.querySelector(".ichips") || r.querySelector(".ih");
+      meta.insertAdjacentHTML("beforeend", `<span class="rv-tags" data-rv-skip>${rvTag(x.t)}${x.t === "changed" && x.old.label && it.label && x.old.label !== it.label ? `<span class="rv-tag gone" data-tip="${esc("Its label in " + sinceLabel())}">was ${esc(x.old.label)}</span>` : ""}</span>`);
+      if (x.t !== "changed") return;
+      const sum = r.querySelector(".isum"); if (sum && x.said) { const was = document.createElement("span"); was.innerHTML = inline(x.old.summary || x.old.title); RevDiff.markText(sum, was.textContent, { skip: RV_SKIP }); }
+      const tt = r.querySelector(".ititle"); if (tt && x.text) RevDiff.markText(tt, x.old.title || "");
+      const ib = r.querySelector(".ib"); if (!ib || !x.text) return;
+      const awt = ib.querySelector(".awt"); if (awt) { const was = document.createElement("p"); was.innerHTML = `<b>As written</b>${inline(x.old.title)}`; RevDiff.markText(awt, was.textContent, { skip: RV_SKIP }); }
+      const aw = ib.querySelector(".aw") || ib.querySelector(":scope > p:not(.awt)");
+      if (aw) { const was = node(`<div>${asWritten(x.old) || (x.old.body ? `<p>${inline(x.old.body)}</p>` : "")}</div>`) || document.createElement("div"); fillMd(was); RevDiff.markTree(aw, was, { skip: RV_SKIP }); }
+    });
+    if (D.removed.length) root.insertAdjacentHTML("beforeend", `<details class="settled rv-only rvgone" open data-rv-skip><summary>Removed since ${esc(sinceLabel())} (${D.removed.length})</summary><div class="lane">${D.removed.map((i) => `<div class="irow rv-removed" id="rv-gone-${esc(i.key || i.id)}"><div class="ih"><span class="iid">${esc(i.id)}</span><span class="rv-title">${inline(i.summary || i.title)}</span></div></div>`).join("")}</div></details>`);
+  }
+  function rvItemsGroup() {
+    const D = view.itemDelta, blk = $("b-items") || $("b-digest"); if (!D || !D.n || !blk) return;
+    const grp = rvGroup("items", ev() ? "What the stage says" : "At a glance", rvId(blk), "changed", null);
+    const now = (dg() || {}).items || [];
+    now.forEach((i) => { const x = D.by[i.id]; if (x) grp.items.push({ go: "i:" + i.key, title: i.id + " · " + plainTitle(i.summary || i.title), t: x.t }); });
+    D.removed.forEach((i) => grp.items.push({ go: "#rv-gone-" + (i.key || i.id), title: i.id + " · " + plainTitle(i.summary || i.title), t: "gone" }));
+  }
+  /* every diff of the page, after it is drawn and linked */
+  function rvApply() {
+    view.rv = { groups: [] }; view.rvSeq = 0;
+    el.col.dataset.rv = rvOn() ? "show" : "clean";
+    if (!view.prev) { paintRvList(); return; }
+    rvEval(); rvItemsGroup(); rvItems($("itemsbody") || $("digestbody")); rvSummary();
+    const docs = docList(), here = new Set(docs.map((d) => d.key));
+    docs.forEach((d, i) => rvDoc(d, i));
+    /* a document gone since the base round is listed; a review copy is replaced by the next one and is not */
+    view.prevList.filter((d) => !here.has(d.key) && !/^review-\d+$/.test(keyOf(d))).forEach((d) => rvGroup(d.key, d.title || d.key, "", "gone", { del: RevDiff.countWords(d.text) }));
+    paintRvList();
   }
 
   function paintGate() {
@@ -1138,18 +1743,20 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
   function paintAll() {
     if (!view.gate) return;
     const g = view.gate; const docs = docList();
-    const sig = JSON.stringify([view.id, g.summary, g.brief, g.review, docs.map((d) => [d.key, d.title, d.kind, d.text, !!d.pending, !!d.partial, !!d.covered]), g.buildTest || null, g.findings || null, g.digest || null, g.evaluation || null, g.criteria || null, isDark(), view.mode, view.changed]);
+    const sig = JSON.stringify([view.id, g.summary, g.brief, g.review, docs.map((d) => [d.key, d.title, d.kind, d.text, !!d.pending, !!d.partial, !!d.covered]), g.buildTest || null, g.findings || null, g.digest || null, g.evaluation || null, g.criteria || null, isDark(), view.mode, view.changed, g.revision || null, view.prev ? view.prev.id : "", view.roundsLoaded, view.rounds.length, RevDiff.pref()]);
     if (sig === view.painted) { paintChrome(docs); return; }
     view.painted = sig; view.refs = new Map();
     view.hashes = {}; view.groups = {}; if (g.summary) view.hashes.summary = hash(g.summary); if (g.brief) view.hashes.review = hash(g.brief);
     const E = ev(), covered = new Set(coveredDocs().map((d) => d.key));
     if (E) view.hashes.evaluation = hash(JSON.stringify([E, g.criteria || []]));
+    if (rvShown()) view.hashes.revision = hash(JSON.stringify([g.revision || null, roundNo()]));
     docs.forEach((d) => { if (!d.pending && !covered.has(d.key)) view.hashes[d.key] = hash(d.text); });
     const FN = fnd(); if (FN) { view.hashes.findings = hash(JSON.stringify(FN.items)); FN.items.forEach((f) => { view.hashes["finding:" + f.id] = hash(JSON.stringify(f)); }); view.groups.findings = FN.items.map((f) => "finding:" + f.id); }
     const DG = dg(); if (DG) { DG.items.forEach((it) => { view.hashes["item:" + it.key] = hash(JSON.stringify([it.title, it.body || "", it.coveredBy || null, it.summary || "", it.label || ""])); }); view.groups[E ? "items" : "digest"] = DG.items.map((it) => "item:" + it.key); }
     const B = bt(); if (B && B.targets) { view.hashes["bt-matrix"] = hash(JSON.stringify(B.targets)); if (openTargets(B).length) view.hashes["bt-decide"] = hash(JSON.stringify(openTargets(B))); }
     const frag = [];
     if (B) frag.push(btStrip(B));
+    if (rvShown()) frag.push(revBlock());
     if (E) { frag.push(evalBlock(E)); if (DG) frag.push(itemsBlock(DG)); }
     if (g.summary) frag.push(`<details class="block sum" open id="b-summary" data-block="summary"><summary>${CARET}<h2>${E ? "Completion summary" : "Summary"}</h2><span class="hint wide">what Claude did in this stage</span><span class="end">${rdot("summary")}</span></summary><div class="body md" id="summarymd"></div></details>`);
     if (DG && !E) frag.push(digestBlock(DG));
@@ -1175,20 +1782,9 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     linkRefs(el.col);
     tipTerms(el.col);
     rowHandles(el.col);
-    markChangedSections();
+    rvApply();
     drawDiagrams(el.col);
     view.railSig = ""; paintChrome(docs);
-  }
-  function markChangedSections() {
-    Object.entries(view.changedSecs).forEach(([key, set]) => {
-      if (!set.size) return; const b = $("d-" + key); if (!b) return; const t = revTone(roundNo());
-      b.querySelectorAll("details.sec").forEach((s) => {
-        if (!set.has(plainTitle(s.dataset.title))) return;
-        s.classList.add("changed"); s.style.background = `var(--${t}-tint)`;
-        const cnt = s.querySelector(":scope > summary .cnt");
-        if (cnt) cnt.insertAdjacentHTML("beforebegin", `<span class="tag" style="background:var(--${t}-bg);color:var(--${t}-fg)" data-tip="${esc("This section differs from " + sinceLabel())}">changed</span>`);
-      });
-    });
   }
   const rdot = (key) => `<button type="button" class="rdot" data-read="${esc(key)}" aria-label="Mark as read" data-tip="Mark as read"><i aria-hidden="true"></i></button>`;
 
@@ -1196,6 +1792,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
   function blocksOf(docs) {
     const g = view.gate, out = [];
     const E = ev();
+    if (rvShown()) { const G = (view.rv || {}).groups || []; out.push({ key: "revision", go: "b-revision", short: "What changed", count: G.length ? String(G.reduce((s, x) => s + Math.max(1, x.items.length), 0)) : "", tip: "What changed in this round: Claude's account of the revision and every change on the page" }); }
     if (E) {
       out.push({ key: "evaluation", go: "b-eval", short: "Evaluation", count: "", extra: (E.lookFirst || []).length ? `<span class="tag" ${toneOf("warn")}>${E.lookFirst.length} to look at first</span>` : "", tip: "Claude's evaluation of the stage against its rules: what to look at first, risks, gaps, conflicts" });
       const J = judgedItems(); if (J.length) out.push({ key: "items", go: "b-items", short: "Items", count: J.filter((i) => isRead("item:" + i.key)).length + "/" + J.length, tip: "Every requirement, rule, decision and story, summarised and labelled by Claude" });
@@ -1221,7 +1818,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     docs.forEach((d) => {
       if (covered.has(d.key)) return;
       const shown = $("d-" + d.key); const title = ((shown && shown.querySelector("summary h2")) || {}).textContent || d.title || d.key;
-      const secs = shown ? shown.querySelectorAll("details.sec").length : 0;
+      const secs = shown ? shown.querySelectorAll("details.sec:not(.rv-removed)").length : 0;
       out.push({ key: d.key, go: "d-" + d.key, short: title.trim(), count: secs ? String(secs) : "", tip: `${title.trim()}${secs ? ": " + plural(secs, "section") : ""}${d.path ? " · " + d.path : ""}`, doc: d });
     });
     return out;
@@ -1230,7 +1827,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
   function passes(key) {
     const f = view.filter;
     if (f === "unread") return !isRead(key);
-    if (f === "changed") return !!view.changed[key];
+    if (f === "changed") return key === "revision" || !!view.changed[key];
     if (f === "notes") return !!(view.notes[key] || "").trim();
     return true;
   }
@@ -1252,14 +1849,14 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     el.hfacts.hidden = false;
     if (view.prev && nChanged) {
       const t = revTone(roundNo()); const nNew = Object.values(view.changed).filter((x) => x === "new").length;
-      el.revs.innerHTML = `<span class="sw" style="background:var(--${t}-fg)"></span><span>Compared with ${esc(sinceLabel())} (${esc(fmt(view.prev.g.createdAt))}): ${[nChanged - nNew ? plural(nChanged - nNew, "document") + " changed" : "", nNew ? plural(nNew, "document") + " new" : ""].filter(Boolean).join(", ")}. Changed documents and sections carry this colour.</span>` +
+      el.revs.innerHTML = `<span class="sw" style="background:var(--${t}-fg)"></span><span>Compared with ${esc(sinceLabel())} (${esc(fmt(view.prev.g.createdAt))}): ${[nChanged - nNew ? plural(nChanged - nNew, "part") + " changed" : "", nNew ? plural(nNew, "part") + " new" : ""].filter(Boolean).join(", ")}. ${rvOn() ? "Inside them, words added are highlighted and words removed are struck through." : "Changes are hidden: choose Changes in the bar to mark them."}</span>` +
         `<button type="button" class="fpill" data-filter="${view.filter === "changed" ? "all" : "changed"}" aria-pressed="${view.filter === "changed"}">Show only what changed</button>`;
       el.revs.hidden = false;
     } else el.revs.hidden = true;
     /* the sticky bar; focus stays on the control it was on */
     const f = document.activeElement; const keep = f && el.bar.contains(f) ? [...f.attributes].map((a) => a.name).find((n) => /^data-(?!tip)/.test(n)) : null; const keepVal = keep ? f.getAttribute(keep) : null;
     const pct = total ? Math.round(read / total * 100) : 100;
-    el.bar.innerHTML = `<div class="barrow"><div class="filters" role="group" aria-label="Show">${filters.map((x) => `<button type="button" class="fpill" data-filter="${x[0]}" aria-pressed="${view.filter === x[0]}">${x[1]}<span class="n">${x[2]}</span></button>`).join("")}</div>` +
+    el.bar.innerHTML = `<div class="barrow"><div class="filters" role="group" aria-label="Show">${filters.map((x) => `<button type="button" class="fpill" data-filter="${x[0]}" aria-pressed="${view.filter === x[0]}">${x[1]}<span class="n">${x[2]}</span></button>`).join("")}</div>${rvBar()}` +
       `<div class="tools"><span class="savestat" id="savestat" role="status" aria-live="polite"></span><span class="progress-r" data-tip="Blocks, items and elements you marked read with their dot. A block you read turns unread again only when its text changes."><span class="num">Read ${read}/${total}</span><span class="meter" aria-hidden="true"><i style="width:${pct}%"></i></span></span>` +
       `<button type="button" data-all="open">Expand all</button><button type="button" data-all="close">Collapse all</button><button type="button" class="wide" data-allread="1">Mark all read</button><button type="button" class="railtoggle" data-outline="1" aria-controls="rail" aria-expanded="${el.rail.classList.contains("show")}">Outline</button></div></div>` +
       `<nav class="chips" aria-label="Jump to">${blocks.filter((x) => passes(x.key)).map((x) => `<a class="jchip${isRead(x.key) ? " read" : ""}" href="#" data-go="${esc(x.go)}" data-tip="${esc("Jump to " + x.tip + (isRead(x.key) ? " (read)" : " (unread)"))}"><span class="udot" aria-hidden="true"></span>${esc(x.short)}${revTag(x.key)}${x.count ? `<span class="count">${esc(x.count)}</span>` : ""}${x.extra || ""}<span class="sr">${isRead(x.key) ? ", read" : ", unread"}</span></a>`).join("")}</nav>`;
@@ -1273,14 +1870,15 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
       const dot = node.querySelector(":scope > summary .rdot"); if (dot) { const lab = r ? "Mark as unread" : "Mark as read"; dot.setAttribute("aria-label", lab); dot.dataset.tip = lab; }
       const ok = passes(x.key); node.hidden = !ok; if (ok) shown++;
     });
+    el.col.classList.toggle("only-changed", view.filter === "changed");
     el.col.querySelectorAll("[data-item]").forEach((n) => {
-      const r = isRead(n.dataset.item); n.classList.toggle("read", r); n.hidden = view.filter === "unread" && r;
+      const r = isRead(n.dataset.item); n.classList.toggle("read", r); n.hidden = (view.filter === "unread" && r) || (view.filter === "changed" && n.classList.contains("rv-same"));
       const d = n.querySelector(":scope > .ih > .idot, :scope > .dtop > .idot"); if (d) { d.dataset.tip = r ? "Read. Press to mark unread" : "Mark as read"; d.setAttribute("aria-label", (r ? "Mark unread: " : "Mark read: ") + (n.dataset.item.split(":")[1] || "")); }
     });
     /* a tier or a folded group whose items are all read leaves with them */
     el.col.querySelectorAll(".dsec, details.settled").forEach((c) => {
       const its = c.querySelectorAll("[data-item]");
-      c.hidden = view.filter === "unread" && its.length > 0 && [...its].every((n) => isRead(n.dataset.item));
+      c.hidden = (view.filter === "unread" && its.length > 0 && [...its].every((n) => isRead(n.dataset.item))) || (view.filter === "changed" && its.length > 0 && [...its].every((n) => n.classList.contains("rv-same")));
     });
     paintElems();
     const rgp = $("b-reference"); if (rgp) rgp.hidden = [...rgp.querySelectorAll("details.doc")].every((n) => n.hidden);
@@ -1385,7 +1983,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     fillText(body, d, i);
   }
   function setSeg(key, mode) { const seg = $("seg-" + key); if (!seg) return; seg.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === mode))); }
-  function fillText(body, d, i) {
+  function fillText(body, d, i, detached) {
     if (d.kind === "json") {
       const text = String(d.text ?? ""); const lines = text.split("\n").length;
       body.innerHTML = `<div class="jsonbox"><p class="jsonnote">JSON · ${lines} line${lines === 1 ? "" : "s"}</p><pre></pre></div>`;
@@ -1394,7 +1992,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     const html = mdHtml(d.text);
     if (html === null) { body.innerHTML = '<pre class="plain"></pre>'; body.firstChild.textContent = d.text; return; }
     const tmp = document.createElement("div"); tmp.innerHTML = html; decorate(tmp);
-    promoteTitle(tmp, d);
+    if (detached) { const f = tmp.firstElementChild; if (f && f.tagName === "H1" && tmp.querySelectorAll("h1").length === 1) f.remove(); } else promoteTitle(tmp, d);
     sectionize(tmp, d, i === 0);
     body.innerHTML = ""; body.appendChild(tmp); tmp.className = "md" + (tmp.querySelector("details.sec") ? "" : " flat");
     tmp.querySelectorAll("details.sec").forEach((s) => s.addEventListener("toggle", () => { if (s.open) drawDiagrams(s); }));
@@ -2778,6 +3376,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     if (sig === view.railSig) return; view.railSig = sig;
     let html = `<div class="railh">Outline</div>`;
     const top = (go, key, title) => `<div class="rgroup"><button type="button" class="rdoc${isRead(key) ? " read" : ""}" data-go="${go}"><span class="rcaret none" aria-hidden="true"></span><span class="rtitle">${title}</span></button></div>`;
+    if (rvShown() && passes("revision")) html += top("b-revision", "revision", "What changed in round " + roundNo());
     if (ev()) { html += top("b-eval", "evaluation", "Claude's evaluation"); if (judgedItems().length) html += top("b-items", "items", "What the stage says"); }
     if (view.gate && view.gate.summary && passes("summary")) html += top("b-summary", "summary", "Summary");
     if (view.gate && view.gate.brief && passes("review")) html += top("b-brief", "review", "Review");
@@ -2788,7 +3387,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     const covered = new Set(coveredDocs().map((d) => d.key));
     docs.filter((d) => passes(d.key) && !covered.has(d.key)).forEach((d) => {
       const shown = el.col.querySelector(`#d-${CSS.escape(d.key)} summary h2`); const title = (shown && shown.textContent.trim()) || d.title || d.key;
-      const secs = [...el.col.querySelectorAll(`#d-${CSS.escape(d.key)} details.sec`)].filter((x) => !x.hidden && !x.classList.contains("eh"));
+      const secs = [...el.col.querySelectorAll(`#d-${CSS.escape(d.key)} details.sec:not(.rv-removed)`)].filter((x) => !x.hidden && !x.classList.contains("eh") && !(view.filter === "changed" && x.classList.contains("rv-same")));
       const block = $("d-" + d.key); const open = Object.prototype.hasOwnProperty.call(view.railOpen, d.key) ? view.railOpen[d.key] : !!(block && block.open);
       html += `<details class="rgroup" data-key="${esc(d.key)}"${open ? " open" : ""}><summary tabindex="-1"><span class="rdoc${isRead(d.key) ? " read" : ""}" data-go="d-${esc(d.key)}" role="button" tabindex="0"><span class="rcaret${secs.length ? "" : " none"}" aria-label="${secs.length ? "Show or hide its sections" : ""}">${secs.length ? CHEV : ""}</span><span class="rtitle">${esc(title)}</span>${(view.notes[d.key] || "").trim() ? '<i class="notedot" aria-label="has your note"></i>' : ""}</span></summary>` +
         secs.map((s) => `<button type="button" class="rsec${s.classList.contains("changed") ? " changed" : ""}" data-go="${esc(s.id)}">${esc(s.dataset.title)}</button>`).join("") + `</details>`;
@@ -2833,8 +3432,10 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     el.rail.querySelectorAll("details.rgroup").forEach((g) => { g.open = on; view.railOpen[g.dataset.key] = on; });
   }
   function onChromeClick(e) {
-    const t = e.target.closest("[data-filter], [data-all], [data-allread], [data-outline], [data-go], [data-retry]"); if (!t) return;
+    const t = e.target.closest("[data-filter], [data-all], [data-allread], [data-outline], [data-go], [data-retry], [data-rvview], [data-rvstep]"); if (!t) return;
     e.preventDefault();
+    if (t.dataset.rvview) { RevDiff.setPref(t.dataset.rvview); view.rvAt = -1; view.painted = ""; paintAll(); const b = el.bar.querySelector(`[data-rvview="${t.dataset.rvview}"]`); if (b) b.focus(); return; }
+    if (t.dataset.rvstep) { rvStep(+t.dataset.rvstep); return; }
     if (t.dataset.filter) { view.filter = t.dataset.filter; paintChrome(docList()); }
     else if (t.dataset.all) expandAll(t.dataset.all === "open");
     else if (t.dataset.allread) { readAndFold(blocksOf(docList()).map((b) => b.key), true); setRead(itemKeys(), true); paintItems(); }
@@ -2864,21 +3465,29 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
      (a section a view flags with data-elem, a .card, a table row, a unit tile), gives each a dot at the right edge, and
      stores the mark as el:<doc key>:<element id>, hashed on the element's text. The document's block is read when all are. */
   const elProgress = () => { const keys = Object.keys(view.hashes).filter((k) => k.startsWith("el:")); return { total: keys.length, read: keys.filter(isRead).length }; };
-  function markElements(root, d) {
+  /* the elements a view drew, each with its id: [{n, id, det}]; markElements and the diff of a revision both use it */
+  function elemList(root) {
     const nodes = [...root.querySelectorAll("[data-elem], .card, table.grid > tbody > tr, .layer > .unit")].filter((n) => {
       if (n.matches("tr")) return n.cells.length && !n.classList.contains("rdet") && !n.classList.contains("fdet") && !n.closest("table.attr") && !n.parentElement.closest(".card, details.sub, [data-elem], .vtools");
       return !n.parentElement.closest(".card, [data-elem]");
     });
-    if (!nodes.length) return;
     const norm = (t) => String(t || "").replace(/\s+/g, " ").trim();
-    const seen = new Map(), keys = [];
-    nodes.forEach((n, i) => {
+    const seen = new Map();
+    return nodes.map((n, i) => {
       let det = null;
       if (n.matches("tr.rrow")) { det = n.nextElementSibling; if (!det || !det.classList.contains("rdet")) det = null; }
       else if (n.matches("tr.frow")) det = n.parentElement.querySelector(`tr.fdet[data-for="${n.dataset.i}"]`);
       const lead = n.dataset.elemId || n.dataset.ref || (n.matches("tr") ? (n.cells[0] || {}).textContent : ((n.querySelector("h1, h2, h3, h4, .iid, b") || {}).textContent));
       let id = norm(lead).slice(0, 80) || "n" + (i + 1);
       const c = (seen.get(id) || 0) + 1; seen.set(id, c); if (c > 1) id += "#" + c;
+      return { n, id, det };
+    });
+  }
+  function markElements(root, d) {
+    const list = elemList(root); if (!list.length) return;
+    const norm = (t) => String(t || "").replace(/\s+/g, " ").trim();
+    const keys = [];
+    list.forEach(({ n, id, det }) => {
       const key = "el:" + d.key + ":" + id;
       view.hashes[key] = hash(norm(n.textContent) + (det ? "\n" + norm(det.textContent) : "")); keys.push(key);
       n.dataset.ekey = key; if (det) det.dataset.ekeyOf = key;
@@ -3178,7 +3787,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     if (ev()) { paintItems2(); paintChrome(docList()); return; }
     const D = dg(), body = $("digestbody");
     if (D && body) { const keep = body.querySelector("[data-iread]:focus, [data-iopen]:focus"); const k = keep && (keep.dataset.iread || keep.dataset.iopen);
-      body.innerHTML = digestBlock(D).split('id="digestbody">')[1].replace(/<\/div><\/details>$/, ""); linkRefs(body); tipTerms(body);
+      body.innerHTML = digestBlock(D).split('id="digestbody">')[1].replace(/<\/div><\/details>$/, ""); linkRefs(body); tipTerms(body); rvItems(body);
       if (k) { const back = body.querySelector(`[data-iread="${CSS.escape(k)}"], [data-iopen="${CSS.escape(k)}"]`); if (back) back.focus(); } }
     paintChrome(docList());
   }
@@ -3295,7 +3904,7 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
   function paintItems2() {
     const D = dg(), body = $("itemsbody"); if (!D || !body) return;
     const keep = body.querySelector("[data-iread]:focus, [data-iopen]:focus"); const k = keep && (keep.dataset.iread || keep.dataset.iopen);
-    body.innerHTML = node(itemsBlock(D)).querySelector("#itemsbody").innerHTML; fillMd(body); linkRefs(body); tipTerms(body);
+    body.innerHTML = node(itemsBlock(D)).querySelector("#itemsbody").innerHTML; fillMd(body); linkRefs(body); tipTerms(body); rvItems(body);
     if (k) { const back = body.querySelector(`[data-iread="${CSS.escape(k)}"], [data-iopen="${CSS.escape(k)}"]`); if (back) back.focus(); }
     itemsCount();
   }
@@ -3318,6 +3927,79 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
     const s = e.target.closest("[data-src]"); if (!s) return;
     e.preventDefault(); e.stopPropagation(); openSource(s.dataset.src);
   }, true);
+
+  /* ---------- "What changed in round N": Claude's account of the revision, then every change on the page ---------- */
+  const rvShown = () => !!(view.gate && (view.gate.revision || view.prev || (view.gate.why === "revision" && roundNo() > 1)));
+  function whereLabel(w) {
+    w = String(w || "");
+    const m = w.match(/^doc:([^#]+)(?:#(.+))?$/);
+    if (m) { const d = docList().find((x) => x.key === m[1]); const t = d ? (d.title || d.key) : m[1]; return m[2] ? t + " › " + m[2] : t; }
+    if (w === "evaluation") return "Claude's evaluation"; if (w === "summary") return "Summary"; if (w === "items") return "What the stage says";
+    const c = critOf(w); if (c) return ORIGIN[c.origin] ? ORIGIN[c.origin][1] + " " + w.replace(/^\D+-/, "") : w;
+    return w;
+  }
+  function revBlock() {
+    const g = view.gate, R = g.revision || null;
+    const picker = view.rounds.length ? `<label class="rvpick"><span>Compared with</span><select data-rvbase aria-label="The earlier round to compare with">${view.rounds.map((r) => `<option value="${esc(r.id)}"${view.prev && view.prev.id === r.id ? " selected" : ""}>Round ${esc(r.g.round || "?")} · ${esc(fmt(r.g.createdAt))}</option>`).join("")}</select></label>` : "";
+    const fb = R && R.feedback ? `<blockquote class="rvfb"><b>What you asked for</b><div>${inline(R.feedback)}</div></blockquote>` : "";
+    const done = R && (R.changes || []).length ? `<ol class="rvdone">${R.changes.map((c) => `<li>${c.asked ? `<p class="asked">${inline(c.asked)}</p>` : ""}<p class="what">${inline(c.what || "")}</p><div class="where"><span>Where</span>${list(c.where).map((w) => `<button type="button" class="src rvgo" data-rvgo="${esc(w)}" data-tip="${esc("Go to " + whereLabel(w))}">${esc(whereLabel(w))}</button>`).join("")}</div></li>`).join("")}</ol>` : "";
+    return `<details class="block revb" open id="b-revision" data-block="revision"><summary>${CARET}<h2>What changed in round ${esc(roundNo())}</h2>${R ? "" : '<span class="pill quiet" data-tip="This round was published without Claude\'s account of the revision">no account from Claude</span>'}<span class="end">${rdot("revision")}</span></summary>` +
+      `<div class="body">${picker || fb ? `<div class="rvhead">${fb}${picker}</div>` : ""}${done ? `<section class="esec"><h3>What Claude changed<span class="hint">for each thing you asked; press a place to go there</span></h3>${done}</section>` : ""}` +
+      `<section class="esec"><h3>Every change on this page<span class="hint" id="rv-total"></span></h3><div id="rv-list"></div></section></div></details>`;
+  }
+  function paintRvList() {
+    const box = $("rv-list"), tot = $("rv-total"); if (!box) return;
+    if (!view.prev) { box.innerHTML = `<p class="hint">${view.roundsLoaded ? "No earlier round of this stage is in this artifact, so the changes cannot be marked." : "Loading the earlier round…"}</p>`; if (tot) tot.textContent = ""; return; }
+    const G = view.rv.groups;
+    if (!G.length) { box.innerHTML = `<p class="hint">Nothing on this page differs from ${esc(sinceLabel())}.</p>`; if (tot) tot.textContent = ""; return; }
+    const T = { new: "new", changed: "changed", gone: "removed" };
+    const row = (x, cls) => `<li class="${cls || ""}"><button type="button" class="rvlink" data-rvgo="${esc(x.go)}"${x.go ? "" : " disabled"}><span class="rv-tag ${x.t === "new" ? "new" : x.t === "gone" ? "gone" : "chg"}">${T[x.t] || x.t}</span><span class="rvt">${esc(x.title)}</span>${rvCount(x)}</button></li>`;
+    const ins = G.reduce((s, x) => s + x.ins, 0), del = G.reduce((s, x) => s + x.del, 0), n = G.reduce((s, x) => s + Math.max(1, x.items.length), 0);
+    if (tot) tot.innerHTML = `${plural(n, "change")} since ${esc(sinceLabel())} · ${rvCount({ ins, del }) || "no words"}`;
+    box.innerHTML = `<ul class="rvlist">${G.map((x) => row(x, "rvg") + (x.items.length ? `<li class="rvsub"><ul>${x.items.map((y) => row(y)).join("")}</ul></li>` : "")).join("")}</ul>`;
+  }
+  /* a place the agent named: doc:<key>, doc:<key>#<section or element>, an item id, a criterion key, a finding id */
+  function whereNode(w) {
+    w = String(w || "").trim();
+    if (w === "evaluation") return $("b-eval"); if (w === "summary") return $("b-summary"); if (w === "items") return $("b-items") || $("b-digest");
+    const m = w.match(/^doc:([^#]+)(?:#(.+))?$/);
+    if (m) {
+      const b = $("d-" + m[1]); if (!b || !m[2]) return b;
+      const t = plainTitle(m[2]).toLowerCase(), secs = [...b.querySelectorAll("details.sec:not(.rv-removed)")], st = (s) => plainTitle(s.dataset.title).toLowerCase();
+      return secs.find((s) => st(s) === t) || secs.find((s) => st(s).endsWith(" · " + t)) || [...b.querySelectorAll("[data-ekey]")].find((n) => ekeyId(n).toLowerCase() === t)
+        || secs.find((s) => st(s).includes(t)) || [...b.querySelectorAll(".body h1, .body h2, .body h3, .body h4, .body h5, .body h6, details.sec > summary, tr, li, dt, p")].find((h) => !h.closest(".rv-removed, .rv-gone") && plainTitle(h.textContent).toLowerCase().includes(t)) || b;
+    }
+    return null;
+  }
+  function rvGo(w) {
+    if (!w) return;
+    if (w.charAt(0) === "#") { const n = $(w.slice(1)); if (n) RevDiff.reveal(n); return; }
+    if (/^i:/.test(w)) { openSource(w); return; }
+    const n = whereNode(w); if (n) { RevDiff.reveal(n); return; }
+    const it = itemOf(w); if (it) { openSource("i:" + it.key); return; }
+    if (critOf(w)) { openSource("c:" + w); return; }
+    const f = el.col.querySelector(`.fcard[data-fid="${CSS.escape(w)}"]`); if (f) { RevDiff.reveal(f); return; }
+    toast("That place is not on this page.");
+  }
+  /* next / previous change: one stop per changed block, in reading order */
+  function rvStops() { return RevDiff.stops(el.col).filter((n) => !n.closest("#b-revision, .eh, [hidden]")); }
+  function rvStep(dir) {
+    const s = rvStops(); if (!s.length) { toast("No marked change is showing."); return; }
+    view.rvAt = view.rvAt < 0 ? (dir > 0 ? 0 : s.length - 1) : (view.rvAt + dir + s.length) % s.length;
+    if (view.rvAt >= s.length) view.rvAt = 0;
+    RevDiff.reveal(s[view.rvAt]);
+    const p = $("rvpos"); if (p) p.textContent = (view.rvAt + 1) + " / " + s.length;
+  }
+  const rvBar = () => !view.prev ? "" : `<div class="rvbar" role="group" aria-label="Changes since ${esc(sinceLabel())}"><span class="seg rvseg"><button type="button" data-rvview="show" aria-pressed="${rvOn()}" data-tip="Mark what changed since ${esc(sinceLabel())}">Changes</button><button type="button" data-rvview="clean" aria-pressed="${!rvOn()}" data-tip="The page as it is now, no marks">Clean</button></span>` +
+    (rvOn() ? `<button type="button" class="rvstep" data-rvstep="-1" aria-label="Previous change" data-tip="Previous change (p)">${UP}</button><span class="num rvpos" id="rvpos" aria-live="polite">${view.rvAt >= 0 ? view.rvAt + 1 : "–"} / ${rvStops().length}</span><button type="button" class="rvstep" data-rvstep="1" aria-label="Next change" data-tip="Next change (n)">${DOWN}</button>` : "") + `</div>`;
+  const UP = '<svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14"><path d="M3 9l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>';
+  const DOWN = '<svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14"><path d="M3 5l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>';
+  el.col.addEventListener("click", (e) => { const g = e.target.closest("[data-rvgo]"); if (!g) return; e.preventDefault(); e.stopPropagation(); rvGo(g.dataset.rvgo); }, true);
+  el.col.addEventListener("change", (e) => { if (e.target.matches && e.target.matches("[data-rvbase]")) useBase(e.target.value); });
+  document.addEventListener("keydown", (e) => {
+    if (!view.prev || !rvOn() || e.metaKey || e.ctrlKey || e.altKey || (e.target.closest && e.target.closest("textarea, input, select, [contenteditable]"))) return;
+    if (e.key === "n" || e.key === "j") { e.preventDefault(); rvStep(1); } else if (e.key === "p" || e.key === "k") { e.preventDefault(); rvStep(-1); }
+  });
 
   /* ---------- notes: saved as you type; a failed save says so and is sent again ---------- */
   function noteEdited(key, text) {

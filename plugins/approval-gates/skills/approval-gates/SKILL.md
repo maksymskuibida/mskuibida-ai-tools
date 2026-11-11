@@ -90,6 +90,16 @@ the stage has a reviewer:
    - **`documents`**: `covered` when the items and the evaluation say everything the file says (the page folds it under
      "As written", shown exactly as written), `shown` when the page must show it in full (questions, the review, anything
      with content no item holds). The draft guessed; check each.
+   - **`revision`** (a revision round only: `--why revision`, or a round after a Request Changes): your account of the
+     round for the page's "What changed in round N" block. `revision.feedback` is what the developer asked for: draft
+     fills it from the audit trail's last Request Changes (`_said` holds their own words, `_conductorSummary` the
+     conductor's summary); add the notes they left on the last page and how they sorted its findings, plain and whole.
+     Then **one `revision.changes` entry per piece of that feedback**: `asked` (that piece, in a sentence), `what` (what
+     you did, or why you left it), `where` (the places on the page it shows: `doc:<key>`, `doc:<key>#<section heading or
+     element id>`, an item id, a criterion key, a finding id, `evaluation` or `summary`). `revision._changed` lists every
+     section that changed since the last finalize of the stage with its `where` ready to copy, and `_changedItems` the
+     items whose text changed; point at those, never guess. Finalize refuses a revision round without it, a `where` the
+     page does not have, and a `doc:<key>#<heading>` the document does not hold.
    - Keys starting with `_` are notes for you; finalize drops them.
 4. **Finalize.**
    ```
@@ -113,13 +123,19 @@ the stage has a reviewer:
 
 The plan checkpoint of Code Generation (Approve Plan) is a gate too: the same steps, with its `code-generation-plan.md`.
 
-What the page shows, top to bottom: **Claude's evaluation** (verdict, what approving decides, look at first, risks /
+What the page shows, top to bottom: on a revision round, **What changed in round N** (what the developer asked for,
+your `revision.changes` with a jump to each place, then every changed, new and removed section, element and item of the
+page with its words added and removed); **Claude's evaluation** (verdict, what approving decides, look at first, risks /
 gaps / conflicts / solid with their sources, and "Rules checked": every criterion with its verdict, failed ones open);
 **What the stage says** (every item as your sentence with its label, grouped Look at first / Matters most / Main / Minor,
 opening to the item as written: its criteria, logic and examples; unchanged and earlier-settled items and the
 traceability fold away with a count); the finding cards; your completion summary (folded); the review; the documents the
 items do not cover; and **As written**, the covered files, folded. Read marks per block and per item, and notes per
-document, stay as they were.
+document, stay as they were. On a round with an earlier one of the same stage (and Unit) in the artifact, the page
+compares itself with it (or with any earlier round the developer picks): words added are highlighted, words removed are
+struck through, unchanged sections fold, a removed section, element or item stays as a struck ghost "removed since round
+N", and the bar gets Changes / Clean, previous and next change (keys `p` and `n`) and a Changed filter. The Unit
+approvals page does the same against the earlier versions of the same Unit page.
 
 ## 2a. Review findings: fix what is certain, the rest goes on the page
 

@@ -353,6 +353,45 @@ def count_rejections(root, slug, unit):
     return total
 
 
+NOT_ANSWERED = re.compile(r"\[User did not answer this question[^\]]*\]\s*")
+
+
+def last_feedback(root, slug, unit):
+    """What the developer asked for at the last Request Changes of this stage (and Unit), from the audit trail:
+    {feedback, said, summary, at}, or {} when the trail has none."""
+    audit = os.path.join(root, "audit")
+    try:
+        names = sorted(os.listdir(audit))
+    except OSError:
+        return {}
+    last = {}
+    for name in names:
+        if not name.endswith(".md"):
+            continue
+        try:
+            with open(os.path.join(audit, name), encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except OSError:
+            continue
+        for block in re.split(r"^(?:---\s*|## .*)$", text, flags=re.M):
+            if not re.search(r"^\*\*Event\*\*:\s*GATE_REJECTED\s*$", block, re.M):
+                continue
+            stage = re.search(r"^\*\*Stage\*\*:\s*(\S+)", block, re.M)
+            unit_line = re.search(r"^\*\*Unit\*\*:\s*(\S+)", block, re.M)
+            if not stage or stage.group(1) != slug or (unit_line.group(1) if unit_line else None) != (unit or None):
+                continue
+            field = lambda name: (re.search(r"^\*\*" + name + r"\*\*:[ \t]*(.*)$", block, re.M) or [None, ""])[1].strip()
+            at = field("Timestamp")
+            if last and at and at < last.get("at", ""):
+                continue
+            said = NOT_ANSWERED.sub("", field("Feedback").replace("\\n", "\n")).strip()
+            summary = field("Conductor Summary")
+            if said.lower() in ("request changes", "changes"):
+                said = ""  # the button alone: the substance is in the page's notes and sorted findings
+            last = {"at": at, "said": said, "summary": summary, "feedback": summary or said}
+    return last
+
+
 def has_reviewer(graph, graph_stage, folder):
     if graph_stage is not None:
         return bool(graph_stage.get("reviewer"))
@@ -736,7 +775,18 @@ def draft(args):
     texts = {}
     for row in docs:
         texts[row["key"]] = texts.get(row["key"], "") + row["text"]
-    j = judgment.skeleton(gate_id, gate, crit, texts, previous)
+    found = None
+    if gate.get("why") == "revision":
+        project = os.path.abspath(args.project_dir or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+        found = dict(last_feedback(record_root(project)[2], args.stage, args.unit))
+        if previous and isinstance(previous.get("documents"), dict):
+            found["changed"] = judgment.changed_sections(previous["documents"], texts)
+        else:
+            found["note"] = ("the last finalize of this stage kept no record of its documents, so the changed sections are "
+                             "not listed: compare with the last page or git history")
+        if previous:
+            found["items"] = judgment.changed_items(previous.get("items"), gate)
+    j = judgment.skeleton(gate_id, gate, crit, texts, previous, found)
     path = os.path.join(out, "judgment.json")
     write_json(path, j)
     print(json.dumps({"id": gate_id, "stage": args.stage, "unit": args.unit, "documents": [d["key"] for d in gate["documents"]],
@@ -761,7 +811,13 @@ def finalize(args):
                       [f"Run draft again (it writes {jpath}), then do its todo list in that file.", f"Run `{cmd}`."],
                       "finalize prints the gate id and the path of writes.json.")
     row = judgment.merge(gate, crit, j)
-    problems = judgment.row_problems(row)
+    texts = {}
+    folder = os.path.join(out, "documents")
+    for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+        if name.endswith(".json"):
+            doc = read_json(os.path.join(folder, name), "a document row")
+            texts[doc.get("key", name[:-5])] = texts.get(doc.get("key", name[:-5]), "") + str(doc.get("text", ""))
+    problems = judgment.row_problems(row, texts)
     if problems:
         return refuse("the gate row", f"{len(problems)} part(s) of your judgment of the stage are missing or break its rules",
                       problems,
@@ -800,7 +856,7 @@ def finalize(args):
               f"({', '.join(os.path.basename(p) for p in paths)})", file=sys.stderr)
     store = judgment.store_path(row.get("intent"), row.get("stage"), row.get("unit"))
     try:
-        write_json(store, dict(judgment.memory(row), gate=gate_id))
+        write_json(store, dict(judgment.memory(row, texts), gate=gate_id))
     except OSError as why_not:
         print(f"approval-gates: the next round cannot carry this judgment over ({why_not})", file=sys.stderr)
     e = row["evaluation"]

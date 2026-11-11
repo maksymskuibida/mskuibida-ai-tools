@@ -173,6 +173,13 @@ stage against its rules**:
   story's criteria). Items an earlier stage settled, items unchanged since the last round and the traceability fold away
   with a count. Files the items cover fold under **As written**; the rest still render in their views.
 - After Request Changes, the next draft carries the summary and label of every item whose text did not change.
+- **What changed in round N.** A revision round's page opens on what you asked for at Request Changes, what Claude did
+  for each piece of it with a jump to the place on the page, and every changed, new and removed section, element and
+  item with its word counts. In the documents, the evaluation, the summary and the items, words added are highlighted
+  and words removed struck through; unchanged sections fold; a removed section, rule or item stays as a struck ghost.
+  Changes / Clean (remembered in your browser), previous and next change (`p` / `n`) and a Changed filter sit in the
+  bar; any earlier round of the stage can be the comparison. The Unit approvals page does the same against its earlier
+  versions.
 
 Rows written before 1.24.0 still open on At a glance:
 

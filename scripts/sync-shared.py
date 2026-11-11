@@ -8,6 +8,8 @@ shared/, and this script writes it into every plugin that carries it:
   shared/aidlc-ids/aidlc-ids.js     -> every page (plugins/**/*.html) between /* aidlc-ids.js:begin */ and :end */
   shared/aidlc-ids/aidlc-ids.css    -> the same pages, between /* aidlc-ids.css:begin */ and :end */
   shared/aidlc-links/aidlc_links.py -> plugins/*/scripts/aidlc_links.py, wherever one exists
+  shared/rev-diff/rev-diff.js       -> every page that carries /* rev-diff.js:begin */ and :end */ (what changed between
+  shared/rev-diff/rev-diff.css         rounds, word by word); the CSS between /* rev-diff.css:begin */ and :end */
 
   sync-shared.py                     write the shared copies into every plugin file that carries one
   sync-shared.py --check             exit 1, naming each file, when a copy differs from shared/ (CI runs this)
@@ -30,7 +32,8 @@ SHARED = os.path.join(ROOT, "shared", "aidlc-ids")
 PY = "aidlc_ids.py"
 LINKS_PY = "aidlc_links.py"
 LINKS = os.path.join(ROOT, "shared", "aidlc-links")
-BLOCKS = {"aidlc-ids.js": "aidlc-ids.js", "aidlc-ids.css": "aidlc-ids.css"}
+BLOCKS = {"aidlc-ids.js": "aidlc-ids/aidlc-ids.js", "aidlc-ids.css": "aidlc-ids/aidlc-ids.css",
+          "rev-diff.js": "rev-diff/rev-diff.js", "rev-diff.css": "rev-diff/rev-diff.css"}
 
 
 def read(path):
@@ -48,7 +51,7 @@ def marker(name):
 
 
 def shared(name):
-    return read(os.path.join(SHARED, name)).rstrip("\n")
+    return read(os.path.join(ROOT, "shared", name)).rstrip("\n")
 
 
 def pages():
