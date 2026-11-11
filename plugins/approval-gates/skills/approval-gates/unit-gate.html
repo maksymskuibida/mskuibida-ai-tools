@@ -297,6 +297,8 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
 .rvstrip ul.rvlist a, .rvstrip .rv-n { min-width: 0; }
 .rvstrip li.gone .rvt { text-decoration: line-through; color: var(--rv-del-fg); }
 .rowhead .rv-tags { display: inline-flex; gap: 6px; align-items: center; flex: none; }
+.row.rv-rb { padding-left: 0; }
+.rvstrip .rv-legend { margin-left: 2px; }
 .row.rv-chg { box-shadow: inset 3px 0 0 var(--rv-chg); } .row.rv-new { box-shadow: inset 3px 0 0 var(--rv-new); }
 [data-rv="clean"] .row.rv-chg, [data-rv="clean"] .row.rv-new { box-shadow: none; }
 @media (max-width: 640px) { .rvpick { margin-left: 0; width: 100%; } .rvpick select { flex: 1; } }
@@ -305,10 +307,24 @@ a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outli
 /* Shared: the canonical copy is shared/rev-diff/rev-diff.css; scripts/sync-shared.py copies it into every page that
    carries the block. What changed since an earlier round: inserted words on a soft green wash with a thin underline,
    removed words struck and muted, a new block with a green edge, a changed one with an amber edge, a gone one as a struck
-   ghost. [data-rv="clean"] on any ancestor hides every mark and shows the page as it is now. */
+   ghost. [data-rv="clean"] on any ancestor hides every mark and shows the page as it is now, with each round's own changes tinted in
+   that round's colour (rv-r*): no strikethrough, no ghosts; the latest round wins where rounds clash. The round colours are
+   the pages' own --r2..--r5 tokens (light and dark), so a round reads the same here as on its "revised" note. */
 :root { --rv-ins-bg: #DDF3E4; --rv-ins-line: #2F8F55; --rv-del-fg: #9A4A43; --rv-del-bg: #FBEDEB; --rv-new: #2F8F55; --rv-chg: #C98A1B; --rv-gone: #B5544B; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --rv-ins-bg: #173A26; --rv-ins-line: #6FCB93; --rv-del-fg: #E3A39C; --rv-del-bg: #3A1F1D; --rv-new: #6FCB93; --rv-chg: #E9B65A; --rv-gone: #E3897F; } }
 :root[data-theme="dark"] { --rv-ins-bg: #173A26; --rv-ins-line: #6FCB93; --rv-del-fg: #E3A39C; --rv-del-bg: #3A1F1D; --rv-new: #6FCB93; --rv-chg: #E9B65A; --rv-gone: #E3897F; }
+:root { --rv-r2: var(--r2-fg, #5B2FA8); --rv-r3: var(--r3-fg, #0F665F); --rv-r4: var(--r4-fg, #8A5A00); --rv-r5: var(--r5-fg, #9B2C5C); }
+.rv-t2 { --rvc: var(--rv-r2); } .rv-t3 { --rvc: var(--rv-r3); } .rv-t4 { --rvc: var(--rv-r4); } .rv-t5 { --rvc: var(--rv-r5); }
+ins.rv-r { background: color-mix(in srgb, var(--rvc) 24%, transparent); color: inherit; text-decoration: none; border-radius: 3px; padding: 0 1px; box-decoration-break: clone; -webkit-box-decoration-break: clone; transition: background-color .15s; }
+.rv-rb { box-shadow: inset 3px 0 0 var(--rvc); padding-left: 8px; }
+ins.rv-r.rv-dim { background: none; }
+.rv-rb.rv-dim { box-shadow: none; }
+.rv-legend { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.rv-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px 0 8px; border-radius: 14px; border: 1px solid color-mix(in srgb, var(--rvc) 40%, var(--line, #ccc)); background: color-mix(in srgb, var(--rvc) 12%, transparent); color: var(--fg, inherit); font: 600 12px/1 var(--body, system-ui); cursor: pointer; }
+.rv-chip i { width: 10px; height: 10px; border-radius: 3px; background: var(--rvc); }
+.rv-chip .n { font: 500 11px/1 var(--mono, ui-monospace, monospace); font-variant-numeric: tabular-nums; color: var(--muted, inherit); }
+.rv-chip[aria-pressed="true"] { background: color-mix(in srgb, var(--rvc) 28%, transparent); border-color: var(--rvc); }
+.rv-chip:focus-visible { outline: 2px solid var(--rvc); outline-offset: 2px; }
 ins.rv-ins { background: var(--rv-ins-bg); text-decoration: underline; text-decoration-color: var(--rv-ins-line); text-decoration-thickness: 1px; text-underline-offset: 3px; border-radius: 3px; padding: 0 1px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 del.rv-del { color: var(--rv-del-fg); background: var(--rv-del-bg); text-decoration: line-through; text-decoration-thickness: 1px; border-radius: 3px; padding: 0 1px; opacity: .9; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 div.rv-gone, li.rv-gone { margin: 6px 0; padding: 4px 10px; border-left: 3px solid var(--rv-gone); border-radius: 0 6px 6px 0; background: color-mix(in srgb, var(--rv-del-bg) 60%, transparent); }
@@ -516,9 +532,13 @@ var AidlcIds = (function () {
      RevDiff.markTree(now, old, o)   mark every text block of the tree now against the tree old; {ins, del}
      RevDiff.diffKeyed(now, old, o)  match keyed parts (sections, elements) by key, then title; changed ones recurse,
                                      new ones are marked, gone ones are handed to o.onRemoved; the rest goes to markTree
+     RevDiff.attributeText(texts, rounds)  the latest text of a chain of rounds as [{r, s}]: r is the round that last wrote s
+     RevDiff.attributeTree(now, olds, rounds, o)  the same on a tree: marks each round's words and blocks in its colour
+     RevDiff.unmark(root)           take the Changes marks off a tree again
+     RevDiff.legend(rounds, counts, only) / only(root, k) / toggleOnly(root, btn, cur)  the legend chips and their filter
      RevDiff.stops(root)             the changes in reading order, one stop per block, for next / previous
      RevDiff.reveal(node)            open every <details> around node, scroll to it and flash it
-     RevDiff.pref() / setPref(v)     "show" | "clean": the viewer's choice, kept in this browser
+     RevDiff.pref() / setPref(v)     "show" | "clean" (the default): the viewer's choice, kept in this browser
    Standard browser APIs only; a page must not load a diff library for it. */
 var RevDiff = (function () {
   "use strict";
@@ -676,7 +696,7 @@ var RevDiff = (function () {
       var s = n.nodeValue, start = starts[idx], end = start + s.length, last = idx === nodes.length - 1, gap = prevEnd;
       prevEnd = end;
       var cuts = [];
-      ins.forEach(function (r) { var a = Math.max(r[0], start), b = Math.min(r[1], end); if (a < b) cuts.push({ at: a - start, to: b - start, ins: true }); });
+      ins.forEach(function (r) { var a = Math.max(r[0], start), b = Math.min(r[1], end); if (a < b) cuts.push({ at: a - start, to: b - start, ins: true, cls: r[2] }); });
       /* a removal in the space joined() put between two nodes goes at the start of the second */
       dels.forEach(function (d) { if ((d[0] >= start && d[0] < end) || (d[0] >= gap && d[0] < start) || (last && d[0] >= end) || (d[0] === start && start === end)) cuts.push({ at: Math.min(Math.max(d[0] - start, 0), s.length), del: d[1] }); });
       if (!cuts.length) return;
@@ -685,7 +705,7 @@ var RevDiff = (function () {
       cuts.forEach(function (c) {
         if (c.at > p) { frag.appendChild(doc.createTextNode(s.slice(p, c.at))); p = c.at; }
         if (c.del != null) frag.appendChild(el(doc, "del", "rv-del", c.del));
-        else { frag.appendChild(el(doc, "ins", "rv-ins", s.slice(c.at, c.to))); p = c.to; }
+        else { frag.appendChild(el(doc, "ins", c.cls || "rv-ins", s.slice(c.at, c.to))); p = c.to; }
       });
       if (p < s.length) frag.appendChild(doc.createTextNode(s.slice(p)));
       n.parentNode.replaceChild(frag, n);
@@ -734,6 +754,17 @@ var RevDiff = (function () {
     return g;
   }
 
+  /* Pair each removed block with the added block it most resembles, in order: {pairs: [[gi, ni]], used: {ni: 1}}. */
+  function pairUp(gone, added) {
+    var pairs = [], used = {};
+    gone.forEach(function (g, gi) {
+      var best = -1, score = 0.34;
+      added.forEach(function (n, ni) { if (used[ni]) return; if (pairs.length && ni < pairs[pairs.length - 1][1]) return; var s = similar(g.text, n.text); if (s > score) { score = s; best = ni; } });
+      if (best >= 0) { used[best] = 1; pairs.push([gi, best]); }
+    });
+    return { pairs: pairs, used: used };
+  }
+
   /* Every text block of now against old; keyed parts (o.keyed) are left to diffKeyed. */
   function markTree(now, old, o) {
     o = o || {};
@@ -750,12 +781,7 @@ var RevDiff = (function () {
       i--;
       var after = (runs[i + 1] && runs[i + 1].t === "=") ? B[runs[i + 1].b0] : null;
       /* pair a removed block with the inserted block it most resembles, in order */
-      var pairs = [], used = {};
-      gone.forEach(function (g, gi) {
-        var best = -1, score = 0.34;
-        added.forEach(function (n, ni) { if (used[ni]) return; if (pairs.length && ni < pairs[pairs.length - 1][1]) return; var s = similar(g.text, n.text); if (s > score) { score = s; best = ni; } });
-        if (best >= 0) { used[best] = 1; pairs.push([gi, best]); }
-      });
+      var pr = pairUp(gone, added), pairs = pr.pairs, used = pr.used;
       var pairedGone = {}; pairs.forEach(function (p) { pairedGone[p[0]] = p[1]; });
       added.forEach(function (n, ni) {
         if (used[ni]) return;
@@ -824,6 +850,124 @@ var RevDiff = (function () {
     return s(a) === s(b);
   }
 
+
+  /* ---------- which round changed what (Clean view) ----------
+     Round k's changes are the difference between round k-1 and round k, folded forward onto the latest text: a word
+     keeps the round that last wrote it, so where a later round changed the same words or block again, the later round
+     wins. Rounds are numbers (2, 3, ...); 0 is the first round the text appeared in, which is not coloured. */
+  var TONES = 4;
+  function tone(k) { return ((Math.max(2, k) - 2) % TONES) + 2; }
+  var isSpace = function (t) { return /^\s+$/.test(t); };
+  /* The tokens of text with the round that wrote each one, given the tokens and rounds of the text before it (null when
+     there was none: everything is then written by round). */
+  function carry(prev, text, round) {
+    var toks = tokens(text), tags = new Array(toks.length), i;
+    var runs = prev ? diff(prev.toks.map(keyOf), toks.map(keyOf), 4000) : null;
+    if (!runs) { for (i = 0; i < toks.length; i++) tags[i] = round; }
+    else {
+      runs.forEach(function (r, ri) {
+        var j;
+        if (r.t === "+") { for (j = r.b0; j < r.b1; j++) tags[j] = round; }
+        else if (r.t === "=") {
+          var kept = toks.slice(r.b0, r.b1).join("");
+          /* a short run kept between two changes (a space, a comma, one short word) is part of the change */
+          var between = ri > 0 && ri < runs.length - 1 && (/^\s*$/.test(kept) || (kept.length <= 3 && !/\s/.test(kept.trim())));
+          for (j = r.b0; j < r.b1; j++) tags[j] = between ? round : prev.tags[r.a0 + (j - r.b0)];
+        }
+      });
+    }
+    /* a space between two words written by the same round belongs to it */
+    for (i = 1; i < toks.length - 1; i++) if (isSpace(toks[i]) && tags[i - 1] === tags[i + 1]) tags[i] = tags[i - 1];
+    return { toks: toks, tags: tags };
+  }
+  function segmentsOf(c) {
+    var out = [];
+    c.toks.forEach(function (t, i) { var last = out[out.length - 1]; if (last && last.r === c.tags[i]) last.s += t; else out.push({ r: c.tags[i], s: t }); });
+    return out;
+  }
+  /* The latest text of a chain of texts (oldest first, null where a round had none) as [{r, s}]: r is the round that
+     wrote s, 0 for the first round. rounds[i] is the round number of texts[i]. */
+  function attributeText(texts, rounds) {
+    var prev = null;
+    texts.forEach(function (t, i) { if (t == null) { prev = null; return; } prev = carry(prev, t, i === 0 ? 0 : rounds[i]); });
+    return prev ? segmentsOf(prev) : [];
+  }
+  /* The tree now against the trees before it (olds[i] has round rounds[i], null where that round did not have this part;
+     the last of rounds is now's): words last written by a later round are wrapped in <ins class="rv-r rv-rK rv-tT">, a
+     block written whole by one round gets that class itself. Returns {words: {round: n}, blocks: {round: n}}. */
+  function attributeTree(now, olds, rounds, o) {
+    o = o || {};
+    var prev = null, n = rounds.length, out = { words: {}, blocks: {} };
+    for (var i = 0; i < n; i++) {
+      var root = i === n - 1 ? now : olds[i];
+      if (!root) { prev = null; continue; }
+      var B = units(root, o), base = i === 0 ? 0 : rounds[i];
+      if (!prev) B.forEach(function (u) { var c = carry(null, u.text, base); u.toks = c.toks; u.tags = c.tags; u.block = base; });
+      else {
+        var runs = diff(prev.map(function (u) { return u.key; }), B.map(function (u) { return u.key; }), 4000)
+          || [{ t: "-", a0: 0, a1: prev.length, b0: 0, b1: 0 }, { t: "+", a0: prev.length, a1: prev.length, b0: 0, b1: B.length }];
+        var settle = function (u, from) { var c = carry(from, u.text, rounds[i]); u.toks = c.toks; u.tags = c.tags; u.block = from ? from.block : rounds[i]; };
+        for (var r = 0; r < runs.length; r++) {
+          var h = runs[r];
+          if (h.t === "=") { for (var j = 0; j < h.b1 - h.b0; j++) settle(B[h.b0 + j], prev[h.a0 + j]); continue; }
+          var gone = [], added = [];
+          while (r < runs.length && runs[r].t !== "=") { var x = runs[r]; if (x.t === "-") for (var a = x.a0; a < x.a1; a++) gone.push(prev[a]); else for (var b = x.b0; b < x.b1; b++) added.push(B[b]); r++; }
+          r--;
+          var pr = pairUp(gone, added);
+          pr.pairs.forEach(function (p) { settle(added[p[1]], gone[p[0]]); });
+          added.forEach(function (u, ni) { if (!pr.used[ni]) settle(u, null); });
+        }
+      }
+      prev = B;
+    }
+    (prev || []).forEach(function (u) {
+      var whole = u.owner !== now && textNodes(u.owner, o).length === u.nodes.length, skip = -1, pos = 0, ranges = [];
+      if (u.block > 0 && whole) { u.owner.classList.add("rv-rb", "rv-r" + u.block, "rv-t" + tone(u.block)); skip = u.block; out.blocks[u.block] = (out.blocks[u.block] || 0) + 1; }
+      u.toks.forEach(function (t, k) {
+        var tag = u.tags[k], last = ranges[ranges.length - 1];
+        if (IS_WORD.test(t) && tag > 0) out.words[tag] = (out.words[tag] || 0) + 1;
+        if (tag > 0 && tag !== skip) {
+          if (last && last.tag === tag && last[1] === pos) last[1] = pos + t.length;
+          else ranges.push(Object.assign([pos, pos + t.length, "rv-r rv-r" + tag + " rv-t" + tone(tag)], { tag: tag }));
+        }
+        pos += t.length;
+      });
+      if (ranges.length) apply(u.nodes, ranges.filter(function (q) { return joined(u.nodes).text.slice(q[0], q[1]).trim(); }), []);
+    });
+    return out;
+  }
+  /* Take the word-level marks of the Changes view (and any colours) off a tree, so the text reads as it was drawn. */
+  function unmark(root) {
+    var seen = [];
+    [].slice.call(root.querySelectorAll("ins.rv-ins, ins.rv-r")).forEach(function (n) {
+      var p = n.parentNode; while (n.firstChild) p.insertBefore(n.firstChild, n); p.removeChild(n); if (seen.indexOf(p) < 0) seen.push(p);
+    });
+    [].slice.call(root.querySelectorAll("del.rv-del")).forEach(function (n) {
+      if (n.closest(".rv-gone, .rv-removed")) return;
+      var p = n.parentNode; p.removeChild(n); if (seen.indexOf(p) < 0) seen.push(p);
+    });
+    seen.forEach(function (p) { p.normalize(); });
+    [].slice.call(root.querySelectorAll(".rv-rb")).forEach(function (n) { n.className = n.className.replace(/\brv-(rb|dim|r\d+|t\d+)\b/g, "").replace(/\s+/g, " ").trim(); });
+  }
+  /* The legend of rounds: a chip each, with the words that round last wrote; a click shows only that round's colour. */
+  function legend(rounds, counts, only) {
+    return '<span class="rv-legend" role="group" aria-label="Changes by version">' + rounds.map(function (k) {
+      var w = counts && counts[k] || 0;
+      return '<button type="button" class="rv-chip rv-t' + tone(k) + '" data-rvonly="' + k + '" aria-pressed="' + (only === k) + '"><i aria-hidden="true"></i>v' + k + (w ? '<span class="n">' + w + "</span>" : "") + "</button>";
+    }).join("") + "</span>";
+  }
+  /* Dim every colour but round k's (k = 0: none dimmed). */
+  function only(root, k) {
+    [].slice.call(root.querySelectorAll(".rv-r, .rv-rb")).forEach(function (n) { n.classList.toggle("rv-dim", !!k && !n.classList.contains("rv-r" + k)); });
+  }
+  /* A click on a legend chip: the round now shown alone (0 when the same chip is clicked again). */
+  function toggleOnly(root, btn, current) {
+    var k = +btn.getAttribute("data-rvonly"); k = k === current ? 0 : k;
+    only(root, k);
+    [].slice.call(btn.parentElement.querySelectorAll("[data-rvonly]")).forEach(function (b) { b.setAttribute("aria-pressed", String(+b.getAttribute("data-rvonly") === k)); });
+    return k;
+  }
+
   /* ---------- reading the changes ---------- */
   var STOP = ".rv-ins, .rv-del, .rv-gone, .rv-new, .rv-removed, .rv-addblk, .rv-chg.diagram, .rv-stop";
   function stops(root) {
@@ -845,11 +989,11 @@ var RevDiff = (function () {
     node.classList.remove("rv-flash"); void node.offsetWidth; node.classList.add("rv-flash");
   }
   var PREF = "aidlc-rev:view";
-  function pref() { try { return localStorage.getItem(PREF) === "clean" ? "clean" : "show"; } catch (e) { return "show"; } }
-  function setPref(v) { try { localStorage.setItem(PREF, v === "clean" ? "clean" : "show"); } catch (e) { /* kept for this visit */ } }
+  function pref() { try { return localStorage.getItem(PREF) === "show" ? "show" : "clean"; } catch (e) { return "clean"; } }
+  function setPref(v) { try { localStorage.setItem(PREF, v === "show" ? "show" : "clean"); } catch (e) { /* kept for this visit */ } }
 
   return { diff: diff, words: words, tokens: tokens, countWords: countWords, norm: norm, similar: similar, textOf: textOf,
-    markText: markText, markTree: markTree, diffKeyed: diffKeyed, stops: stops, reveal: reveal, pref: pref, setPref: setPref };
+    markText: markText, markTree: markTree, attributeText: attributeText, attributeTree: attributeTree, unmark: unmark, legend: legend, only: only, toggleOnly: toggleOnly, tone: tone, diffKeyed: diffKeyed, stops: stops, reveal: reveal, pref: pref, setPref: setPref };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = RevDiff;
 /* rev-diff.js:end */
@@ -1295,7 +1439,7 @@ if (typeof module !== "undefined") module.exports = GateView;
   "use strict";
   var app = document.getElementById("app"), toastEl = document.getElementById("toast");
   var db = null, user = null, uid = null;
-  var view = { id: "", row: null, bundle: null, ids: {}, unsub: [], st: null, readKey: "", saving: false, unsaved: false, timer: 0, rounds: [], base: null, rvAt: -1 };
+  var view = { id: "", row: null, bundle: null, ids: {}, unsub: [], st: null, readKey: "", saving: false, unsaved: false, timer: 0, rounds: [], base: null, rvAt: -1, rvOnly: 0 };
 
   function freshState() { return { mode: "full", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {} }; }
   function toast(text) { toastEl.textContent = text; toastEl.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(function () { toastEl.hidden = true; }, 2400); }
@@ -1493,6 +1637,7 @@ if (typeof module !== "undefined") module.exports = GateView;
     var D = rvDelta(), main = app.querySelector("main"), esc = GateView.esc;
     app.dataset.rv = RevDiff.pref();
     if (!D || !main) return;
+    if (RevDiff.pref() === "clean") { rvClean(main); return; }
     var baseV = (view.base.row.bundle.header || {}).revision || 1, show = RevDiff.pref() === "show";
     var total = { ins: 0, del: 0 };
     D.items.forEach(function (x) {
@@ -1524,6 +1669,38 @@ if (typeof module !== "undefined") module.exports = GateView;
     main.insertBefore(strip, main.firstChild);
     var pos = document.getElementById("rvpos"); if (pos) pos.textContent = (view.rvAt >= 0 ? view.rvAt + 1 : "–") + " / " + rvStops().length;
   }
+  /* Clean view: every version's changes in that version's colour, the latest version winning where they clash. The
+     versions of the Unit page, oldest first, are folded forward onto this one (RevDiff.attributeTree): a word keeps the
+     colour of the version that last wrote it, a row that first appeared in a later version carries that version's edge.
+     Computed once per paint from the bundles already loaded. */
+  function rvClean(main) {
+    var chain = view.rounds.slice().reverse().map(function (r) { return r.row.bundle; }).concat([view.bundle]), nos = [];
+    chain.forEach(function (b, i) { var no = (b.header || {}).revision || i + 1; nos.push(i && no <= nos[i - 1] ? nos[i - 1] + 1 : no); });
+    var maps = chain.map(function (b) { var m = {}; GateView.itemsOf(b).forEach(function (x) { m[x.key] = x.item; }); return m; });
+    var counts = {}, add = function (c) { Object.keys(c.words).forEach(function (k) { counts[k] = (counts[k] || 0) + c.words[k]; }); };
+    var plain = function (text) { var p = document.createElement("p"); p.textContent = text || ""; return p; };
+    GateView.itemsOf(view.bundle).forEach(function (x) {
+      var node = document.getElementById(x.anchor); if (!node) return;
+      var its = maps.map(function (m) { return m[x.key] || null; }), last = chain.length - 1, start = 0;
+      for (var i = last; i > 0; i--) if (its[i] && !its[i - 1]) { start = i; break; }
+      if (start) node.classList.add("rv-rb", "rv-t" + RevDiff.tone(nos[start]), "rv-r" + nos[start]);
+      if (start) counts[nos[start]] = counts[nos[start]] || 0;
+      var rounds = nos.slice(start), field = function (sel, make) {
+        var target = node.querySelector(sel); if (!target) return;
+        add(RevDiff.attributeTree(target, its.slice(start, last).map(function (it) { return it ? make(it) : null; }), rounds, { skip: ".sv" }));
+      };
+      field(".rtitle", function (it) { return plain(it.title); });
+      field(".rowbody > p:not(.revnote)", function (it) { return plain(it.body); });
+      field(".rowbody > ol.subs", function (it) { var ol = document.createElement("ol"); (it.subs || []).forEach(function (q) { var li = document.createElement("li"); li.textContent = q.text; ol.appendChild(li); }); return ol; });
+    });
+    var strip = document.createElement("section");
+    strip.className = "card rvstrip"; strip.id = "rvstrip"; strip.setAttribute("data-rv-skip", ""); strip.setAttribute("aria-label", "What changed, by version");
+    strip.innerHTML = '<div class="rvtop"><h2>What changed, by version</h2>' + RevDiff.legend(nos.slice(1), counts, view.rvOnly) +
+      '<span class="hint">Each colour is the version that last changed the text</span>' +
+      '<span class="seg rvseg" role="group" aria-label="Changes"><button type="button" data-rvview="show" aria-pressed="false">Changes</button><button type="button" data-rvview="clean" aria-pressed="true">Clean</button></span></div>';
+    main.insertBefore(strip, main.firstChild);
+    RevDiff.only(main, view.rvOnly);
+  }
   function rvStops() { return RevDiff.stops(app).filter(function (n) { return !n.closest("#rvstrip"); }); }
   function rvStep(dir) {
     var s = rvStops(); if (!s.length) { toast("No marked change is showing."); return; }
@@ -1533,7 +1710,8 @@ if (typeof module !== "undefined") module.exports = GateView;
   }
   app.addEventListener("click", function (e) {
     var v = e.target.closest("[data-rvview]"); if (v) { e.preventDefault(); e.stopImmediatePropagation(); RevDiff.setPref(v.dataset.rvview); view.rvAt = -1; paint(); return; }
-    var s = e.target.closest("[data-rvstep]"); if (s) { e.preventDefault(); e.stopImmediatePropagation(); rvStep(+s.dataset.rvstep); }
+    var s = e.target.closest("[data-rvstep]"); if (s) { e.preventDefault(); e.stopImmediatePropagation(); rvStep(+s.dataset.rvstep); return; }
+    var o = e.target.closest("[data-rvonly]"); if (o) { e.preventDefault(); e.stopImmediatePropagation(); view.rvOnly = RevDiff.toggleOnly(app, o, view.rvOnly); }
   }, true);
   app.addEventListener("change", function (e) { if (e.target.matches && e.target.matches("[data-rvbase]")) { view.base = view.rounds.filter(function (r) { return r.id === e.target.value; })[0] || view.base; view.rvAt = -1; paint(); } });
   document.addEventListener("keydown", function (e) {
@@ -1550,7 +1728,7 @@ if (typeof module !== "undefined") module.exports = GateView;
     }, function () { app.innerHTML = '<div class="card msg"><b>Couldn’t load the pages.</b><p>Reload the page.</p></div>'; }));
   }
   function showPage(id) {
-    teardown(); view.id = id; view.bundle = null; view.st = freshState(); view.rounds = []; view.base = null; view.rvAt = -1;
+    teardown(); view.id = id; view.bundle = null; view.st = freshState(); view.rounds = []; view.base = null; view.rvAt = -1; view.rvOnly = 0;
     if (!db) return;
     app.innerHTML = '<div class="card msg"><b>Loading this page…</b></div>';
     view.unsub.push(db.doc("bundles/" + id).onSnapshot(function (snap) {

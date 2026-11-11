@@ -180,6 +180,12 @@ stage against its rules**:
   Changes / Clean (remembered in your browser), previous and next change (`p` / `n`) and a Changed filter sit in the
   bar; any earlier round of the stage can be the comparison. The Unit approvals page does the same against its earlier
   versions.
+- **Clean is the default view (1.29.0).** It has no strikethroughs and no ghosts: the page as it is now, with the words
+  and blocks each round wrote tinted in that round's own colour (the same round colours as the "revised" notes, light and
+  dark). Each round's changes are the difference between it and the round before, folded forward onto the latest text, so
+  where a later round changed the same words or block again only the latest round's colour shows. A legend chip per round
+  (v2, v3, ...) names the colours; a click on a chip shows that round alone. The Changes view (word diff against a round you
+  pick) stays one click away, and a choice you made is kept. A page with one round is unchanged.
 
 Rows written before 1.24.0 still open on At a glance:
 

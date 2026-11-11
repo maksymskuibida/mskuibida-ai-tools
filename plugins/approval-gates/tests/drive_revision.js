@@ -12,14 +12,25 @@ const { JSDOM } = require("jsdom");
 const { boot } = require("./gate_page_env");
 const [kind, pagePath, samplePath, scenario] = process.argv.slice(2);
 const sample = JSON.parse(fs.readFileSync(samplePath, "utf8"));
+/* The viewer's stored view: RV_PREF=show (the default here, the Changes view the older tests read) or "none" for a reader
+   who never chose, which is the Clean view with each round's colour. */
+const PREF = process.env.RV_PREF || "show";
+const seed = (w) => { if (PREF !== "none") w.localStorage.setItem("aidlc-rev:view", PREF); };
 const text = (n) => (n ? n.textContent.replace(/\s+/g, " ").trim() : "");
 
 function gate() {
   const t0 = Date.now();
-  const { w } = boot(pagePath, sample);
+  const { w } = boot(pagePath, sample, seed);
   const d = w.document, $ = (s) => d.querySelector(s), all = (s) => [...d.querySelectorAll(s)];
   const shown = (n) => !!n && !n.hidden && !n.closest("[hidden]");
   const filter = (name) => all("#bar .fpill").find((b) => b.firstChild.textContent === name).click();
+  /* what the Clean view tinted: [round, text] per <ins class="rv-r">, the blocks that carry a round's edge, the legend */
+  const colours = () => ({
+    ins: all("ins.rv-r").map((n) => [+(n.className.match(/rv-r(\d+)/) || [])[1], n.textContent]),
+    blocks: all(".rv-rb").map((n) => [+(n.className.match(/rv-r(\d+)/) || [])[1], n.id || n.dataset.ekey || n.className]),
+    legend: all(".rv-chip").map((b) => b.dataset.rvonly + ":" + b.getAttribute("aria-pressed")),
+    changesMarks: all("ins.rv-ins, del.rv-del").filter((n) => !n.closest(".rv-gone, .rv-removed")).length,  /* a ghost keeps its struck text, hidden in Clean */
+  });
   const page = () => ({
     blocks: all("#col > details.block").map((b) => b.id),
     chips: all("#bar .jchip").map(text),
@@ -44,6 +55,7 @@ function gate() {
     feedback: text($("#b-revision .rvfb")),
     picker: all("#b-revision select[data-rvbase] option").map(text),
     rv: $("#col").dataset.rv,
+    colours: colours(),
     pos: text($("#rvpos")),
     ms: Date.now() - t0,
   });
@@ -71,6 +83,15 @@ function gate() {
       if (go) { const where = go.dataset.rvgo; go.click(); r.went = where; const sec = all("details.sec").find((s) => s.classList.contains("rv-flash")) || $(".rv-flash"); r.landed = sec ? (sec.dataset.title || sec.id || sec.className) : ""; r.landedOpen = sec ? !sec.closest("details:not([open])") : false; }
       const link = all("#rv-list li.rvsub [data-rvgo]").find((b) => b.dataset.rvgo.startsWith("i:"));
       if (link) { link.click(); const key = link.dataset.rvgo.slice(2); const row = d.getElementById("item-" + key); r.itemOpened = !!(row && row.querySelector(".ib")); r.itemMarks = row ? row.querySelectorAll("ins.rv-ins, del.rv-del").length : 0; }
+      return r;
+    },
+    html() { return { html: $("#col").innerHTML.replace(/ data-rv="[a-z]+"/g, ""), rv: $("#col").dataset.rv, ins: all("ins").length, legend: all(".rv-chip").length, edges: all(".rv-rb").length }; },
+    colours() {
+      const r = { colours: colours() };
+      const chip = all(".rv-chip")[0];
+      if (chip) { chip.click(); r.pressed = all(".rv-chip").map((b) => b.getAttribute("aria-pressed")); r.dimmed = all("ins.rv-r.rv-dim").map((n) => +(n.className.match(/rv-r(\d+)/) || [])[1]); chip.click(); r.undimmed = all(".rv-dim").length; }
+      $("[data-rvview='show']").click();
+      r.show = { rv: $("#col").dataset.rv, pref: w.localStorage.getItem("aidlc-rev:view"), marks: all("ins.rv-ins").length, tinted: all("ins.rv-r").length, legend: all(".rv-chip").length };
       return r;
     },
     reads() {
@@ -101,11 +122,15 @@ function unit() {
     doc: () => ({ get: async () => snap("x", undefined), set: async () => {} }) };
   const db = { collection: () => q, doc: () => ({ onSnapshot: (cb) => { setTimeout(() => cb(snap(sample.id, sample.row))); return () => {}; }, update: async () => {} }) };
   w.claude = { use: async (what) => (what === "db" ? db : { id: async () => "viewer" }) };
+  seed(w);
   for (const m of html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)) w.eval(m[1]);
   const d = w.document, $ = (s) => d.querySelector(s), all = (s) => [...d.querySelectorAll(s)];
   return new Promise((done) => setTimeout(() => {
     const r = {};
     try {
+      r.colours = { ins: all("ins.rv-r").map((n) => [+(n.className.match(/rv-r(\d+)/) || [])[1], n.textContent]), blocks: all(".rv-rb").map((n) => [+(n.className.match(/rv-r(\d+)/) || [])[1], n.id]),
+        legend: all(".rv-chip").map((b) => b.dataset.rvonly + ":" + text(b)), marks: all("ins.rv-ins, del.rv-del").length, rv: $("#app").dataset.rv, strip: text($("#rvstrip h2")) };
+      if (PREF === "none") { const c = all(".rv-chip")[0]; if (!c) return done(r); c.click(); r.dim = all(".rv-dim").map((n) => n.className); r.pressed = all(".rv-chip").map((b) => b.getAttribute("aria-pressed")); return done(r); }
       r.strip = text($("#rvstrip h2")); r.hint = text($("#rvstrip .hint"));
       r.list = all("#rvstrip ul.rvlist li").map(text);
       r.rows = all(".row.rv-chg, .row.rv-new").map((n) => n.id + ":" + (n.classList.contains("rv-new") ? "new" : "changed"));

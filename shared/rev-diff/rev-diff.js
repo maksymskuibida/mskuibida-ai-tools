@@ -11,9 +11,13 @@
      RevDiff.markTree(now, old, o)   mark every text block of the tree now against the tree old; {ins, del}
      RevDiff.diffKeyed(now, old, o)  match keyed parts (sections, elements) by key, then title; changed ones recurse,
                                      new ones are marked, gone ones are handed to o.onRemoved; the rest goes to markTree
+     RevDiff.attributeText(texts, rounds)  the latest text of a chain of rounds as [{r, s}]: r is the round that last wrote s
+     RevDiff.attributeTree(now, olds, rounds, o)  the same on a tree: marks each round's words and blocks in its colour
+     RevDiff.unmark(root)           take the Changes marks off a tree again
+     RevDiff.legend(rounds, counts, only) / only(root, k) / toggleOnly(root, btn, cur)  the legend chips and their filter
      RevDiff.stops(root)             the changes in reading order, one stop per block, for next / previous
      RevDiff.reveal(node)            open every <details> around node, scroll to it and flash it
-     RevDiff.pref() / setPref(v)     "show" | "clean": the viewer's choice, kept in this browser
+     RevDiff.pref() / setPref(v)     "show" | "clean" (the default): the viewer's choice, kept in this browser
    Standard browser APIs only; a page must not load a diff library for it. */
 var RevDiff = (function () {
   "use strict";
@@ -171,7 +175,7 @@ var RevDiff = (function () {
       var s = n.nodeValue, start = starts[idx], end = start + s.length, last = idx === nodes.length - 1, gap = prevEnd;
       prevEnd = end;
       var cuts = [];
-      ins.forEach(function (r) { var a = Math.max(r[0], start), b = Math.min(r[1], end); if (a < b) cuts.push({ at: a - start, to: b - start, ins: true }); });
+      ins.forEach(function (r) { var a = Math.max(r[0], start), b = Math.min(r[1], end); if (a < b) cuts.push({ at: a - start, to: b - start, ins: true, cls: r[2] }); });
       /* a removal in the space joined() put between two nodes goes at the start of the second */
       dels.forEach(function (d) { if ((d[0] >= start && d[0] < end) || (d[0] >= gap && d[0] < start) || (last && d[0] >= end) || (d[0] === start && start === end)) cuts.push({ at: Math.min(Math.max(d[0] - start, 0), s.length), del: d[1] }); });
       if (!cuts.length) return;
@@ -180,7 +184,7 @@ var RevDiff = (function () {
       cuts.forEach(function (c) {
         if (c.at > p) { frag.appendChild(doc.createTextNode(s.slice(p, c.at))); p = c.at; }
         if (c.del != null) frag.appendChild(el(doc, "del", "rv-del", c.del));
-        else { frag.appendChild(el(doc, "ins", "rv-ins", s.slice(c.at, c.to))); p = c.to; }
+        else { frag.appendChild(el(doc, "ins", c.cls || "rv-ins", s.slice(c.at, c.to))); p = c.to; }
       });
       if (p < s.length) frag.appendChild(doc.createTextNode(s.slice(p)));
       n.parentNode.replaceChild(frag, n);
@@ -229,6 +233,17 @@ var RevDiff = (function () {
     return g;
   }
 
+  /* Pair each removed block with the added block it most resembles, in order: {pairs: [[gi, ni]], used: {ni: 1}}. */
+  function pairUp(gone, added) {
+    var pairs = [], used = {};
+    gone.forEach(function (g, gi) {
+      var best = -1, score = 0.34;
+      added.forEach(function (n, ni) { if (used[ni]) return; if (pairs.length && ni < pairs[pairs.length - 1][1]) return; var s = similar(g.text, n.text); if (s > score) { score = s; best = ni; } });
+      if (best >= 0) { used[best] = 1; pairs.push([gi, best]); }
+    });
+    return { pairs: pairs, used: used };
+  }
+
   /* Every text block of now against old; keyed parts (o.keyed) are left to diffKeyed. */
   function markTree(now, old, o) {
     o = o || {};
@@ -245,12 +260,7 @@ var RevDiff = (function () {
       i--;
       var after = (runs[i + 1] && runs[i + 1].t === "=") ? B[runs[i + 1].b0] : null;
       /* pair a removed block with the inserted block it most resembles, in order */
-      var pairs = [], used = {};
-      gone.forEach(function (g, gi) {
-        var best = -1, score = 0.34;
-        added.forEach(function (n, ni) { if (used[ni]) return; if (pairs.length && ni < pairs[pairs.length - 1][1]) return; var s = similar(g.text, n.text); if (s > score) { score = s; best = ni; } });
-        if (best >= 0) { used[best] = 1; pairs.push([gi, best]); }
-      });
+      var pr = pairUp(gone, added), pairs = pr.pairs, used = pr.used;
       var pairedGone = {}; pairs.forEach(function (p) { pairedGone[p[0]] = p[1]; });
       added.forEach(function (n, ni) {
         if (used[ni]) return;
@@ -319,6 +329,124 @@ var RevDiff = (function () {
     return s(a) === s(b);
   }
 
+
+  /* ---------- which round changed what (Clean view) ----------
+     Round k's changes are the difference between round k-1 and round k, folded forward onto the latest text: a word
+     keeps the round that last wrote it, so where a later round changed the same words or block again, the later round
+     wins. Rounds are numbers (2, 3, ...); 0 is the first round the text appeared in, which is not coloured. */
+  var TONES = 4;
+  function tone(k) { return ((Math.max(2, k) - 2) % TONES) + 2; }
+  var isSpace = function (t) { return /^\s+$/.test(t); };
+  /* The tokens of text with the round that wrote each one, given the tokens and rounds of the text before it (null when
+     there was none: everything is then written by round). */
+  function carry(prev, text, round) {
+    var toks = tokens(text), tags = new Array(toks.length), i;
+    var runs = prev ? diff(prev.toks.map(keyOf), toks.map(keyOf), 4000) : null;
+    if (!runs) { for (i = 0; i < toks.length; i++) tags[i] = round; }
+    else {
+      runs.forEach(function (r, ri) {
+        var j;
+        if (r.t === "+") { for (j = r.b0; j < r.b1; j++) tags[j] = round; }
+        else if (r.t === "=") {
+          var kept = toks.slice(r.b0, r.b1).join("");
+          /* a short run kept between two changes (a space, a comma, one short word) is part of the change */
+          var between = ri > 0 && ri < runs.length - 1 && (/^\s*$/.test(kept) || (kept.length <= 3 && !/\s/.test(kept.trim())));
+          for (j = r.b0; j < r.b1; j++) tags[j] = between ? round : prev.tags[r.a0 + (j - r.b0)];
+        }
+      });
+    }
+    /* a space between two words written by the same round belongs to it */
+    for (i = 1; i < toks.length - 1; i++) if (isSpace(toks[i]) && tags[i - 1] === tags[i + 1]) tags[i] = tags[i - 1];
+    return { toks: toks, tags: tags };
+  }
+  function segmentsOf(c) {
+    var out = [];
+    c.toks.forEach(function (t, i) { var last = out[out.length - 1]; if (last && last.r === c.tags[i]) last.s += t; else out.push({ r: c.tags[i], s: t }); });
+    return out;
+  }
+  /* The latest text of a chain of texts (oldest first, null where a round had none) as [{r, s}]: r is the round that
+     wrote s, 0 for the first round. rounds[i] is the round number of texts[i]. */
+  function attributeText(texts, rounds) {
+    var prev = null;
+    texts.forEach(function (t, i) { if (t == null) { prev = null; return; } prev = carry(prev, t, i === 0 ? 0 : rounds[i]); });
+    return prev ? segmentsOf(prev) : [];
+  }
+  /* The tree now against the trees before it (olds[i] has round rounds[i], null where that round did not have this part;
+     the last of rounds is now's): words last written by a later round are wrapped in <ins class="rv-r rv-rK rv-tT">, a
+     block written whole by one round gets that class itself. Returns {words: {round: n}, blocks: {round: n}}. */
+  function attributeTree(now, olds, rounds, o) {
+    o = o || {};
+    var prev = null, n = rounds.length, out = { words: {}, blocks: {} };
+    for (var i = 0; i < n; i++) {
+      var root = i === n - 1 ? now : olds[i];
+      if (!root) { prev = null; continue; }
+      var B = units(root, o), base = i === 0 ? 0 : rounds[i];
+      if (!prev) B.forEach(function (u) { var c = carry(null, u.text, base); u.toks = c.toks; u.tags = c.tags; u.block = base; });
+      else {
+        var runs = diff(prev.map(function (u) { return u.key; }), B.map(function (u) { return u.key; }), 4000)
+          || [{ t: "-", a0: 0, a1: prev.length, b0: 0, b1: 0 }, { t: "+", a0: prev.length, a1: prev.length, b0: 0, b1: B.length }];
+        var settle = function (u, from) { var c = carry(from, u.text, rounds[i]); u.toks = c.toks; u.tags = c.tags; u.block = from ? from.block : rounds[i]; };
+        for (var r = 0; r < runs.length; r++) {
+          var h = runs[r];
+          if (h.t === "=") { for (var j = 0; j < h.b1 - h.b0; j++) settle(B[h.b0 + j], prev[h.a0 + j]); continue; }
+          var gone = [], added = [];
+          while (r < runs.length && runs[r].t !== "=") { var x = runs[r]; if (x.t === "-") for (var a = x.a0; a < x.a1; a++) gone.push(prev[a]); else for (var b = x.b0; b < x.b1; b++) added.push(B[b]); r++; }
+          r--;
+          var pr = pairUp(gone, added);
+          pr.pairs.forEach(function (p) { settle(added[p[1]], gone[p[0]]); });
+          added.forEach(function (u, ni) { if (!pr.used[ni]) settle(u, null); });
+        }
+      }
+      prev = B;
+    }
+    (prev || []).forEach(function (u) {
+      var whole = u.owner !== now && textNodes(u.owner, o).length === u.nodes.length, skip = -1, pos = 0, ranges = [];
+      if (u.block > 0 && whole) { u.owner.classList.add("rv-rb", "rv-r" + u.block, "rv-t" + tone(u.block)); skip = u.block; out.blocks[u.block] = (out.blocks[u.block] || 0) + 1; }
+      u.toks.forEach(function (t, k) {
+        var tag = u.tags[k], last = ranges[ranges.length - 1];
+        if (IS_WORD.test(t) && tag > 0) out.words[tag] = (out.words[tag] || 0) + 1;
+        if (tag > 0 && tag !== skip) {
+          if (last && last.tag === tag && last[1] === pos) last[1] = pos + t.length;
+          else ranges.push(Object.assign([pos, pos + t.length, "rv-r rv-r" + tag + " rv-t" + tone(tag)], { tag: tag }));
+        }
+        pos += t.length;
+      });
+      if (ranges.length) apply(u.nodes, ranges.filter(function (q) { return joined(u.nodes).text.slice(q[0], q[1]).trim(); }), []);
+    });
+    return out;
+  }
+  /* Take the word-level marks of the Changes view (and any colours) off a tree, so the text reads as it was drawn. */
+  function unmark(root) {
+    var seen = [];
+    [].slice.call(root.querySelectorAll("ins.rv-ins, ins.rv-r")).forEach(function (n) {
+      var p = n.parentNode; while (n.firstChild) p.insertBefore(n.firstChild, n); p.removeChild(n); if (seen.indexOf(p) < 0) seen.push(p);
+    });
+    [].slice.call(root.querySelectorAll("del.rv-del")).forEach(function (n) {
+      if (n.closest(".rv-gone, .rv-removed")) return;
+      var p = n.parentNode; p.removeChild(n); if (seen.indexOf(p) < 0) seen.push(p);
+    });
+    seen.forEach(function (p) { p.normalize(); });
+    [].slice.call(root.querySelectorAll(".rv-rb")).forEach(function (n) { n.className = n.className.replace(/\brv-(rb|dim|r\d+|t\d+)\b/g, "").replace(/\s+/g, " ").trim(); });
+  }
+  /* The legend of rounds: a chip each, with the words that round last wrote; a click shows only that round's colour. */
+  function legend(rounds, counts, only) {
+    return '<span class="rv-legend" role="group" aria-label="Changes by version">' + rounds.map(function (k) {
+      var w = counts && counts[k] || 0;
+      return '<button type="button" class="rv-chip rv-t' + tone(k) + '" data-rvonly="' + k + '" aria-pressed="' + (only === k) + '"><i aria-hidden="true"></i>v' + k + (w ? '<span class="n">' + w + "</span>" : "") + "</button>";
+    }).join("") + "</span>";
+  }
+  /* Dim every colour but round k's (k = 0: none dimmed). */
+  function only(root, k) {
+    [].slice.call(root.querySelectorAll(".rv-r, .rv-rb")).forEach(function (n) { n.classList.toggle("rv-dim", !!k && !n.classList.contains("rv-r" + k)); });
+  }
+  /* A click on a legend chip: the round now shown alone (0 when the same chip is clicked again). */
+  function toggleOnly(root, btn, current) {
+    var k = +btn.getAttribute("data-rvonly"); k = k === current ? 0 : k;
+    only(root, k);
+    [].slice.call(btn.parentElement.querySelectorAll("[data-rvonly]")).forEach(function (b) { b.setAttribute("aria-pressed", String(+b.getAttribute("data-rvonly") === k)); });
+    return k;
+  }
+
   /* ---------- reading the changes ---------- */
   var STOP = ".rv-ins, .rv-del, .rv-gone, .rv-new, .rv-removed, .rv-addblk, .rv-chg.diagram, .rv-stop";
   function stops(root) {
@@ -340,10 +468,10 @@ var RevDiff = (function () {
     node.classList.remove("rv-flash"); void node.offsetWidth; node.classList.add("rv-flash");
   }
   var PREF = "aidlc-rev:view";
-  function pref() { try { return localStorage.getItem(PREF) === "clean" ? "clean" : "show"; } catch (e) { return "show"; } }
-  function setPref(v) { try { localStorage.setItem(PREF, v === "clean" ? "clean" : "show"); } catch (e) { /* kept for this visit */ } }
+  function pref() { try { return localStorage.getItem(PREF) === "show" ? "show" : "clean"; } catch (e) { return "clean"; } }
+  function setPref(v) { try { localStorage.setItem(PREF, v === "show" ? "show" : "clean"); } catch (e) { /* kept for this visit */ } }
 
   return { diff: diff, words: words, tokens: tokens, countWords: countWords, norm: norm, similar: similar, textOf: textOf,
-    markText: markText, markTree: markTree, diffKeyed: diffKeyed, stops: stops, reveal: reveal, pref: pref, setPref: setPref };
+    markText: markText, markTree: markTree, attributeText: attributeText, attributeTree: attributeTree, unmark: unmark, legend: legend, only: only, toggleOnly: toggleOnly, tone: tone, diffKeyed: diffKeyed, stops: stops, reveal: reveal, pref: pref, setPref: setPref };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = RevDiff;
