@@ -4,7 +4,7 @@
     "name": "Maksym Skuibida"
   },
   "description": "Maksym Skuibida's personal Claude Code tooling — small, opinionated plugins.",
-  "version": "1.47.0",
+  "version": "1.48.0",
   "plugins": [
     {
       "name": "response-format",
@@ -61,10 +61,10 @@
       "version": "1.11.0"
     },
     {
-      "name": "aidlc-session-titles",
-      "source": "./plugins/aidlc-session-titles",
+      "name": "session-titles",
+      "source": "./plugins/session-titles",
       "description": "For AI-DLC projects: keeps every session that runs the workflow titled by what it is on — `<unit> — <stage>` only in a Unit's checkout that really works on the Unit (a Haiku agent judges), else `<phase> — <stage>` (just `Construction` in the main checkout on main; elsewhere on Construction the developer is asked whether it is a Unit checkout); a session opened from a Unit's branch for other work keeps its title. Read from the project's state, never from the agent. Set at each prompt and, in the desktop app, renamed mid-turn when the stage or Unit moves on.",
-      "version": "0.2.0"
+      "version": "0.3.0"
     },
     {
       "name": "unit-claim",
@@ -73,10 +73,10 @@
       "version": "0.4.2"
     },
     {
-      "name": "aidlc-patches",
-      "source": "./plugins/aidlc-patches",
+      "name": "engine-patches",
+      "source": "./plugins/engine-patches",
       "description": "For people who patch the AI-DLC engine in their own fork of awslabs/aidlc-workflows: investigate a bug to a failing test, check upstream first, keep the fork as an upstream release plus one commit per patch, release previews numbered from .101, pin projects to them, and send fixes upstream. Remembers your forks across plugin updates.",
-      "version": "0.1.0"
+      "version": "0.2.0"
     },
     {
       "name": "aidlc-ids",
