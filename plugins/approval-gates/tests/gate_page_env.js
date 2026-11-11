@@ -4,7 +4,7 @@ const fs = require("fs");
 const { JSDOM } = require("jsdom");
 const optional = (name) => { try { return require(name); } catch { return null; } };
 
-function boot(pagePath, sample) {
+function boot(pagePath, sample, before) {
   const html = fs.readFileSync(pagePath, "utf8").replace(/<script src=[^>]*><\/script>/g, "");
   const dom = new JSDOM("<!doctype html><html><head></head><body>" + html + "</body></html>", {
     runScripts: "outside-only", pretendToBeVisual: true, url: "https://claude.ai/artifact/x#" + sample.id,
@@ -18,6 +18,7 @@ function boot(pagePath, sample) {
   if (marked && purify) { w.marked = marked.marked || marked; w.DOMPurify = (purify.default || purify)(w); }
   if (yaml) w.jsyaml = yaml;
 
+  if (before) before(w);
   const writes = [];
   const snap = (id, data) => ({ id, exists: data !== undefined, data: () => data });
   const query = (docs) => {

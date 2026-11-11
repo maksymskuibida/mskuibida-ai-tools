@@ -134,7 +134,9 @@ items do not cover; and **As written**, the covered files, folded. Read marks pe
 document, stay as they were. On a round with an earlier one of the same stage (and Unit) in the artifact, the page
 compares itself with it (or with any earlier round the developer picks): words added are highlighted, words removed are
 struck through, unchanged sections fold, a removed section, element or item stays as a struck ghost "removed since round
-N", and the bar gets Changes / Clean, previous and next change (keys `p` and `n`) and a Changed filter. The Unit
+N", and the bar gets Changes / Clean, previous and next change (keys `p` and `n`) and a Changed filter. Clean is the
+default view: no strikethroughs, and the words each round wrote tinted in that round's own colour (the latest round
+wins where rounds clash), with a legend chip per round. The Unit
 approvals page does the same against the earlier versions of the same Unit page.
 
 ## 2a. Review findings: fix what is certain, the rest goes on the page
