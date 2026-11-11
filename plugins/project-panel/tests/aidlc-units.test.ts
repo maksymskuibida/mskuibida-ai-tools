@@ -245,6 +245,36 @@ describe('parseUnitEvents', () => {
   })
 })
 
+describe('a plan that skips per-Unit stages (no column in the table)', () => {
+  const table = [
+    '## Unit Progress',
+    '',
+    '| unit | owner | functional-design | nfr-requirements | code-generation | gate | merged |',
+    '| --- | --- | --- | --- | --- | --- | --- |',
+    '| u1-skeleton | A | [x] | [x] | [x] | [x] | [x] |',
+    '| u2-api | | [ ] | [ ] | [ ] | [ ] | [ ] |',
+    '',
+    '## Current Status',
+  ].join('\n')
+  const units: Unit[] = [
+    { name: 'u1-skeleton', kind: '', dependsOn: [], id: 'U1', jira: '' },
+    { name: 'u2-api', kind: '', dependsOn: ['u1-skeleton'], id: 'U2', jira: '' },
+  ]
+  const facts: UnitFacts = { events: [], builtByFiles: new Set(), startedByFiles: new Map() }
+
+  test('every present column done is done, and its dependent is ready', () => {
+    const got = progressOf(units, parseState(stateText()), facts, parseUnitProgress(table))
+    expect(got.get('u1-skeleton')).toEqual({ phase: 'done', stage: '' })
+    expect(got.get('u2-api')).toEqual({ phase: 'planned', stage: '' })
+    expect(startOf(units[1]!, got, new Set())).toBe('ready')
+  })
+
+  test('a table with no per-Unit stage columns does not count as done', () => {
+    const bare = ['## Unit Progress', '', '| unit | owner | gate | merged |', '| --- | --- | --- | --- |', '| u1-skeleton | A | [x] | [x] |', '', '## Current Status'].join('\n')
+    expect(parseUnitProgress(bare).size).toBe(0)
+  })
+})
+
 describe('progressOf', () => {
   const units: Unit[] = [
     { name: 'a', kind: '', dependsOn: [], id: 'U1', jira: '' },
