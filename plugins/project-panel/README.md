@@ -398,6 +398,12 @@ Until Units Generation has finished and produced Units, Construction's seven sta
 is listed with its stages but carries no count or ring (its row says `not included yet`, in `local only`'s amber), and the plan counts only the other phases. Once the Units exist
 (or when Units Generation is skipped), Construction counts again, as below.
 
+### Units whose plan skips stages (0.27.1)
+
+A per-Unit stage with no column in the engine's `## Unit Progress` table is not part of the Unit, the same as a cell
+marked `[S]`. A Unit whose every present column is `[x]` is built, so the Units that depend on it are ready, not locked.
+A table with no per-Unit stage columns at all never counts a Unit as done.
+
 ### Links to a stage's pages (0.27.0)
 
 Under a stage's row (and under a Unit's, when its stages are not rows of their own) the panel lists the artifact pages

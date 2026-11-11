@@ -257,7 +257,8 @@ function skippedRow(row: Map<string, UnitCell>): string[] {
 /** A Unit's progress from its table row: built, on a stage (working, waiting, revising), between stages, or not started. */
 function progressFromRow(row: Map<string, UnitCell>, isPaused: boolean): UnitProgress {
   const cellOf = (stage: string) => row.get(stage) ?? ' '
-  const live = PER_UNIT_STAGES.filter(stage => cellOf(stage) !== 'S')
+  // A stage with no column in the table is not part of the Unit, the same as one marked S.
+  const live = PER_UNIT_STAGES.filter(stage => row.has(stage) && cellOf(stage) !== 'S')
   const skipped = PER_UNIT_STAGES.filter(stage => cellOf(stage) === 'S')
   if (live.length > 0 && live.every(stage => cellOf(stage) === 'x')) return progressWith({ phase: 'done', stage: '' }, skipped)
   const on = live.find(stage => ['-', '?', 'R'].includes(cellOf(stage)))
@@ -347,7 +348,7 @@ export type UnitStageStatus = 'done' | 'active' | 'paused' | 'awaiting' | 'revis
 /** Each per-unit stage's status straight from the Unit's row of the engine's Unit Progress table. */
 export function stageStatusesFromRow(row: Map<string, UnitCell>, isPaused: boolean): Map<string, UnitStageStatus> {
   const of: Record<UnitCell, UnitStageStatus> = { ' ': 'planned', '-': isPaused ? 'paused' : 'active', '?': 'awaiting', R: 'revising', x: 'done', S: 'skipped' }
-  return new Map(PER_UNIT_STAGES.map(stage => [stage, of[row.get(stage) ?? ' ']]))
+  return new Map(PER_UNIT_STAGES.map(stage => [stage, row.has(stage) ? of[row.get(stage) ?? ' '] : 'skipped']))
 }
 
 /**
