@@ -1,6 +1,6 @@
 import type { EngineInterface, Register } from 'claude-code'
 
-// /aidlc-ids:sync builds or brings up to date the id map of the session's AI-DLC project, without a model turn: the
+// /project-ids:sync builds or brings up to date the id map of the session's AI-DLC project, without a model turn: the
 // command runs scripts/aidlc_ids.py sync and answers with what it printed. Agents run the same script before they
 // build a page; the command is for the developer, and for a session that wants the map fresh without spending tokens.
 

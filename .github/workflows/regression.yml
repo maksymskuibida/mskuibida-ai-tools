@@ -116,11 +116,11 @@ jobs:
           claude plugin validate plugins/question-forms
           claude plugin test plugins/question-forms
 
-      - name: Validate and test aidlc-ids
+      - name: Validate and test project-ids
         # Not best effort, same as model-fit.
         run: |
-          claude plugin validate plugins/aidlc-ids
-          claude plugin test plugins/aidlc-ids
+          claude plugin validate plugins/project-ids
+          claude plugin test plugins/project-ids
 
       - name: Validate the marketplace and the plugins without a test command
         run: |
