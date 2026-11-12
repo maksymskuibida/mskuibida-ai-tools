@@ -89,11 +89,12 @@ def state_path(event):
 def blank():
     """`aidlc`: the session runs the workflow. `emitted`: the title last handed to the harness. `applied`: the title
     the desktop app last confirmed. `asked`, `declined`, `blocked`: the title the assistant was last told to set,
-    refused, or was stopped for. `judged`: the Haiku verdict on whether the session is a Unit session,
+    refused, or was stopped for; all three are forgotten when the stage's title changes (`seen`: the title the project
+    last asked for), so a title the session comes back to is asked for again. `judged`: the Haiku verdict on whether the session is a Unit session,
     {"unit", "verdict" (true, false, or null when the judge could not answer), "at"}. `checkouts`: per project folder,
     "asked" once the developer was asked whether it is a Unit checkout, then their answer, "unit" or "other"."""
     return {"aidlc": False, "emitted": None, "applied": None, "asked": None, "declined": None, "blocked": None,
-            "judged": None, "checkouts": {}, "updated": time.time()}
+            "seen": None, "judged": None, "checkouts": {}, "updated": time.time()}
 
 
 def load(event):
@@ -105,7 +106,7 @@ def load(event):
         return state
     if isinstance(data, dict):
         state["aidlc"] = data.get("aidlc") is True
-        for key in ("emitted", "applied", "asked", "declined", "blocked"):
+        for key in ("emitted", "applied", "asked", "declined", "blocked", "seen"):
             if isinstance(data.get(key), str):
                 state[key] = data[key]
         judged = data.get("judged")
@@ -507,8 +508,18 @@ def title_for(event, state):
     for project in projects(event):
         title, _ = expected_title(event, state, project)
         if title:
+            note_title(state, title)
             return title
     return None
+
+
+def note_title(state, title):
+    """The title is the stage the checkout is on now, in whichever direction it moved. What was asked, declined or
+    blocked for the title before is no answer for the new one: forget it, so that a title the session returns to
+    (a jump back, a redone stage, a Request Changes, a Unit switch) is set again."""
+    if state["seen"] != title:
+        state["seen"] = title
+        state["asked"] = state["declined"] = state["blocked"] = None
 
 
 def checkout_question(event, state):
@@ -610,7 +621,7 @@ def on_tool(event, state):
         if event.get("hook_event_name") == "PostToolUseFailure" or failed(event.get("tool_response"), title):
             state["declined"] = title
         else:
-            state["applied"] = title
+            state["applied"] = state["emitted"] = title  # the title in force, so a prompt at another stage emits again
         return True
     if tool == "AskUserQuestion":
         ti = event.get("tool_input") or {}
@@ -670,8 +681,8 @@ def main():
     try:
         with state_lock(event):
             state = load(event)
-            before = json.dumps([state["judged"], state["checkouts"]])
-            if handler(event, state) | (json.dumps([state["judged"], state["checkouts"]]) != before):
+            before = json.dumps([state["judged"], state["checkouts"], state["seen"]])
+            if handler(event, state) | (json.dumps([state["judged"], state["checkouts"], state["seen"]]) != before):
                 save(event, state)
     except Exception:  # never break the call this hook sits beside
         return 0
