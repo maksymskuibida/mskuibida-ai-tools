@@ -68,7 +68,7 @@ function gate() {
       r.next = text($("#rvpos"));
       $("[data-rvstep='-1']").click();
       r.prev = text($("#rvpos"));
-      w.document.dispatchEvent(new w.KeyboardEvent("keydown", { key: "n", bubbles: true }));
+      w.document.dispatchEvent(new w.KeyboardEvent("keydown", { key: "j", bubbles: true }));
       r.key = text($("#rvpos"));
       filter("Changed");
       r.changed = { items: all("#b-items .irow[data-item]").filter(shown).length, of: all("#b-items .irow[data-item]").length,

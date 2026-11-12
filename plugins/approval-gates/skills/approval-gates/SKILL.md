@@ -129,8 +129,10 @@ page with its words added and removed); **Claude's evaluation** (verdict, what a
 gaps / conflicts / solid with their sources, and "Rules checked": every criterion with its verdict, failed ones open);
 **What the stage says** (every item as your sentence with its label, grouped Look at first / Matters most / Main / Minor,
 opening to the item as written: its criteria, logic and examples; unchanged and earlier-settled items and the
-traceability fold away with a count); the finding cards; your completion summary (folded); the review; the documents the
-items do not cover; and **As written**, the covered files, folded. Read marks per block and per item, and notes per
+traceability fold away with a count); the finding cards; your completion summary (folded); the review; and, last, **Records** (every
+file of the stage as written, closed, the ones the evaluation does not cover first) and **Your answer** (the developer's
+picks and notes, read-only; the decision itself is given in chat). A "Needs you" filter and a "n decisions left · m unread"
+counter in the bar are the developer's; nothing the agent writes changes. Read marks per block and per item, and notes per
 document, stay as they were. On a round with an earlier one of the same stage (and Unit) in the artifact, the page
 compares itself with it (or with any earlier round the developer picks): words added are highlighted, words removed are
 struck through, unchanged sections fold, a removed section, element or item stays as a struck ghost "removed since round

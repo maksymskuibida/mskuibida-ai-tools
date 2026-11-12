@@ -112,11 +112,16 @@ class TestTheJudgedPage(unittest.TestCase):
         self.assertIn("AC1.1.2", self.r["opened"])
         self.assertIn("orders for tomorrow are closed", self.r["opened"])
 
-    def test_covered_files_fold_under_as_written_and_no_raw_table_leads(self):
-        self.assertEqual(self.r["asWritten"], ["d-stories", "d-traceability"])
-        self.assertNotIn("d-stories", self.r["shownDocs"])
-        self.assertIn("d-personas", self.r["shownDocs"])
-        self.assertEqual(self.r["tablesOutsideAsWritten"], ["d-review-02"], "only the reviewer's findings table")
+    def test_every_file_is_a_row_of_records_and_no_raw_table_leads(self):
+        r = self.r
+        self.assertEqual(r["docsOutsideRecords"], [], "no file is drawn in full outside Records")
+        self.assertEqual(r["recordsWhy"]["d-stories"], "covered")
+        self.assertEqual(r["recordsWhy"]["d-traceability"], "covered")
+        self.assertEqual(r["recordsWhy"]["d-personas"], "notcovered")
+        self.assertEqual(r["records"][-2:], ["d-stories", "d-traceability"], "covered files come last")
+        self.assertLess(r["records"].index("d-personas"), r["records"].index("d-stories"), "files the evaluation does not cover come first")
+        self.assertFalse(r["recordsOpen"], "closed by default while there is anything else to read")
+        self.assertEqual(r["tablesOutsideRecords"], [], "no raw table is drawn outside Records")
 
     def test_rendering_writes_nothing(self):
         self.assertEqual(self.r["writes"], 0, "opening the page never writes to the gate")

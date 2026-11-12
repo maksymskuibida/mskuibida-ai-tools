@@ -354,7 +354,7 @@ class TestRender(Base):
 
     def test_the_plan_page_renders(self):
         _path, b, _info = self.finished()
-        out = render(b, {"default": {}, "summary": {"mode": "summary"}, "full": {"mode": "full"}, "v1read": {"read": {"A-1": 1}}})
+        out = render(b, {"default": {}, "summary": {"mode": "summary", "sec": {"records": True}}, "full": {"mode": "full"}, "v1read": {"read": {"A-1": 1}}})
         page = out["summary"]
         self.assertIn("Unit u2-pickup-slots: Approve plan", page)
         for key in ("narrows", "assumptions", "findings", "plan", "tests", "answers"):
@@ -371,7 +371,7 @@ class TestRender(Base):
         self.assertIn('data-aidlc-id="R-02" data-anchor="FD-R-02"', page, "a folded row's id is still a live link")
         self.assertNotIn('data-aidlc-id="Q1"', page, "Q1 is in two stages' answers: no one row defines it")
         self.assertIn('class="row read"', out["v1read"])
-        self.assertEqual(out["order"], validate_bundle.order(b))
+        self.assertEqual(out["order"], ["records" if k in ("answers", "design") else k for k in validate_bundle.order(b)])
         self.assertIn(b["id"], out["list"])
 
     def test_a_revision_marks_and_filters(self):
@@ -419,12 +419,13 @@ class TestRender(Base):
             "nodes": [{"id": "r", "title": "Slot rules", "weight": "core", "target": "#B-1"}, {"id": "l", "title": "Slot list", "weight": "main", "target": "#B-2"}],
             "edges": [{"from": "r", "to": "l", "label": "full slots"}]}
         self.assertEqual(validate_bundle.validate(end), [], end_built)
-        page = render(end)["summary"]
+        page = render(end, {"summary": {"mode": "summary", "sec": {"records": True}}})["summary"]
         self.assertIn("The design you approved", page)
         self.assertIn('class="node core"', page)
         self.assertIn("full slots", page)
         self.assertIn("High and core", page)
         self.assertLess(page.index('id="built"'), page.index('id="design"'))
+        self.assertLess(page.index('id="design"'), page.index('id="answer"'), "Your answer is the last block")
 
 
 U4_REPO = os.path.expanduser(os.environ.get("APPROVAL_GATES_U4_REPO", "~/dayboard"))

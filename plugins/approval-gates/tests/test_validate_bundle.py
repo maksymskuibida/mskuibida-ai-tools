@@ -225,13 +225,14 @@ class TestOrder(unittest.TestCase):
     def test_the_page_orders_like_the_contract(self):
         for b in (plan_bundle(), end_bundle()):
             # the page tells the unverified, verified and failed sections as one "verification" section, where the first stood
-            merged = ["verification" if k in ("unverified", "verified", "failed") else k for k in validate_bundle.order(b)]
-            self.assertEqual(render(b)["order"], [k for i, k in enumerate(merged) if k != "verification" or "verification" not in merged[:i]])
+            # and the answers and the approved design as one closed "records" block at the bottom
+            merged = ["verification" if k in ("unverified", "verified", "failed") else "records" if k in ("answers", "design") else k for k in validate_bundle.order(b)]
+            self.assertEqual(render(b)["order"], [k for i, k in enumerate(merged) if k not in ("verification", "records") or k not in merged[:i]])
         b = plan_bundle()
         b["sections"][0]["rows"] = [row("A-1", "low"), row("A-2", "medium")]
         b["sections"][1]["rows"][0]["refs"] = []
         b["sections"][2]["rows"][0]["label"] = "low"
-        self.assertEqual(render(b)["order"], validate_bundle.order(b))
+        self.assertEqual(render(b)["order"], ["records" if k in ("answers", "design") else k for k in validate_bundle.order(b)])
         self.assertEqual(validate_bundle.order(b)[0], "plan")
 
 
