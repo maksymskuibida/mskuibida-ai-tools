@@ -1,5 +1,53 @@
 # approval-gates changelog
 
+## 1.35.0
+
+Fix round 1 of the pages' rework, for the per-stage page, the Unit pages and the test plan page (`approval-gate.html`,
+`unit-gate.html`, `test-plan.html`, the shared `gate-viz`; `maps.html` is not touched). What a first on-screen review of 83 mock pages
+found: the look stays, the experience changes. Every number below is the page's own, drawn once.
+
+- **Round changes are always visible, in Clean too.** Every changed, new or removed thing carries a small round tag ("v3 changed",
+  "v3 new", "v3 removed", "was Met" on a target whose verdict moved) in the round's colour; removed things are listed where they were,
+  struck, in both views. The banner never says "Changes are hidden". The Changed filter shows exactly the changed, new and removed things
+  and never drops a block that has changes (the code plan's steps included) or leaves an empty one. The Changed pill, the banner, the
+  round timeline and the list of changes read one count; a Unit page compares with its first round by default (a row carries the round
+  that last changed it), the Rounds menu picks a later one.
+- **Nothing twice.** A record whose targets table became the matrix draws its other sections only (every such table is cut, once per
+  Unit); a target named in another record's table links to its matrix row; the ledger names a target by id; an opened item lists no id its
+  own text already shows, and says its title once; a criterion does not repeat its title; the criteria bars (the third copy of the same
+  counts) are gone.
+- **No empty shells.** An items block with no items is not drawn (its traceability line sits at the foot of the evaluation). Units Generation's
+  Units are items (`digest.py`: `U<n>` headings, bullets and tables of `unit-of-work.md`, nowhere else); "stories", not "storys".
+- **Text / View / Diagram, Changes / Clean never close anything**: every block and section stays as it was, the control stays under the
+  pointer, and the record's own view is built, hidden, under a diagram so the read totals do not move.
+- **One sticky bar** on the per-stage and the Unit pages: one row at 48 px on a wide screen, at most two to three short rows (98 px) on a
+  phone. All / Needs you / Unread / Changed and the readiness counter; Rounds (the timeline and the round to compare with), Sections (Unit
+  pages) or Outline (per-stage), and View (Summary | Full, Changes | Clean, Look first, High and critical, Expand all, Collapse all, Mark all
+  read) open as menus. The jump chips and "Read x/y" are gone (the counter holds the unread count); every control has a tooltip.
+- **Phone**: the Why first paragraph no longer inherits the document chip's `nowrap` (it pushed the page 178 px sideways); a row's sentence
+  keeps its width and its tags wrap under it; outline labels wrap.
+- **Unit pages open in Summary**; Do it / Leave it sit on the row's own line; "Your answer" lists a note the moment it is written; the
+  tiles are numbers the page can show (Look first = what the filter shows, no Steps tile without a plan); a design row's id is no link to a
+  verification row; the list marks the current page and mutes the replaced ones with their row counts.
+- **Readiness is honest**: something tagged not handled, not met or failing is not settled by being read. It stays in Needs you ("N to
+  look at") until the person presses "Seen, will answer in chat" on it; Ready to answer shows only then.
+- **Each evaluation card is its own element** with its own read mark; "N to look at first" clears as each card is read.
+- **One vocabulary** (round) and English dates (never the browser's locale inside English text).
+- **The trace diagram** orders by id (US2.1 before US10.1) and sweeps to untangle; above 10 boxes a column or 36 links it is offered per
+  requirement (pick one, see its chain).
+- **Test plan page**: the others' width (1180 px), header with an "All plans" link and a status chip, a sticky progress strip with "Next
+  step to do", a closing band, no scroll jump on load, visible focus on the Pass / Fail buttons.
+- Smaller: a "sources disagree" tag has its own space under the verdict; a heat cell pressed twice clears and a filtered list says
+  "Showing n of 48 · Clear filters"; under Unread the target strip leaves when nothing in it is unread; a Reject without a reason is
+  "Reject, reason missing" in Your answer; read dots are named by what they mark; tooltips never show markdown table source; no anchor hash
+  in a list of changes; Records opens (and says so) on a stage whose files are its content; the "Your answer" block no longer inherits an
+  old inline-answer style.
+- `dev/preview.py`: a scenario starts at round 1 (the audit is cleared between scenarios); summaries read like an agent's; a Unit
+  page's tiles are computed; suggestion rows; the list view holds plan and unit-end pages; gate rows carry links to the maps; a gate of
+  the Ideation phase with open decisions (84 pages).
+- Tests: `test_fix1_pages.py` (one class per decision) and `drive_fix1.js`; the older drivers read the readiness counter and the blocks
+  instead of the jump chips.
+
 ## 1.34.0
 
 Fix round 1 for the maps page (`maps.html`): the look stays, the experience changes so a person can use the Unit map to decide what

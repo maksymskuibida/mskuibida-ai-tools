@@ -19,7 +19,7 @@ setTimeout(() => {
   const report = {
     title: text("#title"),
     blocks: all("#col > details.block, #col > section").map((b) => b.id),
-    chips: all("#bar .jchip").map((c) => c.textContent.replace(/\s+/g, " ").trim()),
+    chips: all("#col > details.block:not([hidden])").map((b) => b.querySelector(":scope > summary").textContent.replace(/\s+/g, " ").trim()),
     verdict: text("#b-eval > summary .pill"),
     decides: text("#b-eval .decides"),
     lookFirst: all("#b-eval ol.lfl > li").map((li) => li.textContent.replace(/\s+/g, " ").trim()),

@@ -13,8 +13,8 @@ const d = w.document, $ = (sel) => d.querySelector(sel), all = (sel) => [...d.qu
 const click = (sel) => { const n = typeof sel === "string" ? $(sel) : sel; if (!n) throw new Error("no " + sel); n.click(); };
 const filter = (name) => click(all("#bar .fpill").find((b) => b.firstChild.textContent === name));
 const shown = (n) => !!n && !n.hidden && !n.closest("[hidden]") && !n.closest(".eh");
-const chips = () => all("#bar .jchip").map((c) => c.textContent.replace(/\s+/g, " ").trim());
-const progress = () => ((d.querySelector("#bar .progress-r .num") || {}).textContent || "");
+const chips = () => all("#col > details.block:not([hidden])").map((b) => b.querySelector(":scope > summary").textContent.replace(/\s+/g, " ").trim());
+const progress = () => { const r = d.querySelector("#ready"); return r ? "Read " + (+r.dataset.total - +r.dataset.unread) + "/" + r.dataset.total : ""; };
 const where = () => { const a = d.activeElement; return a ? (a.closest("[data-fid]") ? "card:" + a.closest("[data-fid]").dataset.fid : a.closest("#b-findings") ? "findings-header" : a.closest("#bar") ? "bar" : a.closest("[data-ekey]") ? "el:" + a.closest("[data-ekey]").dataset.ekey : a.tagName) : ""; };
 
 const scenarios = {

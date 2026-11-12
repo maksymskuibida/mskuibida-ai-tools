@@ -361,7 +361,8 @@ class TestRender(Base):
             self.assertIn(f'id="{key}"', page)
         self.assertIn('id="FD-R-02"', page)
         self.assertNotIn('class="rowbody"', page, "rows are folded in the Summary view")
-        self.assertIn('class="rowbody"', out["default"], "everything starts open")
+        self.assertNotIn('class="rowbody"', out["default"], "the page opens in Summary: one line per row")
+        self.assertIn('class="rowbody"', out["full"], "Full opens every row")
         read_row = out["v1read"].split('class="row read"', 1)[1].split('class="row', 1)[0]
         self.assertNotIn('class="rowbody"', read_row, "a row marked read stays folded")
         self.assertIn("look first", page)
@@ -383,8 +384,10 @@ class TestRender(Base):
         info = self.finalize(path)
         with open(info["bundle"], encoding="utf-8") as f:
             v2 = json.load(f)
-        out = render(v2, {"read": {"read": {"A-1": 1, "A-2": 1}}, "v2": {"filter": "v2"}})
-        self.assertIn("v2 · 1 change (current)", out["read"])
+        rv = {"cur": 2, "since": 1, "changed": 1, "added": 0, "removed": 0, "n": 1}  # the page's one diff, as its controller hands it to the renderer
+        out = render(v2, {"read": {"read": {"A-1": 1, "A-2": 1}, "rv": rv, "mode": "full"}, "v2": {"filter": "v2", "mode": "full"}})
+        self.assertIn("Round 2 compared with round 1: 1 changed", out["read"])
+        self.assertIn(">Changed<b class=\"n\">1</b>", out["read"], "the pill is the banner's count")
         self.assertIn('class="row read" id="A-1"', out["read"])
         self.assertIn('class="row" id="A-2"', out["read"], "a row changed in v2 turns unread")
         self.assertIn(' id="A-2"', out["v2"])

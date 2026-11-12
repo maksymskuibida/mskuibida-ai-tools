@@ -89,7 +89,7 @@ class TestTheJudgedPage(unittest.TestCase):
         self.assertIn("Why first", self.r["lookFirst"][0])
         self.assertEqual(self.r["columns"][:2], ["Risks1", "Gaps1"])
         self.assertIn("Solid2", self.r["columns"])
-        self.assertTrue(self.r["chips"][0].startswith("Evaluation2 to look at first"), self.r["chips"][0])
+        self.assertTrue(self.r["chips"][0].startswith("Claude's evaluation") and "2 to look at first" in self.r["chips"][0], self.r["chips"][0])
 
     def test_every_criterion_shows_its_verdict_and_a_source_opens_it(self):
         verdicts = {c["id"]: c["verdict"] for c in self.r["criteria"]}
@@ -218,9 +218,9 @@ class TestReadMarks(unittest.TestCase):
         self.assertFalse(done["block"], "the whole block hides: header, tiers and folded groups")
         self.assertFalse(any(t["shown"] for t in done["tiers"]))
         self.assertFalse(any(done["folds"]))
-        self.assertFalse(any(c.startswith("Items") for c in done["chips"]), "its chip leaves the bar with it")
+        self.assertFalse(any(c.startswith("What the stage says") for c in done["chips"]), "the block leaves the page with its parts")
         self.assertTrue(r["back"]["block"] and all(t["shown"] for t in r["back"]["tiers"]), "All brings everything back")
-        self.assertTrue(any(c.startswith("Items") for c in r["back"]["chips"]))
+        self.assertTrue(any(c.startswith("What the stage says") for c in r["back"]["chips"]))
 
     def test_answering_a_finding_card_marks_it_read(self):
         r = drive(self.tmp, "finding", lambda s: s["row"].update(findings=FINDINGS))

@@ -33,7 +33,7 @@ function gate() {
   });
   const page = () => ({
     blocks: all("#col > details.block").map((b) => b.id),
-    chips: all("#bar .jchip").map(text),
+    chips: all("#col > details.block:not([hidden])").map((b) => text(b.querySelector(":scope > summary"))),
     groups: all("#rv-list li.rvg").map((li) => text(li)),
     entries: all("#rv-list li.rvsub li").map((li) => text(li)),
     total: text($("#rv-total")),
@@ -128,18 +128,20 @@ function unit() {
   return new Promise((done) => setTimeout(() => {
     const r = {};
     try {
+      /* the Unit page opens in Summary; the words of a row's body are read in Full */
+      const full = $('[data-act="mode"][data-val="full"]'); if (full) full.click();
       r.colours = { ins: all("ins.rv-r").map((n) => [+(n.className.match(/rv-r(\d+)/) || [])[1], n.textContent]), blocks: all(".rv-rb").map((n) => [+(n.className.match(/rv-r(\d+)/) || [])[1], n.id]),
-        legend: all(".rv-chip").map((b) => b.dataset.rvonly + ":" + text(b)), marks: all("ins.rv-ins, del.rv-del").length, rv: $("#app").dataset.rv, strip: text($("#rvstrip h2")) };
+        legend: all(".rv-chip").map((b) => b.dataset.rvonly + ":" + text(b)), marks: all("ins.rv-ins, del.rv-del").length, rv: $("#app").dataset.rv, strip: text($(".revs")) };
       if (PREF === "none") { const c = all(".rv-chip")[0]; if (!c) return done(r); c.click(); r.dim = all(".rv-dim").map((n) => n.className); r.pressed = all(".rv-chip").map((b) => b.getAttribute("aria-pressed")); return done(r); }
-      r.strip = text($("#rvstrip h2")); r.hint = text($("#rvstrip .hint"));
-      r.list = all("#rvstrip ul.rvlist li").map(text);
+      r.strip = text($(".revs")); r.hint = "";
+      r.list = all(".row.rv-removed").map(text);
       r.rows = all(".row.rv-chg, .row.rv-new").map((n) => n.id + ":" + (n.classList.contains("rv-new") ? "new" : "changed"));
       r.ins = all("ins.rv-ins").map((n) => n.textContent); r.del = all("del.rv-del").map((n) => n.textContent);
-      r.picker = all("#rvstrip select option").map(text);
+      r.picker = all("select[data-rvbase] option").map(text);
       r.filters = all("#bar .pill").map(text);
-      all("#bar .pill").find((b) => text(b) === "Changed").click();
+      all("#bar .pill").find((b) => /^Changed/.test(text(b))).click();
       r.changedOnly = all("main .row").map((n) => n.id);
-      all("#bar .pill").find((b) => text(b) === "All").click();
+      all("#bar .pill").find((b) => /^All/.test(text(b))).click();
       $("[data-rvstep='1']").click(); r.pos = text($("#rvpos"));
       $("[data-rvview='clean']").click(); r.clean = { rv: $("#app").dataset.rv, nav: !!$("#rvpos") };
     } catch (e) { r.error = String(e && e.stack || e); }

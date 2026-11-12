@@ -139,3 +139,9 @@
 }
 @media (max-width: 560px) { .vz-layer, .vz-lane { grid-template-columns: minmax(0, 1fr); } .vz-lname { padding-top: 0; } .vz-item { max-width: 100%; } .vz-lstep { max-width: 100%; } }
 @media (prefers-reduced-motion: no-preference) { .vz-node rect, .vz-edge path, .vz-item { transition: stroke .12s, opacity .12s, background .12s; } }
+/* a trace too big to draw at once is offered per requirement */
+.vz-pickrow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0 0 8px; }
+.vz-pickrow label { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--fg-2); }
+.vz-pickrow select { max-width: min(420px, 70vw); font: inherit; font-size: 13px; font-weight: 400; color: var(--fg); background: var(--surface); border: 1px solid var(--control); border-radius: 6px; padding: 4px 8px; min-height: 30px; }
+.vz-pickrow .hint { font-size: 12px; }
+.vz-seg.auto { cursor: default; }

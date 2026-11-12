@@ -122,15 +122,15 @@ async function unit() {
   const f = $(".vz-funnel");
   out.funnel = f ? { label: f.getAttribute("aria-label"), segs: all(".vz-seg").map((s) => ({ cls: s.className.replace("vz-seg ", ""), text: s.textContent.replace(/\s+/g, " ").trim(), tag: s.tagName })) } : null;
   if (f) {
-    out.rowsAll = all("#verification .row").length;
+    out.rowsAll = all("#verification .row:not(.rv-removed)").length;
     const failed = $(".vz-seg.failed");
     if (failed) {
       click(w, failed); await wait(50);
-      out.failed = { rows: all("#verification .row").length, chip: ($(".vchip[data-val=failed]") || { getAttribute: () => "" }).getAttribute("aria-pressed"), seg: ($(".vz-seg.failed") || { getAttribute: () => "" }).getAttribute("aria-pressed") };
+      out.failed = { rows: all("#verification .row:not(.rv-removed)").length, chip: ($(".vchip[data-val=failed]") || { getAttribute: () => "" }).getAttribute("aria-pressed"), seg: ($(".vz-seg.failed") || { getAttribute: () => "" }).getAttribute("aria-pressed") };
       click(w, $(".vz-seg.failed")); await wait(50);
-      out.cleared = { rows: all("#verification .row").length };
+      out.cleared = { rows: all("#verification .row:not(.rv-removed)").length };
       click(w, $(".vz-seg.verified")); await wait(50);
-      out.verified = { rows: all("#verification .row").length, chips: all(".vchip[aria-pressed=true]").map((c) => c.dataset.val) };
+      out.verified = { rows: all("#verification .row:not(.rv-removed)").length, chips: all(".vchip[aria-pressed=true]").map((c) => c.dataset.val) };
     }
   }
   const lanes = $(".vz-lanes");

@@ -83,7 +83,7 @@ class TestTwoRounds(unittest.TestCase):
         for name in ("Claude's evaluation", "What the stage says", "Completion summary", "Requirements: Bakery pre-order", "Review 02"):
             self.assertIn(name, groups)
         self.assertNotIn("Review 01", groups, "a review copy replaced by the next one is not a removal")
-        self.assertRegex(self.r["total"], r"^\d+ changes since round 1 · \+\d+ −\d+$")
+        self.assertRegex(self.r["total"], r"^\d+ changes since round 1 \(\d+ changed, \d+ new, \d+ removed\) · \+\d+ −\d+$")
         entries = " | ".join(self.r["entries"])
         self.assertIn("FR2.2 · Sold out is set per product and no list write clears it.", entries)
         self.assertIn("FR3.1", entries)
@@ -237,12 +237,12 @@ class TestSyntheticRounds(unittest.TestCase):
         self.assertIn("Kept the same", [s["title"] for s in self.r["sameSecs"]])
         self.assertIn("18:00", "".join(self.r["ins"]))
         self.assertIn("six in the evening", "".join(self.r["del"]))
-        self.assertTrue(any("removed since round 1" in t for t in self.r["removed"]))
+        self.assertTrue(any("v2 removed" in t for t in self.r["removed"]), "a removed thing is tagged with the round that removed it")
 
     def test_an_element_removed_and_one_reworded(self):
         # the "Reworded" section of the notes document is an element of its own too (each section of a file shown as written is)
         self.assertEqual(self.r["changedElems"], ["el:notes:Reworded", "el:rules:BR1.1"])
-        self.assertTrue(any(t.startswith("BR1.2") and "removed since round 1" in t for t in self.r["removed"]), self.r["removed"])
+        self.assertTrue(any(t.startswith("BR1.2") and "v2 removed" in t for t in self.r["removed"]), self.r["removed"])
         self.assertIn("new", [t.strip() for t in self.r["ins"]])
         self.assertIn("and says so", [t.strip() for t in self.r["ins"]])
         self.assertIn("15", self.r["ins"], "a change in the rule's folded logic shows too")
@@ -332,11 +332,11 @@ class TestUnitPage(unittest.TestCase):
                                   "createdAt": at, "status": "open", "bundle": bundle}
         r = drive("unit", UNIT_PAGE, {"id": v2["id"], "row": row(v2, "2026-02-02T10:00:00Z"),
                                       "others": [{"id": v1["id"], "row": row(removed, "2026-02-01T10:00:00Z")}]})
-        self.assertEqual(r["strip"], "What changed since v1")
+        self.assertIn("Round 2 compared with round 1", r["strip"])
         self.assertEqual(r["rows"], ["A-2:changed"])
         self.assertIn("Changed to cover Saturdays too", " ".join(r["ins"]), "the row's new words are highlighted (when it is open)")
-        self.assertTrue(any("A-9" in x and x.startswith("removed") for x in r["list"]), r["list"])
-        self.assertIn("Changed", r["filters"])
+        self.assertTrue(any("A-9" in x and "removed" in x for x in r["list"]), r["list"])
+        self.assertTrue(any(f.startswith("Changed") for f in r["filters"]), r["filters"])
         self.assertIn("A-2", r["changedOnly"])
         self.assertNotIn("A-1", r["changedOnly"], "an unchanged row leaves under Changed")
         self.assertTrue(r["pos"].startswith("1 / "))
