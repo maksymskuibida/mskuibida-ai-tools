@@ -172,6 +172,12 @@ h2 .hint { margin-left: 8px; font-weight: 400; font-size: 13px; color: var(--mut
 .where.path { font-family: var(--mono); width: 150px; }
 .lab { flex: none; width: 66px; text-align: center; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; padding: 3px 0; border-radius: 4px; }
 .layer { flex: none; width: 66px; text-align: center; font-size: 11px; font-weight: 500; padding: 3px 0; border-radius: 4px; }
+.vchips { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 16px 4px; }
+.vchip { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid var(--line); background: var(--surface); color: var(--fg-2); font-size: 13px; cursor: pointer; }
+.vchip b { font-family: var(--mono); font-weight: 500; color: var(--muted); }
+.vchip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.tag.vst { flex: none; }
+.secdot { margin-left: 4px; }
 .dot { flex: none; width: 32px; height: 32px; border: 0; border-radius: 6px; background: transparent; display: inline-flex; align-items: center; justify-content: center; }
 .dot i { width: 10px; height: 10px; border-radius: 5px; background: var(--accent); border: 2px solid var(--accent); }
 .read > .rowhead .dot i { background: transparent; border-color: var(--control); }
@@ -1022,6 +1028,24 @@ var GateView = (function () {
   /* Only in-page anchors and http(s) addresses become links: a bundle is data, never a script. */
   function safeHref(u) { u = String(u || ""); return /^#[A-Za-z0-9._-]*$/.test(u) || /^https?:\/\//i.test(u) ? u : "#"; }
   function stepKey(st) { return st.source && st.source.key ? String(st.source.key) : "step:" + int(st.n); }
+  /* A row numbered by its place in a list (a deviation D-n, a V point V-n, a built piece B-n) is read by the record it was drawn from (source.key, a digest of its text); any other row by its id, so a
+     point that moved from V-2 to V-1 keeps its mark and one whose text changed does not; its anchor and its note and pick
+     key stay the id the agent and the developer know it by. */
+  function rowKey(r) { return r.source && r.source.key && /^[DVB]-\d+$/.test(String(r.id)) ? String(r.source.key) : anchor(r.id); }
+  /* The unit-end page tells each V point once: the contract's three sections (unverified, verified, failed) are one
+     Verification section here, every point carrying its state. The bundle is unchanged. */
+  var VKINDS = ["unverified", "verified", "failed"];
+  var VSTATE = { unverified: ["Not verified", "warn"], verified: ["Verified by you", "ok"], failed: ["Failed, left as known", "crit"] };
+  function sectionsOf(bundle) {
+    var out = [], merged = null;
+    (bundle.sections || []).forEach(function (s) {
+      if (VKINDS.indexOf(s.kind) < 0) { out.push(s); return; }
+      if (!merged) { merged = { key: "verification", kind: "verification", title: "Verification", short: "Verification", hint: "The points the code summary left open, and where each stands", refsLabel: s.refsLabel, rows: [], merged: true }; out.push(merged); }
+      (s.rows || []).forEach(function (r) { merged.rows.push(Object.assign({}, r, { _state: s.kind })); });
+    });
+    return out;
+  }
+  function sectionOfKey(bundle, key) { return sectionsOf(bundle).filter(function (s) { return s.key === key; })[0] || null; }
   var CHEVRON = '<svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14"><path d="M5 3l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>';
 
   function score(rows) {
@@ -1040,7 +1064,7 @@ var GateView = (function () {
      section and above the rest, tests after every other section, then the answers, and on the unit-end page the design. */
   function order(bundle) {
     var ranked = [], tests = [];
-    (bundle.sections || []).forEach(function (s, i) { (s.kind === "tests" ? tests : ranked).push({ key: s.key, score: score(s.rows || []), i: i }); });
+    sectionsOf(bundle).forEach(function (s, i) { (s.kind === "tests" ? tests : ranked).push({ key: s.key, score: score(s.rows || []), i: i }); });
     if (bundle.plan) ranked.push({ key: "plan", score: [PLAN_RANK, 0, 0], i: -1 });
     var by = function (a, b) { return cmp(a.score, b.score) || (a.i - b.i); };
     var keys = ranked.sort(by).map(function (x) { return x.key; }).concat(tests.sort(by).map(function (x) { return x.key; }));
@@ -1056,12 +1080,13 @@ var GateView = (function () {
   function isOpen(st, key, read) { var o = st.open[key]; return o === undefined ? st.mode === "full" && !read : o; }
   /* Test now / Later is proof the row was read: set the pick and mark the row read at its rev. A second click on the
      pressed button un-picks and leaves the read state alone. A row that was open stays open, so the pick shows. */
-  function applyTestPick(st, key, val, item) {
+  function applyTestPick(st, key, val, item, readKey) {
+    readKey = readKey || key;
     var was = st.picks[key] === val;
     st.picks[key] = was ? "" : val;
     if (was || !item || (val !== "now" && val !== "later")) return false;
-    var open = isOpen(st, key, isRead(st, key, item));
-    st.read[key] = Math.max(st.read[key] || 0, revOf(item));
+    var open = isOpen(st, key, isRead(st, readKey, item));
+    st.read[readKey] = Math.max(st.read[readKey] || 0, revOf(item));
     if (open) st.open[key] = true;
     return true;
   }
@@ -1080,10 +1105,11 @@ var GateView = (function () {
   /* key: the read mark's key (a row's anchor; a step's source, so a renumbered step keeps its mark); anchor: the jump target. */
   function itemsOf(bundle) {
     var out = [];
-    (bundle.sections || []).forEach(function (s) { (s.rows || []).forEach(function (r) { out.push({ key: anchor(r.id), anchor: anchor(r.id), item: r }); }); });
-    ((bundle.plan || {}).steps || []).forEach(function (st) { out.push({ key: stepKey(st), anchor: "step-" + int(st.n), item: st }); });
+    sectionsOf(bundle).forEach(function (s) { (s.rows || []).forEach(function (r) { out.push({ key: rowKey(r), anchor: anchor(r.id), item: r, sec: s.key }); }); });
+    ((bundle.plan || {}).steps || []).forEach(function (st) { out.push({ key: stepKey(st), anchor: "step-" + int(st.n), item: st, sec: "plan" }); });
     return out;
   }
+  function itemsOfSection(bundle, key) { return itemsOf(bundle).filter(function (x) { return x.sec === key; }); }
   function revisionsIn(bundle) {
     var seen = {};
     itemsOf(bundle).forEach(function (x) { if (x.item.rev) seen[x.item.rev] = (seen[x.item.rev] || 0) + 1; });
@@ -1104,7 +1130,7 @@ var GateView = (function () {
   function definedIds(bundle) {
     var byId = {}, out = {};
     var add = function (id, key) { id = String(id || "").split(" ").pop(); if (IDISH.test(id)) (byId[id] = byId[id] || []).push(key); };
-    (bundle.sections || []).forEach(function (s) { (s.rows || []).forEach(function (r) { add(r.id, anchor(r.id)); }); });
+    sectionsOf(bundle).forEach(function (s) { (s.rows || []).forEach(function (r) { add(r.id, anchor(r.id)); }); });
     (bundle.answers || []).forEach(function (g) { (g.questions || []).forEach(function (q) { add(q.id, q.anchor); }); });
     Object.keys(byId).forEach(function (id) { if (byId[id].length === 1) out[byId[id][0]] = id; });
     return out;
@@ -1115,7 +1141,7 @@ var GateView = (function () {
   function idMap(bundle) {
     var out = {}, defs = definedIds(bundle);
     var fromRef = function (x) { var l = String(x.label || ""); if (IDISH.test(l) && !out[l]) out[l] = { title: String(x.tip || ""), doc: String(x.target || "").indexOf("path:") === 0 ? String(x.target).slice(5).replace(/#.*/, "") : "" }; };
-    (bundle.sections || []).forEach(function (s) { (s.rows || []).forEach(function (r) {
+    sectionsOf(bundle).forEach(function (s) { (s.rows || []).forEach(function (r) {
       var id = defs[anchor(r.id)]; if (id && !out[id]) out[id] = { title: String(r.title || "") };
       (r.refs || []).forEach(fromRef);
     }); });
@@ -1179,8 +1205,8 @@ var GateView = (function () {
   }
 
   function rowHtml(st, bundle, sec, r) {
-    var key = anchor(r.id), read = isRead(st, key, r), open = isOpen(st, key, read);
-    var t = r.rev ? revTone(r.rev) : null;
+    var key = anchor(r.id), read = isRead(st, rowKey(r), r), open = isOpen(st, key, read);
+    var t = r.rev ? revTone(r.rev) : null, vs = r._state ? VSTATE[r._state] : null;
     var bg = t ? "background:var(--" + t + "-tint)" : (r.lookFirst ? "background:var(--accent-tint)" : "");
     var head = '<div class="rowhead">' +
       '<button type="button" class="twist" data-act="row" data-key="' + esc(key) + '" aria-expanded="' + open + '" aria-label="' + (open ? "Collapse " : "Expand ") + esc(r.id) + '">' + CHEVRON + "</button>" +
@@ -1188,7 +1214,8 @@ var GateView = (function () {
       '<button type="button" class="rtitle" data-act="row" data-key="' + esc(key) + '" title="' + esc(r.title) + '">' + esc(r.title) + "</button>" +
       revBadge(r) + (r.lookFirst ? '<span class="look">look first</span>' : "") + handledChip(r, bundle) +
       (r.where ? '<span class="where' + (r.whereIsPath ? " path" : "") + '" title="' + esc(r.where) + '">' + esc(r.where) + "</span>" : "") +
-      (sec.kind === "unverified" ? testPick(st, key) : "") +
+      (vs ? '<span class="tag vst" style="' + tone(vs[1]) + '">' + esc(vs[0]) + "</span>" : "") +
+      ((r._state || sec.kind) === "unverified" ? testPick(st, key) : "") +
       '<span class="lab" style="' + tone(LABEL_TONE[r.label] || "low") + '">' + esc(r.label) + "</span>" +
       '<button type="button" class="dot" data-act="read" data-key="' + esc(key) + '" aria-label="Mark ' + esc(r.id) + (read ? " unread" : " read") + '" title="Mark ' + (read ? "unread" : "read") + '"><i></i></button></div>';
     var body = "";
@@ -1204,6 +1231,12 @@ var GateView = (function () {
     return '<div class="row' + (read ? " read" : "") + '" id="' + esc(key) + '"' + idAttr(definedIds(bundle), key) + ' style="' + bg + '">' + head + reasonLine(r) + body + "</div>";
   }
 
+  /* a section's own dot is derived: read when every row (step) in it is, and pressing it marks or unmarks them all */
+  function secDot(st, bundle, key, title) {
+    var its = itemsOfSection(bundle, key); if (!its.length) return "";
+    var all = its.every(function (x) { return isRead(st, x.key, x.item); });
+    return '<button type="button" class="dot secdot" data-act="secread" data-key="' + esc(key) + '" aria-label="Mark ' + esc(title) + (all ? " unread" : " read") + '" title="Mark all of ' + esc(title) + (all ? " unread" : " read") + '"><i></i></button>';
+  }
   function sectionHead(key, title, hint, open, right) {
     return '<div class="sechead"><button type="button" class="twist" data-act="sec" data-key="' + esc(key) + '" aria-expanded="' + open + '" aria-label="' + (open ? "Collapse " : "Expand ") + esc(title) + '">' + CHEVRON + "</button>" +
       '<h2><button type="button" data-act="sec" data-key="' + esc(key) + '">' + esc(title) + (hint ? ' <span class="hint">' + esc(hint) + "</span>" : "") + "</button></h2>" +
@@ -1249,12 +1282,16 @@ var GateView = (function () {
 
   function sectionHtml(st, bundle, s) {
     var rows = sortRows(s.rows || []), kinds = s.kind === "built" ? WEIGHTS : SEVERITY;
-    var shownRows = rows.filter(function (r) { return passes(st, r, anchor(r.id), false); });
+    var vsel = st.vstate || {}, anyV = s.merged && VKINDS.some(function (k) { return vsel[k]; });
+    var shownRows = rows.filter(function (r) { return passes(st, r, rowKey(r), false) && (!anyV || vsel[r._state]); });
     var open = secOpen(st, s.key, true);
-    var right = labelCounts(rows, kinds) + '<span class="shown">' + (st.filter === "all" ? rows.length : shownRows.length + "/" + rows.length) + "</span>";
+    var right = labelCounts(rows, kinds) + '<span class="shown">' + (st.filter === "all" && !anyV ? rows.length : shownRows.length + "/" + rows.length) + "</span>" + secDot(st, bundle, s.key, s.title);
     var body = "";
+    var chips = !s.merged ? "" : '<div class="vchips" role="group" aria-label="Show points that are">' + VKINDS.filter(function (k) { return rows.some(function (r) { return r._state === k; }); }).map(function (k) {
+      return '<button type="button" class="vchip" data-act="vstate" data-val="' + k + '" aria-pressed="' + !!vsel[k] + '">' + esc(VSTATE[k][0]) + '<b>' + rows.filter(function (r) { return r._state === k; }).length + "</b></button>";
+    }).join("") + "</div>";
     if (open) {
-      body = '<div class="secbody">' + (s.map && st.filter === "all" ? mapHtml(s.map) : "") +
+      body = '<div class="secbody">' + chips + (s.map && st.filter === "all" ? mapHtml(s.map) : "") +
         (s.asApproved ? '<p class="asapproved">The design stays as approved.</p>' : "") +
         shownRows.map(function (r) { return rowHtml(st, bundle, s, r); }).join("") + "</div>";
     }
@@ -1295,7 +1332,7 @@ var GateView = (function () {
     var revs = Object.keys(steps.reduce(function (m, s) { if (s.rev) m[s.rev] = 1; return m; }, {})).sort().map(function (v) {
       var t = revTone(+v); return '<span class="lc" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">v' + int(v) + "<b>" + steps.filter(function (s) { return s.rev === +v; }).length + "</b></span>";
     }).join("");
-    var right = layers + revs + '<span class="shown">' + (st.filter === "all" ? steps.length : shown.length + "/" + steps.length) + "</span>";
+    var right = layers + revs + '<span class="shown">' + (st.filter === "all" ? steps.length : shown.length + "/" + steps.length) + "</span>" + secDot(st, bundle, "plan", p.title || "Code plan");
     var body = open ? '<div class="secbody">' + shown.map(function (s) { return stepHtml(st, bundle, s); }).join("") + "</div>" : "";
     return '<section class="card" id="plan" data-sec="plan">' + sectionHead("plan", p.title || "Code plan", p.hint || "", open, right) + body + "</section>";
   }
@@ -1358,8 +1395,8 @@ var GateView = (function () {
     } else if (key === "answers") { short = "Answers"; count = String((bundle.answers || []).reduce(function (n, g) { return n + (g.questions || []).length; }, 0)); }
     else if (key === "design") { short = "Approved design"; count = String((bundle.design.rows || []).length); }
     else {
-      var s = (bundle.sections || []).filter(function (x) { return x.key === key; })[0], rows = s.rows || [];
-      short = s.short; count = rows.filter(function (r) { return !isRead(st, anchor(r.id), r); }).length + "/" + rows.length;
+      var s = sectionOfKey(bundle, key), rows = s.rows || [];
+      short = s.short; count = rows.filter(function (r) { return !isRead(st, rowKey(r), r); }).length + "/" + rows.length;
       var lab = rows.some(function (r) { return r.label === "critical"; }) ? "critical" : (rows.some(function (r) { return r.label === "high"; }) ? "high" : "");
       if (lab) top = '<span class="tag" style="' + tone(LABEL_TONE[lab]) + '">' + lab + "</span>";
       var mx = Math.max.apply(null, [0].concat(rows.map(function (r) { return r.rev || 0; })));
@@ -1396,19 +1433,20 @@ var GateView = (function () {
      every one. A section that says something without rows (the design stays as approved, a map) stays. */
   function hasContent(st, bundle, key) {
     if (key === "plan") { var steps = bundle.plan.steps || []; return steps.some(function (x) { return passes(st, x, stepKey(x), true); }); }
-    if (key === "answers") return (bundle.answers || []).length > 0;
-    if (key === "design") return !!((bundle.design.rows || []).length || bundle.design.bundle || bundle.design.url);
-    var s = (bundle.sections || []).filter(function (x) { return x.key === key; })[0];
+    /* the answers and the approved design hold nothing to read: they show with the whole page, never under a filter */
+    if (key === "answers") return (bundle.answers || []).length > 0 && st.filter === "all";
+    if (key === "design") return !!((bundle.design.rows || []).length || bundle.design.bundle || bundle.design.url) && st.filter === "all";
+    var s = sectionOfKey(bundle, key);
     if (!s) return false;
     if (s.asApproved || (s.map && st.filter === "all")) return true;
-    return (s.rows || []).some(function (r) { return passes(st, r, anchor(r.id), false); });
+    return (s.rows || []).some(function (r) { return passes(st, r, rowKey(r), false); });
   }
 
   /* The whole page for one bundle. st: {mode, filter, open, sec, read, notes, picks, noteStat}. */
   function render(bundle, st) {
-    st = Object.assign({ mode: "full", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {} }, st || {});
+    st = Object.assign({ mode: "full", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {}, vstate: {} }, st || {});
     var keys = order(bundle).filter(function (k) { return hasContent(st, bundle, k); }), parts = {};
-    (bundle.sections || []).forEach(function (s) { parts[s.key] = sectionHtml(st, bundle, s); });
+    sectionsOf(bundle).forEach(function (s) { parts[s.key] = sectionHtml(st, bundle, s); });
     if (bundle.plan) parts.plan = planHtml(st, bundle);
     if ((bundle.answers || []).length) parts.answers = answersHtml(st, bundle);
     if (bundle.design) parts.design = designHtml(st, bundle);
@@ -1429,7 +1467,7 @@ var GateView = (function () {
       }).join("");
   }
 
-  return { render: render, listHtml: listHtml, pageTitle: pageTitle, order: order, sortRows: sortRows, anchor: anchor, itemsOf: itemsOf, isRead: isRead, applyTestPick: applyTestPick, esc: esc, idMap: idMap };
+  return { render: render, listHtml: listHtml, pageTitle: pageTitle, order: order, sortRows: sortRows, anchor: anchor, itemsOf: itemsOf, itemsOfSection: itemsOfSection, sectionsOf: sectionsOf, rowKey: rowKey, isRead: isRead, applyTestPick: applyTestPick, esc: esc, idMap: idMap };
 })();
 if (typeof module !== "undefined") module.exports = GateView;
 /* RENDER-END */
@@ -1441,7 +1479,7 @@ if (typeof module !== "undefined") module.exports = GateView;
   var db = null, user = null, uid = null;
   var view = { id: "", row: null, bundle: null, ids: {}, unsub: [], st: null, readKey: "", saving: false, unsaved: false, timer: 0, rounds: [], base: null, rvAt: -1, rvOnly: 0 };
 
-  function freshState() { return { mode: "full", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {} }; }
+  function freshState() { return { mode: "full", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {}, vstate: {} }; }
   function toast(text) { toastEl.textContent = text; toastEl.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(function () { toastEl.hidden = true; }, 2400); }
   function teardown() {
     if (view.unsaved) flush();  /* sends the pending note of the page being left; flush reads the id before it awaits */
@@ -1505,9 +1543,9 @@ if (typeof module !== "undefined") module.exports = GateView;
   function reveal(target) {
     var st = view.st, b = view.bundle;
     if (!b || !target) return;
-    var secKeys = (b.sections || []).map(function (s) { return s.key; }).concat(["plan", "answers", "design"]);
+    var secs = GateView.sectionsOf(b), secKeys = secs.map(function (s) { return s.key; }).concat(["plan", "answers", "design"]);
     if (secKeys.indexOf(target) >= 0) st.sec[target] = true;
-    (b.sections || []).forEach(function (s) { (s.rows || []).forEach(function (r) { if (GateView.anchor(r.id) === target) { st.sec[s.key] = true; st.open[target] = true; } }); });
+    secs.forEach(function (s) { (s.rows || []).forEach(function (r) { if (GateView.anchor(r.id) === target) { st.sec[s.key] = true; st.open[target] = true; if (s.merged) st.vstate = {}; } }); });
     if (/^step-\d+$/.test(target)) { st.sec.plan = true; st.open[target] = true; }
     (b.answers || []).forEach(function (g) {
       if (g.key === target) st.sec.answers = true;
@@ -1572,6 +1610,11 @@ if (typeof module !== "undefined") module.exports = GateView;
       var it = GateView.itemsOf(view.bundle).filter(function (x) { return x.anchor === key; })[0];
       /* marking a row read folds it; marking it unread opens it again */
       if (it) { var r = it.item.rev || 1; if (GateView.isRead(st, it.key, it.item)) { st.read[it.key] = r - 1; saveReads(); st.open[key] = true; } else { markRead([it.key], r); st.open[key] = false; } }
+    } else if (act === "vstate") { st.vstate = st.vstate || {}; st.vstate[val] = !st.vstate[val]; }
+    else if (act === "secread") {
+      var sits = GateView.itemsOfSection(view.bundle, key), sall = sits.length && sits.every(function (x) { return GateView.isRead(st, x.key, x.item); });
+      sits.forEach(function (x) { var r = x.item.rev || 1; if (sall) st.read[x.key] = r - 1; else st.read[x.key] = Math.max(st.read[x.key] || 0, r); });
+      saveReads();
     } else if (act === "mode") { st.mode = val; st.open = {}; st.sec = {}; }
     else if (act === "filter") { st.filter = val; st.sec = {}; }
     else if (act === "expand" || act === "collapse") {
@@ -1585,7 +1628,7 @@ if (typeof module !== "undefined") module.exports = GateView;
     }
     else if (act === "pick") {
       var pit = GateView.itemsOf(view.bundle).filter(function (x) { return x.anchor === key; })[0];
-      if (GateView.applyTestPick(st, key, val, pit && pit.item)) saveReads();
+      if (GateView.applyTestPick(st, key, val, pit && pit.item, pit && pit.key)) saveReads();
       queueSave();
     }
     paint();
@@ -1615,7 +1658,8 @@ if (typeof module !== "undefined") module.exports = GateView;
       view.base = view.rounds[0] || null; view.rvAt = -1; paint();
     }).catch(function () { /* no comparison: the page reads as it is */ });
   }
-  function rvSig(it) { return JSON.stringify([it.title || "", it.body || "", (it.subs || []).map(function (s) { return s.text; }), it.label || "", it.layer || ""]); }
+  /* what the server counts as a change (unit_bundle.py ROW_FIELDS and a step's fields): a row changed in any of them is tagged, so none is unread without a mark */
+  function rvSig(it) { return JSON.stringify([it.title || "", it.body || "", (it.subs || []).map(function (s) { return s.text; }), it.label || "", it.layer || "", (it.refs || []).map(function (r) { return [r.label, r.tip, r.target]; }), it.coveredBy || null, it.suggestion || "", it.where || "", !!it.lookFirst, it.files || 0, (it.implements || []).map(function (r) { return [r.label, r.target]; })]); }
   function rvDelta() {
     var base = view.base && view.base.row.bundle; if (!base) return null;
     var old = {}; GateView.itemsOf(base).forEach(function (x) { old[x.key] = x; });
@@ -1637,7 +1681,7 @@ if (typeof module !== "undefined") module.exports = GateView;
     var D = rvDelta(), main = app.querySelector("main"), esc = GateView.esc;
     app.dataset.rv = RevDiff.pref();
     if (!D || !main) return;
-    if (RevDiff.pref() === "clean") { rvClean(main); return; }
+    if (RevDiff.pref() === "clean") { rvClean(main, D); return; }
     var baseV = (view.base.row.bundle.header || {}).revision || 1, show = RevDiff.pref() === "show";
     var total = { ins: 0, del: 0 };
     D.items.forEach(function (x) {
@@ -1673,7 +1717,7 @@ if (typeof module !== "undefined") module.exports = GateView;
      versions of the Unit page, oldest first, are folded forward onto this one (RevDiff.attributeTree): a word keeps the
      colour of the version that last wrote it, a row that first appeared in a later version carries that version's edge.
      Computed once per paint from the bundles already loaded. */
-  function rvClean(main) {
+  function rvClean(main, D) {
     var chain = view.rounds.slice().reverse().map(function (r) { return r.row.bundle; }).concat([view.bundle]), nos = [];
     chain.forEach(function (b, i) { var no = (b.header || {}).revision || i + 1; nos.push(i && no <= nos[i - 1] ? nos[i - 1] + 1 : no); });
     var maps = chain.map(function (b) { var m = {}; GateView.itemsOf(b).forEach(function (x) { m[x.key] = x.item; }); return m; });
@@ -1697,7 +1741,8 @@ if (typeof module !== "undefined") module.exports = GateView;
     strip.className = "card rvstrip"; strip.id = "rvstrip"; strip.setAttribute("data-rv-skip", ""); strip.setAttribute("aria-label", "What changed, by version");
     strip.innerHTML = '<div class="rvtop"><h2>What changed, by version</h2>' + RevDiff.legend(nos.slice(1), counts, view.rvOnly) +
       '<span class="hint">Each colour is the version that last changed the text</span>' +
-      '<span class="seg rvseg" role="group" aria-label="Changes"><button type="button" data-rvview="show" aria-pressed="false">Changes</button><button type="button" data-rvview="clean" aria-pressed="true">Clean</button></span></div>';
+      '<span class="seg rvseg" role="group" aria-label="Changes"><button type="button" data-rvview="show" aria-pressed="false">Changes</button><button type="button" data-rvview="clean" aria-pressed="true">Clean</button></span></div>' +
+      (D.removed.length ? '<ul class="rvlist rvgoneList">' + D.removed.map(function (it) { return '<li class="gone"><span>' + rvTagHtml("gone") + '<span class="rvt">' + GateView.esc(itemName(it)) + "</span></span></li>"; }).join("") + "</ul>" : "");
     main.insertBefore(strip, main.firstChild);
     RevDiff.only(main, view.rvOnly);
   }

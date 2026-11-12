@@ -73,11 +73,14 @@ At the `build-and-test` gate `gate_bundle.py` also reads the stage's tables into
 
 - a **results strip**: commands passed out of run, line coverage per repository as a bar against its floor, and the
   Met / Not Met / Unverified / N/A counts (press a count to filter the matrix);
-- a **target matrix**: Not Met and Unverified first, filter chips by verdict and by Unit, a search by ID or text, and
-  evidence codes whose legend shows on hover;
-- a **decision card** per Not Met or Unverified target: Accept as known, Follow-up or Fix now, with an optional note.
-  The picks are saved in the row (`targetPicks`) and the agent reads them with your chat answer: Fix now becomes a
-  Request Changes naming those targets, Follow-up is recorded as follow-up work, Accept as a known limit;
+- **one list of targets** (1.30.0): every target once, however many files list it (the worst verdict wins; a target whose
+  files disagree carries a "sources disagree" tag with both verdicts). The open ones, Not Met first and then Unverified,
+  sit at the top with their decision in the row: Accept as known, Follow-up or Fix now, with an optional note; Met and
+  N/A fold under a count. Filter chips by verdict and by Unit, a search by ID or text, evidence codes whose legend shows
+  on hover, and "n of m chosen" on the header. The picks are saved in the row (`targetPicks`) and the agent reads them
+  with your chat answer: Fix now becomes a Request Changes naming those targets, Follow-up is recorded as follow-up
+  work, Accept as a known limit. A file whose targets table became the list is folded, with a line saying where its
+  table is, and an item of "What the stage says" that is one of the targets links to its row instead of repeating it;
 - the build, integration, performance and security instruction files folded in a closed **Reference** section.
 
 If the tables are not found, the stage looks like any other.
@@ -180,6 +183,17 @@ stage against its rules**:
   Changes / Clean (remembered in your browser), previous and next change (`p` / `n`) and a Changed filter sit in the
   bar; any earlier round of the stage can be the comparison. The Unit approvals page does the same against its earlier
   versions.
+- **Every separate thing has its own read dot (1.30.0)** and hides under Unread when read: digest items, criteria, the
+  evaluation's text, findings, targets, the summary, the review brief, the revision block, each document and each
+  element or section in it; on the Unit pages each row, each plan step and each section's own dot. A container's dot is
+  derived (read when every part is; pressing it marks or unmarks them all), the same thing has one read key wherever it
+  is drawn, and the "Read n/m" count counts the things themselves. A mark is tied to what the thing says: when a round
+  changes it, it is unread again (and so is everything above it); a thing a round did not change keeps its mark, whatever
+  its number, place or presentation (`unchanged`, look first, a line number in a source). Findings, targets and the
+  review brief show what a round did to them like everything else: tagged and word-marked in Changes, in the round's
+  colour in Clean, a removed one listed.
+- **The unit-end page tells each V point once (1.30.0):** the bundle still holds `unverified`, `verified` and `failed`
+  sections; the page shows one Verification section whose points carry their state, with state chips to filter by.
 - **Clean is the default view (1.29.0).** It has no strikethroughs and no ghosts: the page as it is now, with the words
   and blocks each round wrote tinted in that round's own colour (the same round colours as the "revised" notes, light and
   dark). Each round's changes are the difference between it and the round before, folded forward onto the latest text, so

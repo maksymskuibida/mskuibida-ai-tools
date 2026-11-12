@@ -55,7 +55,7 @@ to this file) and asks it for the ids of the summary, the brief and every docume
 (`aidlc_ids.py refs --near`), so a Q1 or R-01 is this stage's and a BR1.1 this Unit's. A failure leaves `ids` out and warns.
 Build and Test: for the stage `build-and-test` the gate row also carries `buildTest`, the stage's tables read into
 data for the page's results view: `commands` (every `Check | Command | Result` row of the test results), `coverage`
-(the line coverage and floor a result names), `counts`, `targets` (the Target Verification Matrix, one entry per row,
+(the line coverage and floor a result names), `counts`, `targets` (the Target Verification Matrix, one entry per (unit, id) with the worst verdict winning,
 the Unit from its `###` heading) and `evidence` (the legend of evidence codes). Columns are found by header name;
 what a file does not have is left out, and when nothing is found the field is left out and the page shows the
 stage as any other. Its contract is `contract/build-test.schema.json`.
@@ -501,6 +501,41 @@ def command_ok(result):
     return not re.search(r"\b(fail\w*|error\w*|not ok|timed? ?out|crash\w*)\b", text, re.I)
 
 
+WORST = ("Not Met", "Unverified", "Met", "N/A")  # the order a target's verdict is judged in when its sources disagree
+TEXT_FIELDS = ("source", "expected", "actual", "evidence", "owner")
+
+
+def merge_targets(rows):
+    """One target per (unit, id), however many files and tables list it: the worst verdict wins (Not Met, Unverified, Met,
+    N/A; a verdict outside those ranks last), each text field keeps the fullest value any source gave, and a target whose
+    sources gave different verdicts carries `disagree`: [{verdict, file}], one per source verdict, worst first. Order is
+    that of the first appearance."""
+    order, by = [], {}
+    for row in rows:
+        key = (row.get("unit", ""), row["id"])
+        if key not in by:
+            by[key] = []
+            order.append(key)
+        by[key].append(row)
+    out = []
+    for key in order:
+        group = by[key]
+        rank = lambda r: WORST.index(r["verdict"]) if r["verdict"] in WORST else len(WORST)
+        best = min(group, key=rank)  # min keeps the first of equals
+        entry = {k: v for k, v in best.items() if k != "_file"}
+        for field in TEXT_FIELDS:
+            values = [r[field] for r in group if r.get(field)]
+            if values:
+                entry[field] = max(values, key=len)
+        seen = {}
+        for r in group:
+            seen.setdefault(r["verdict"], r["_file"])
+        if len(seen) > 1:
+            entry["disagree"] = [{"verdict": v, "file": f} for v, f in sorted(seen.items(), key=lambda kv: WORST.index(kv[0]) if kv[0] in WORST else len(WORST))]
+        out.append(entry)
+    return out
+
+
 def parse_build_test(folder):
     """The `buildTest` object of a Build and Test stage folder, or None when its files hold none of the tables."""
     commands, coverage, targets, legend, counts = [], [], [], {}, {}
@@ -523,7 +558,7 @@ def parse_build_test(folder):
                     ident, verdict = plain(cell(row, ti)), verdict_of(cell(row, vi))
                     if not ident or not verdict:
                         continue
-                    entry = {"id": ident, "unit": unit_of(heading) if heading else "", "verdict": verdict}
+                    entry = {"id": ident, "unit": unit_of(heading) if heading else "", "verdict": verdict, "_file": name}
                     for key, n in cols.items():
                         value = plain(cell(row, n))
                         if value:
@@ -562,6 +597,7 @@ def parse_build_test(folder):
                 if re.match(r"^\s*[-*]\s+\*\*[A-Z]{1,4}\*\*\s*:", line):
                     for code, meaning in re.findall(r"\*\*([A-Z]{1,4})\*\*\s*:\s*(.*?)(?=\s+\*\*[A-Z]{1,4}\*\*\s*:|$)", line):
                         legend.setdefault(code, clip(plain(meaning).rstrip(".;"), 300))
+    targets = merge_targets(targets)
     if targets:
         counts = {"met": 0, "notMet": 0, "unverified": 0, "na": 0}
         for t in targets:

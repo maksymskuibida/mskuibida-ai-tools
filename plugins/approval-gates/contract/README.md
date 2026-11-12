@@ -48,7 +48,7 @@ schema file itself, so the two cannot drift. Keep to that subset when the schema
 | plan | `visible` | Changes to what the person sees, stored data, API or MCP shape, security, dependencies. |
 | plan | `tests` | The plan's tests, one row per group. |
 | unit-end | `changes` | What changed after plan approval. `asApproved: true` with no rows says "the design stays as approved". |
-| unit-end | `unverified` | What isn't verified yet. After a test plan: the points still not verified (picked Later, or failed and being fixed). |
+| unit-end | `unverified` | (The page tells `unverified`, `verified` and `failed` as one Verification section, each point carrying its state; the sections below are unchanged.) What isn't verified yet. After a test plan: the points still not verified (picked Later, or failed and being fixed). |
 | unit-end | `verified` | Only after a test plan: the points the person tested and passed ("Verified by you"). Each row keeps its V id. |
 | unit-end | `failed` | Only after a test plan: the points that failed and the person left as known ("Failed, left as known"). |
 | unit-end | `built` | What was built, in plain words, labelled core, main or minor. It may carry a `map` of how the pieces connect. |
@@ -189,8 +189,9 @@ does not change.
 Not part of the bundle above: the per-stage `gates/<id>` row for the Build and Test stage may carry `buildTest`, the
 stage's tables read into data (commands and their results, line coverage against its floor, the Target Verification
 Matrix, the evidence-code legend). `gate_bundle.py` writes it; `approval-gate.html` shows a results strip, a
-filterable target matrix and a decision card per Not Met or Unverified target when it is there, and the stage as any
-other when it is not. Its shape is [`build-test.schema.json`](build-test.schema.json); check a row with
+filterable target matrix (one row per target; the Not Met and Unverified rows carry the decision and a note) when it is
+there, and the stage as any other when it is not. A target listed in several files or tables is one entry, the worst
+verdict winning, with `disagree` naming the sources when they differ. Its shape is [`build-test.schema.json`](build-test.schema.json); check a row with
 `python3 validate_bundle.py --build-test <gate.json>`. The developer's picks come back in the row's `targetPicks`
 (`{<target id>: {pick: "accept"|"followup"|"fix", note?}}`), written by the page, never by the agent.
 

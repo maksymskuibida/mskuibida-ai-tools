@@ -174,7 +174,7 @@ Under the unit-end rhythm the findings you leave go on the Unit's bundle page as
   card that is neither Fix nor Reject holds Approve: say so in one line and ask the developer to sort it. A typed answer
   that is just one choice for every card ("fix all", "accept all") counts as the sort; Accept never covers a blocking card.
 - `Approve`: the engine's approved report, as usual.
-- **Build and Test only: the target picks.** Whatever the answer, `get` `gates/<id>` and read `targetPicks`
+- **Build and Test only: the target picks.** (The page shows the picks in the target matrix's open rows, not in a separate decisions block; `targetPicks` is unchanged.) Whatever the answer, `get` `gates/<id>` and read `targetPicks`
   (`{<target id>: {pick, note?}}`, written by the page: `accept`, `followup` or `fix`). Act on them with the answer:
   `fix` → the answer is Request Changes: name those targets (id and the developer's note) in the rejected report's
   `--reason` as what to fix; `followup` → record each in the stage's follow-up work (a follow-up line in the
