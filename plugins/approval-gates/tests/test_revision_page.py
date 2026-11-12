@@ -240,7 +240,8 @@ class TestSyntheticRounds(unittest.TestCase):
         self.assertTrue(any("removed since round 1" in t for t in self.r["removed"]))
 
     def test_an_element_removed_and_one_reworded(self):
-        self.assertEqual(self.r["changedElems"], ["el:rules:BR1.1"])
+        # the "Reworded" section of the notes document is an element of its own too (each section of a file shown as written is)
+        self.assertEqual(self.r["changedElems"], ["el:notes:Reworded", "el:rules:BR1.1"])
         self.assertTrue(any(t.startswith("BR1.2") and "removed since round 1" in t for t in self.r["removed"]), self.r["removed"])
         self.assertIn("new", [t.strip() for t in self.r["ins"]])
         self.assertIn("and says so", [t.strip() for t in self.r["ins"]])

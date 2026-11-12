@@ -868,8 +868,11 @@ def mark_revisions(bundle, previous):
         return []
     missing = []
     old_rows = {r["id"]: r for _s, r in validate_bundle.all_rows(previous)}
+    # A row drawn from a record is the same row in the next draft wherever its number landed: V-2 that became V-1 because
+    # a point above it was fixed is not new. Its source key (a digest of the record's text) finds it first, its id second.
+    old_keys = {(r.get("source") or {}).get("key"): r for _s, r in validate_bundle.all_rows(previous) if (r.get("source") or {}).get("key")}
     for _s, r in validate_bundle.all_rows(bundle):
-        old = old_rows.get(r["id"])
+        old = old_keys.get((r.get("source") or {}).get("key")) or old_rows.get(r["id"])
         if old and content(old, ROW_FIELDS) == content(r, ROW_FIELDS):
             for k in ("rev", "revKind", "revNote"):
                 if old.get(k) is not None:

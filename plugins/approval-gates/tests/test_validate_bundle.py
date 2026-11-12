@@ -224,7 +224,9 @@ class TestOrder(unittest.TestCase):
     @unittest.skipUnless(NODE, "node is not installed")
     def test_the_page_orders_like_the_contract(self):
         for b in (plan_bundle(), end_bundle()):
-            self.assertEqual(render(b)["order"], validate_bundle.order(b))
+            # the page tells the unverified, verified and failed sections as one "verification" section, where the first stood
+            merged = ["verification" if k in ("unverified", "verified", "failed") else k for k in validate_bundle.order(b)]
+            self.assertEqual(render(b)["order"], [k for i, k in enumerate(merged) if k != "verification" or "verification" not in merged[:i]])
         b = plan_bundle()
         b["sections"][0]["rows"] = [row("A-1", "low"), row("A-2", "medium")]
         b["sections"][1]["rows"][0]["refs"] = []

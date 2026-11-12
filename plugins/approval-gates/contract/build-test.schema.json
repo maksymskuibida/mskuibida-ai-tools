@@ -2,14 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/maksymskuibida/mskuibida-ai-tools/plugins/approval-gates/contract/build-test.schema.json",
   "title": "Build and Test results of a gate row",
-  "description": "The `buildTest` field of a per-stage `gates/<id>` row for the Build and Test stage, written by gate_bundle.py from the stage's tables. The page (approval-gate.html) shows a results strip, a filterable target matrix and a decision card per Not Met or Unverified target when it is present, and the stage as any other when it is not. Every part is optional; parts the stage's files do not hold are left out.",
+  "description": "The `buildTest` field of a per-stage `gates/<id>` row for the Build and Test stage, written by gate_bundle.py from the stage's tables. The page (approval-gate.html) shows a results strip and one filterable target matrix, whose Not Met and Unverified rows carry the decision (accept, follow-up, fix now) and a note, when it is present, and the stage as any other when it is not. Every part is optional; parts the stage's files do not hold are left out.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
     "commands": { "type": "array", "items": { "$ref": "#/$defs/command" }, "description": "Every `Check | Command | Result` row of the test results." },
     "coverage": { "type": "array", "items": { "$ref": "#/$defs/coverage" }, "description": "Line coverage a result names, with the floor when it names one." },
     "counts": { "$ref": "#/$defs/counts" },
-    "targets": { "type": "array", "items": { "$ref": "#/$defs/target" }, "description": "The Target Verification Matrix, one entry per row, in file order." },
+    "targets": { "type": "array", "items": { "$ref": "#/$defs/target" }, "description": "The Target Verification Matrix, one entry per (unit, id) however many files and tables list it, in the order of first appearance. The worst verdict wins (Not Met, Unverified, Met, N/A); the fullest expected, actual and evidence are kept; `disagree` names the sources when their verdicts differ." },
     "evidence": { "type": "object", "propertyNames": { "pattern": "^[A-Z]{1,4}$" }, "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 300 }, "description": "The legend of evidence codes: code to what it stands for." }
   },
   "$defs": {
@@ -50,7 +50,13 @@
         "actual": { "type": "string", "maxLength": 600 },
         "evidence": { "type": "string", "maxLength": 600, "description": "Evidence codes from the legend, then the test names." },
         "owner": { "type": "string", "maxLength": 600, "description": "The owning stage." },
-        "verdict": { "type": "string", "minLength": 1, "description": "Met, Not Met, Unverified or N/A; anything else is shown as written." }
+        "verdict": { "type": "string", "minLength": 1, "description": "Met, Not Met, Unverified or N/A; anything else is shown as written." },
+        "disagree": {
+          "type": "array", "minItems": 2,
+          "description": "Present when the files that list this target gave different verdicts: one entry per verdict, worst first. `verdict` above is the worst of them.",
+          "items": { "type": "object", "additionalProperties": false, "required": ["verdict", "file"],
+            "properties": { "verdict": { "type": "string", "minLength": 1 }, "file": { "type": "string", "minLength": 1, "description": "The first file that gave this verdict." } } }
+        }
       }
     }
   }

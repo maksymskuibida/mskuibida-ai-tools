@@ -1175,6 +1175,26 @@ figure.screen > details.sub { margin: 0; padding: 4px 12px 6px; border-top: 1px 
 .tm-det dt { color: var(--muted); } .tm-det dd { margin: 0; overflow-wrap: anywhere; }
 .ecode { font: 600 11.5px var(--mono); padding: 0 4px; border-radius: 3px; background: var(--accent-soft); color: var(--accent); border-bottom: 1px dotted var(--accent); }
 .tm-none { padding: 18px; color: var(--muted); }
+/* the open targets carry their decision in the row; Met and N/A fold under a count */
+.tm-row.chosen > .tm-line { background: var(--accent-tint); }
+.tm-id .idot { margin: 0 0 0 auto; width: 28px; height: 28px; }
+.tm-row.read .idot i, details.crow.read .idot i, .etext.read .idot i { background: transparent; border-color: var(--control); }
+.tm-decide { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 2px 12px 12px 42px; }
+.tm-decide .dnote { flex: 1 1 100%; }
+.tm-decide .dfoot .stat { margin-left: 0; }
+details.tm-fold { border-top: 1px solid var(--line); }
+details.tm-fold > summary { cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 9px 12px; font-size: 13px; color: var(--muted); list-style: none; background: var(--raised); }
+details.tm-fold > summary::-webkit-details-marker { display: none; }
+details.tm-fold > summary .n { font-variant-numeric: tabular-nums; color: var(--fg-2); font-weight: 600; }
+details.tm-fold[open] > summary .caret { transform: rotate(90deg); }
+.tag.dis { margin-left: 6px; }
+.tgo { text-decoration: none; cursor: pointer; }
+details.crow > summary .idot { margin: 0 0 0 auto; width: 28px; height: 28px; align-self: center; }
+.etext { position: relative; padding-right: 36px; display: grid; gap: 14px; }
+.etext > .idot { position: absolute; top: -4px; right: 0; margin: 0; width: 28px; height: 28px; }
+.mxnote, .mxsum { color: var(--muted); font-size: 13px; }
+.mxnote { margin: 10px 0 0; }
+tr.frow.sorted td { color: var(--muted); }
 .dsum { margin: 12px 0 0; color: var(--fg-2); }
 .dcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr)); gap: 10px; margin-top: 12px; }
 .dcard { display: grid; gap: 8px; align-content: start; min-width: 0; padding: 12px; border: 1px solid var(--line); border-left-width: 3px; border-radius: 8px; background: var(--surface); }
@@ -1495,7 +1515,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
 
   let db = null, uid = null, tipOn = null;
   const fresh = () => ({ unsub: [], gate: null, docs: new Map(), docsLoaded: false, notes: {}, dirty: new Set(), noteStat: {}, unsaved: false, saving: false, failed: false,
-    noteTimer: null, painted: "", openNotes: new Set(), railSig: "", mode: {}, picks: {}, fpicks: {}, iopen: new Set(), bt: { v: new Set(), u: new Set(), q: "", rows: new Set() }, refs: new Map(), ids: {}, railOpen: {},
+    noteTimer: null, painted: "", openNotes: new Set(), railSig: "", mode: {}, picks: {}, fpicks: {}, iopen: new Set(), bt: { v: new Set(), u: new Set(), q: "", rows: new Set(), fold: false }, refs: new Map(), ids: {}, railOpen: {},
     reads: {}, readKey: "", hashes: {}, groups: {}, filter: "all", prev: null, prevDocs: null, changed: {},
     rounds: [], roundsLoaded: false, baseDocs: {}, prevList: [], itemDelta: null, rv: { groups: [] }, rvSeq: 0, rvAt: -1, rvOnly: 0, rvLegend: "", chainReady: false, rvTrees: new Map() });
   const view = Object.assign({ id: "", diagrams: 0 }, fresh());
@@ -1700,7 +1720,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     return out;
   }
   function computeChanges() {
-    view.changed = {}; view.itemDelta = null;
+    view.changed = {}; view.itemDelta = null; view.recDelta = {};
     if (!view.prevDocs) return;
     const g = view.gate, b = view.prev.g;
     docList().forEach((d) => {
@@ -1713,6 +1733,21 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     if (g.summary && g.summary !== b.summary) view.changed.summary = b.summary ? "changed" : "new";
     view.itemDelta = itemDeltaOf(g, b);
     if (view.itemDelta.n && dg()) view.changed[ev() ? "items" : "digest"] = "changed";
+    /* the structured blocks: a finding, a target, the review brief. A changed or new one is tagged; a removed one is listed. */
+    const FN = fnd(), before = (b.findings || {}).items || [];
+    if (FN || before.length) { const D = recDelta(FN ? FN.items : [], before, (f) => f.id, fSig); view.recDelta.findings = D; if (D.n && FN) view.changed.findings = "changed"; }
+    const BT = bt(), tbefore = (b.buildTest || {}).targets || [];
+    if (BT && (BT.targets || []).length) { const D = recDelta(BT.targets, tbefore, tkey, tHash); view.recDelta["bt-matrix"] = D; if (D.n) view.changed["bt-matrix"] = "changed"; }
+    if (g.brief && g.brief !== (b.brief || "")) view.changed.review = b.brief ? "changed" : "new";
+  }
+  const fSig = (f) => JSON.stringify([f.severity || "", !!f.blocking, f.why || "", f.proposed || "", f.title || "", f.plain || "", f.action || "", f.actionBy || "", f.where || ""]);
+  const fHash = (f) => hash(fSig(f));
+  /* what a round did to a list of records, matched by id: {by: Map id -> {t: new|changed, old}, removed: [record], n} */
+  function recDelta(nowL, oldL, idOf, sigOf) {
+    const old = new Map((oldL || []).map((r) => [idOf(r), r])), out = { by: new Map(), removed: [], n: 0 };
+    (nowL || []).forEach((r) => { const o = old.get(idOf(r)); if (!o) { out.by.set(idOf(r), { t: "new" }); out.n++; } else if (sigOf(o) !== sigOf(r)) { out.by.set(idOf(r), { t: "changed", old: o }); out.n++; } });
+    const ids = new Set((nowL || []).map(idOf)); out.removed = (oldL || []).filter((r) => !ids.has(idOf(r))); out.n += out.removed.length;
+    return out;
   }
   const roundNo = () => (view.gate && view.gate.round) || 1;
   const sinceLabel = () => !view.prev ? "" : (view.prev.g.round && view.prev.g.round !== roundNo() ? "round " + view.prev.g.round : "the last page");
@@ -1840,6 +1875,63 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     });
     if (D.removed.length) root.insertAdjacentHTML("beforeend", `<details class="settled rv-only rvgone" open data-rv-skip><summary>Removed since ${esc(sinceLabel())} (${D.removed.length})</summary><div class="lane">${D.removed.map((i) => `<div class="irow rv-removed" id="rv-gone-${esc(i.key || i.id)}"><div class="ih"><span class="iid">${esc(i.id)}</span><span class="rv-title">${inline(i.summary || i.title)}</span></div></div>`).join("")}</div></details>`);
   }
+  /* findings and targets: records matched by id across rounds. Each is drawn once, so each is marked in place: new or changed
+     with its words marked, removed ones listed under the block and in "What changed". */
+  const htmlText = (html) => { const s = document.createElement("span"); s.innerHTML = html; return rvNorm(s.textContent); };
+  const rvNorm = (t) => String(t || "").replace(/\s+/g, " ").trim();
+  function recSpecs() {
+    const out = [], FN = fnd(), BT = bt();
+    if (FN && $("b-findings")) out.push({ key: "findings", title: "Findings to sort", block: $("b-findings"), end: $("b-findings").querySelector(":scope > .body"), tagIn: ".dtop", cur: new Map(FN.items.map((f) => [f.id, f])),
+      nodes: [...el.col.querySelectorAll(".fcard[data-fid]")].map((n) => ({ id: n.dataset.fid, node: n })), list: (g) => ((g.findings || {}).items || []), idOf: (f) => f.id, name: (f) => f.id + " · " + plainTitle(f.title),
+      fields: [["h3", (f) => inline(f.title || "")], [".fplain", (f) => inline(f.plain || "")], [".faction", (f) => inline(f.action || "")], [".fwhere", (f) => esc(f.where || "")]] });
+    if (BT && (BT.targets || []).length && $("b-bt-matrix")) out.push({ key: "bt-matrix", title: "Target matrix", block: $("b-bt-matrix"), end: $("bt-tm"), after: true, tagIn: ".tm-id", cur: new Map(BT.targets.map((t) => [tkey(t), t])),
+      nodes: [...el.col.querySelectorAll(".tm-row[data-tid]")].map((n) => ({ id: n.dataset.item, node: n })), list: (g) => ((g.buildTest || {}).targets || []), idOf: tkey, name: (t) => t.id + " · " + (t.expected || t.verdict),
+      fields: [[".c-exp", (t) => esc(t.expected || "")], [".c-act", (t) => esc(t.actual || "")], [".c-ev", (t) => esc(t.evidence || "")]],
+      was: (o, t) => o.verdict !== t.verdict ? `<span class="rv-tag gone" data-tip="${esc("Its verdict in " + sinceLabel())}">was ${esc(o.verdict)}</span>` : "" });
+    return out;
+  }
+  function tagAt(host, html) {
+    const span = document.createElement("span"); span.className = "rv-tags"; span.dataset.rvSkip = ""; span.innerHTML = html;
+    host.insertBefore(span, host.querySelector(":scope > .idot, :scope > .end") || null);
+  }
+  /* mark the nodes of one spec against its delta; grp, when given, collects the list of changes */
+  function rvMarkRecs(sp, D, grp) {
+    sp.nodes.forEach(({ id, node }) => {
+      if (node.classList.contains("rv-chg") || node.classList.contains("rv-new") || node.classList.contains("rv-same")) return;  /* marked already */
+      const x = D.by.get(id);
+      if (!x) { node.classList.add("rv-same"); return; }
+      node.classList.add(x.t === "new" ? "rv-new" : "rv-chg", "changed");
+      const rec = sp.cur.get(id), c = { ins: 0, del: 0 };
+      if (x.t === "changed") sp.fields.forEach(([sel, html]) => { const t = node.querySelector(sel); if (!t) return; const was = htmlText(html(x.old)); if (was !== rvNorm(t.textContent)) { const cc = RevDiff.markText(t, was, { skip: RV_SKIP + ", .fsugg, .flab" }) || {}; c.ins += cc.ins || 0; c.del += cc.del || 0; } });
+      else c.ins = sp.fields.reduce((n, f) => n + RevDiff.countWords(htmlText(f[1](rec))), 0);
+      tagAt(node.querySelector(sp.tagIn) || node, rvTag(x.t, c) + (x.t === "changed" && sp.was ? sp.was(x.old, rec) : ""));
+      if (grp) grp.items.push({ go: rvId(node), title: sp.name(rec), t: x.t, ins: c.ins, del: x.t === "changed" ? c.del : 0 });
+    });
+  }
+  function rvRecs() {
+    if (!view.prev) return;
+    recSpecs().forEach((sp) => {
+      const D = (view.recDelta || {})[sp.key]; if (!D || !D.n) return;
+      const grp = rvGroup(sp.key, sp.title, rvId(sp.block), "changed", null);
+      rvMarkRecs(sp, D, grp);
+      if (D.removed.length) {
+        const gid = (r) => "rv-gone-" + sp.key + "-" + anchorId(sp.idOf(r));
+        const box = `<details class="settled rv-only rvgone" open data-rv-skip><summary>Removed since ${esc(sinceLabel())} (${D.removed.length})</summary><div class="lane">${D.removed.map((r) => `<div class="irow rv-removed" id="${esc(gid(r))}"><div class="ih"><span class="iid">${esc(sp.name(r).split(" · ")[0])}</span><span class="rv-title">${esc(sp.name(r).split(" · ").slice(1).join(" · "))}</span></div></div>`).join("")}</div></details>`;
+        if (sp.after) sp.end.insertAdjacentHTML("afterend", box); else sp.end.insertAdjacentHTML("beforeend", box);
+        D.removed.forEach((r) => grp.items.push({ go: "#" + gid(r), title: sp.name(r), t: "gone", ins: 0, del: 0 }));
+      }
+    });
+  }
+  /* the review brief: the one thing in it is its text */
+  function briefNode(text) { const d = document.createElement("div"); fillBriefInto(d, text); return d; }
+  function rvBrief() {
+    if (!view.prev || !view.changed.review) return;
+    const body = $("briefbody"), blk = $("b-brief"); if (!body || !blk) return;
+    const grp = rvGroup("review", "Review", rvId(blk), view.changed.review, null);
+    if (view.changed.review === "new") return;
+    const c = RevDiff.markTree(body, briefNode(view.prev.g.brief), { skip: RV_SKIP }); grp.ins = c.ins; grp.del = c.del;
+    body.querySelectorAll("tr.fdet").forEach((det) => { if (det.querySelector(".rv-ins, .rv-del, .rv-gone")) { det.hidden = false; const row = body.querySelector(`tr.frow[data-i="${det.dataset.for}"]`); if (row) row.setAttribute("aria-expanded", "true"); } });
+  }
   function rvItemsGroup() {
     const D = view.itemDelta, blk = $("b-items") || $("b-digest"); if (!D || !D.n || !blk) return;
     const grp = rvGroup("items", ev() ? "What the stage says" : "At a glance", rvId(blk), "changed", null);
@@ -1852,14 +1944,27 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
      rounds are drawn off screen the same way as this one and folded forward onto it (RevDiff.attributeTree): a word keeps
      the colour of the round that last wrote it; a document, row or item that first appeared in a later round carries
      that round's edge. Runs once per paint, after the Changes marks (which the Clean view does not show) are taken off. */
-  function rvAttribute() {
-    if (!view.prev || !view.chainReady) { view.rvLegend = ""; return; }
+  function rvChain() {
     const rs = [...view.rounds].reverse(), nos = [], last = rs.length, counts = {};
     rs.concat([{ g: view.gate }]).forEach((r, i) => { const n = r.g.round || i + 1; nos.push(i && n <= nos[i - 1] ? nos[i - 1] + 1 : n); });
     const add = (c) => Object.keys(c.words).forEach((k) => { counts[k] = (counts[k] || 0) + c.words[k]; });
     const first = (its) => { for (let i = last; i > 0; i--) if (its[i] && !its[i - 1]) return i; return 0; };
     const edge = (n, start) => { if (n && start) n.classList.add("rv-rb", "rv-t" + RevDiff.tone(nos[start]), "rv-r" + nos[start]); };
-    const run = (target, its, start, make) => { if (target) add(RevDiff.attributeTree(target, its.slice(start, last).map((x, j) => x ? make(x, start + j) : null), nos.slice(start), { skip: RV_SKIP })); };
+    const run = (target, its, start, make) => { if (target) add(RevDiff.attributeTree(target, its.slice(start, last).map((x, j) => x ? make(x, start + j) : null), nos.slice(start), { skip: RV_SKIP + ", .fsugg, .flab" })); };
+    return { rs, nos, last, counts, first, edge, run };
+  }
+  /* Clean: a finding or target first written in a later round carries that round's edge; its words, the colour of the round that last wrote them */
+  function rvAttributeRecs(ch, sp) {
+    const maps = ch.rs.map((r) => new Map(sp.list(r.g).map((x) => [sp.idOf(x), x])));
+    sp.nodes.forEach(({ id, node }) => {
+      const its = maps.map((m) => m.get(id) || null).concat([sp.cur.get(id) || null]), start = ch.first(its);
+      ch.edge(node, start);
+      sp.fields.forEach(([sel, html]) => ch.run(node.querySelector(sel), its, start, (rec) => { const w = document.createElement("span"); w.innerHTML = html(rec); return w; }));
+    });
+  }
+  function rvAttribute() {
+    if (!view.prev || !view.chainReady) { view.rvLegend = ""; return; }
+    const ch = rvChain(), { rs, nos, last, counts, first, edge, run } = ch;
     const plain = (t) => { const p = document.createElement("p"); p.textContent = t || ""; return p; };
     RevDiff.unmark(el.col);
     docList().forEach((d, i) => {
@@ -1892,6 +1997,8 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
       const ib = r.querySelector(".ib"), aw = ib && (ib.querySelector(".aw") || ib.querySelector(":scope > p:not(.awt)"));
       run(aw, its, start, (o) => { const w = node(`<div>${asWritten(o) || (o.body ? `<p>${inline(o.body)}</p>` : "")}</div>`) || document.createElement("div"); fillMd(w); return w; });
     });
+    recSpecs().forEach((sp) => rvAttributeRecs(ch, sp));
+    { const bb = $("briefbody"); if (bb && view.gate.brief) { const its = rs.map((r) => r.g.brief || null).concat([view.gate.brief]); run(bb, its, first(its), (t) => briefNode(t)); } }
     view.rvLegend = RevDiff.legend(nos.slice(1), counts, view.rvOnly);
     const slot = $("rvlegend"); if (slot) slot.innerHTML = view.rvLegend;
     RevDiff.only(el.col, view.rvOnly);
@@ -1901,7 +2008,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     view.rv = { groups: [] }; view.rvSeq = 0;
     el.col.dataset.rv = rvOn() ? "show" : "clean";
     if (!view.prev) { paintRvList(); return; }
-    rvEval(); rvItemsGroup(); rvItems($("itemsbody") || $("digestbody")); rvSummary();
+    rvEval(); rvItemsGroup(); rvItems($("itemsbody") || $("digestbody")); rvSummary(); rvRecs(); rvBrief();
     const docs = docList(), here = new Set(docs.map((d) => d.key));
     docs.forEach((d, i) => rvDoc(d, i));
     /* a document gone since the base round is listed; a review copy is replaced by the next one and is not */
@@ -1952,12 +2059,20 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     view.painted = sig; view.refs = new Map();
     view.hashes = {}; view.groups = {}; if (g.summary) view.hashes.summary = hash(g.summary); if (g.brief) view.hashes.review = hash(g.brief);
     const E = ev(), covered = new Set(coveredDocs().map((d) => d.key));
-    if (E) view.hashes.evaluation = hash(JSON.stringify([E, g.criteria || []]));
+    if (E) {  /* the evaluation's own text, and each criterion: separate things, each with its own mark; the block is read when all are */
+      const C = g.criteria || [];
+      view.hashes["eval:text"] = hash(JSON.stringify(E));
+      C.forEach((c) => { view.hashes["crit:" + c.key] = hash(JSON.stringify([c.key, c.origin, c.verdict, c.note || "", c.title, c.text || "", String(c.source || "").replace(/#L\d+.*$/, "")])); });
+      view.groups.evaluation = ["eval:text"].concat(C.map((c) => "crit:" + c.key));
+    }
     if (rvShown()) view.hashes.revision = hash(JSON.stringify([g.revision || null, roundNo()]));
     docs.forEach((d) => { if (!d.pending && !covered.has(d.key)) view.hashes[d.key] = hash(d.text); });
-    const FN = fnd(); if (FN) { view.hashes.findings = hash(JSON.stringify(FN.items)); FN.items.forEach((f) => { view.hashes["finding:" + f.id] = hash(JSON.stringify(f)); }); view.groups.findings = FN.items.map((f) => "finding:" + f.id); }
-    const DG = dg(); if (DG) { DG.items.forEach((it) => { view.hashes["item:" + it.key] = hash(JSON.stringify([it.title, it.body || "", it.coveredBy || null, it.summary || "", it.label || ""])); }); view.groups[E ? "items" : "digest"] = DG.items.map((it) => "item:" + it.key); }
-    const B = bt(); if (B && B.targets) { view.hashes["bt-matrix"] = hash(JSON.stringify(B.targets)); if (openTargets(B).length) view.hashes["bt-decide"] = hash(JSON.stringify(openTargets(B))); }
+    const FN = fnd(); if (FN) { FN.items.forEach((f) => { view.hashes["finding:" + f.id] = fHash(f); }); view.groups.findings = FN.items.map((f) => "finding:" + f.id); }
+    /* an item that is also a target is the target: one row in the matrix, one read key; the item only links to it.
+       `unchanged` and `lookFirst` are how this round presents the item, not what it says, so neither is in the hash. */
+    const B = bt();
+    const DG = dg(); if (DG) { const own = DG.items.filter((it) => !targetOfItem(it)); own.forEach((it) => { view.hashes["item:" + it.key] = hash(JSON.stringify([it.kind || "", it.title, it.body || "", it.format || "", it.coveredBy || null, it.summary || "", it.label || "", it.relates || it.mentions || []])); }); view.groups[E ? "items" : "digest"] = own.map((it) => "item:" + it.key); }
+    if (B && B.targets && B.targets.length) { B.targets.forEach((t) => { view.hashes[tkey(t)] = tHash(t); }); view.groups["bt-matrix"] = B.targets.map(tkey); }
     const frag = [];
     if (B) frag.push(btStrip(B));
     if (rvShown()) frag.push(revBlock());
@@ -1966,7 +2081,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     if (DG && !E) frag.push(digestBlock(DG));
     if (FN) frag.push(findingsBlock(FN));
     if (g.brief) frag.push(briefBlock(g));
-    if (B && B.targets && B.targets.length) { frag.push(btMatrixBlock(B)); frag.push(btDecideBlock(B)); }
+    if (B && B.targets && B.targets.length) frag.push(btMatrixBlock(B));
     if (!docs.length) frag.push(view.docsLoaded ? '<div class="card0 msg"><b>No documents yet.</b><p>Claude writes them with the gate; they appear here as soon as they land.</p></div>' : '<p class="hint">Loading documents…</p>');
     const refs = refDocs(docs);
     docs.forEach((d, i) => { if (!refs.includes(d) && !covered.has(d.key)) frag.push(docBlock(d, i)); });
@@ -1979,7 +2094,6 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     fillMd(el.col); itemsCount();
     findingsCount(); Object.keys(view.fpicks).forEach((id) => { const st = view.noteStat["fpick:" + id]; if (st) setNoteStat("fpick:" + id, st[0], st[1]); });
     btRender(); btDecideCount(); { const q = $("bt-q"); if (q) q.value = view.bt.q; }
-    Object.keys(view.picks).forEach((id) => { const st = view.noteStat["pick:" + id]; if (st) setNoteStat("pick:" + id, st[0], st[1]); });
     openAll();
     docs.forEach((d) => { const b = $("d-" + d.key); if (b && d.path) regRef("file:" + d.path.split("/").pop().toLowerCase(), b, d.title || d.key, d.path.split("/").pop()); });
     view.ids = idMap(docs);
@@ -2014,9 +2128,8 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
       tip: "The review findings Claude could not fix for certain: sort each one Fix, Accept or Reject" });
     const B = bt();
     if (B && B.targets && B.targets.length) {
-      out.push({ key: "bt-matrix", go: "b-bt-matrix", short: "Matrix", count: String(B.targets.length), tip: "The target matrix: every quality target and how it ended" });
       const open = openTargets(B);
-      if (open.length) out.push({ key: "bt-decide", go: "b-bt-decide", short: "Decisions", count: pickedCount(B) + "/" + open.length, tip: "A decision card for each target that is not met or unverified" });
+      out.push({ key: "bt-matrix", go: "b-bt-matrix", short: "Matrix", count: open.length ? pickedCount(B) + "/" + open.length : String(B.targets.length), tip: "The target matrix: every quality target once and how it ended" + (open.length ? "; choose what to do with each open one" : "") });
     }
     const covered = new Set(coveredDocs().map((d) => d.key));
     docs.forEach((d) => {
@@ -2035,12 +2148,13 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     if (f === "notes") return !!(view.notes[key] || "").trim();
     return true;
   }
+  /* what groups readable parts without being one: hidden under Unread when every part is read */
+  const CONTAINERS = ".dsec, details.settled, details.cgroup, section.esec:not(.lf), .tm-fold";
   function paintChrome(docs) {
     if (!view.gate) return;
     const g = view.gate, blocks = blocksOf(docs);
-    const ip = itemProgress();
-    const own = blocks.filter((b) => view.hashes[b.key] && !view.groups[b.key]), ep = elProgress();
-    const total = own.length + ip.total + ep.total, read = own.filter((b) => isRead(b.key)).length + ip.read + ep.read;
+    const lp = leafProgress();
+    const total = lp.total, read = lp.read;
     const nChanged = Object.keys(view.changed).length, nNotes = noted().length;
     const filters = [["all", "All", blocks.length], ["unread", "Unread", total - read]].concat(nChanged ? [["changed", "Changed", nChanged]] : []).concat(nNotes ? [["notes", "With notes", nNotes]] : []);
     if (!filters.some((f) => f[0] === view.filter)) view.filter = "all";
@@ -2061,7 +2175,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const f = document.activeElement; const keep = f && el.bar.contains(f) ? [...f.attributes].map((a) => a.name).find((n) => /^data-(?!tip)/.test(n)) : null; const keepVal = keep ? f.getAttribute(keep) : null;
     const pct = total ? Math.round(read / total * 100) : 100;
     el.bar.innerHTML = `<div class="barrow"><div class="filters" role="group" aria-label="Show">${filters.map((x) => `<button type="button" class="fpill" data-filter="${x[0]}" aria-pressed="${view.filter === x[0]}">${x[1]}<span class="n">${x[2]}</span></button>`).join("")}</div>${rvBar()}` +
-      `<div class="tools"><span class="savestat" id="savestat" role="status" aria-live="polite"></span><span class="progress-r" data-tip="Blocks, items and elements you marked read with their dot. A block you read turns unread again only when its text changes."><span class="num">Read ${read}/${total}</span><span class="meter" aria-hidden="true"><i style="width:${pct}%"></i></span></span>` +
+      `<div class="tools"><span class="savestat" id="savestat" role="status" aria-live="polite"></span><span class="progress-r" data-tip="Every separate thing you marked read with its dot: items, criteria, findings, targets, elements, documents. One turns unread again only when its own text changes."><span class="num">Read ${read}/${total}</span><span class="meter" aria-hidden="true"><i style="width:${pct}%"></i></span></span>` +
       `<button type="button" data-all="open">Expand all</button><button type="button" data-all="close">Collapse all</button><button type="button" class="wide" data-allread="1">Mark all read</button><button type="button" class="railtoggle" data-outline="1" aria-controls="rail" aria-expanded="${el.rail.classList.contains("show")}">Outline</button></div></div>` +
       `<nav class="chips" aria-label="Jump to">${blocks.filter((x) => passes(x.key)).map((x) => `<a class="jchip${isRead(x.key) ? " read" : ""}" href="#" data-go="${esc(x.go)}" data-tip="${esc("Jump to " + x.tip + (isRead(x.key) ? " (read)" : " (unread)"))}"><span class="udot" aria-hidden="true"></span>${esc(x.short)}${revTag(x.key)}${x.count ? `<span class="count">${esc(x.count)}</span>` : ""}${x.extra || ""}<span class="sr">${isRead(x.key) ? ", read" : ", unread"}</span></a>`).join("")}</nav>`;
     if (keep) { const back = el.bar.querySelector(`[${keep}="${CSS.escape(keepVal)}"]`); if (back) back.focus(); }
@@ -2077,14 +2191,16 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     el.col.classList.toggle("only-changed", view.filter === "changed");
     el.col.querySelectorAll("[data-item]").forEach((n) => {
       const r = isRead(n.dataset.item); n.classList.toggle("read", r); n.hidden = (view.filter === "unread" && r) || (view.filter === "changed" && n.classList.contains("rv-same"));
-      const d = n.querySelector(":scope > .ih > .idot, :scope > .dtop > .idot"); if (d) { d.dataset.tip = r ? "Read. Press to mark unread" : "Mark as read"; d.setAttribute("aria-label", (r ? "Mark unread: " : "Mark read: ") + (n.dataset.item.split(":")[1] || "")); }
-    });
-    /* a tier or a folded group whose items are all read leaves with them */
-    el.col.querySelectorAll(".dsec, details.settled").forEach((c) => {
-      const its = c.querySelectorAll("[data-item]");
-      c.hidden = (view.filter === "unread" && its.length > 0 && [...its].every((n) => isRead(n.dataset.item))) || (view.filter === "changed" && its.length > 0 && [...its].every((n) => n.classList.contains("rv-same")));
+      const d = [...n.querySelectorAll("[data-iread]")].find((x) => x.dataset.iread === n.dataset.item); if (d) { d.dataset.tip = r ? "Read. Press to mark unread" : "Mark as read"; d.setAttribute("aria-label", (r ? "Mark unread: " : "Mark read: ") + (n.dataset.item.split(":").slice(1).join(":") || "")); d.classList.toggle("isread", r); }
     });
     paintElems();
+    /* a container whose readable parts are all read (or all unchanged) leaves with them: no empty shell under Unread or Changed */
+    const mine = (c) => [...c.querySelectorAll("[data-item], [data-ekey]")].filter((n) => !n.closest(".rv-removed, .rv-gone"));
+    const rd = (n) => isRead(n.dataset.item || n.dataset.ekey);
+    el.col.querySelectorAll(CONTAINERS).forEach((c) => {
+      const its = mine(c);
+      c.hidden = (view.filter === "unread" && its.length > 0 && its.every(rd)) || (view.filter === "changed" && its.length > 0 && its.every((n) => n.classList.contains("rv-same")));
+    });
     const rgp = $("b-reference"); if (rgp) rgp.hidden = [...rgp.querySelectorAll("details.doc")].every((n) => n.hidden);
     const nm = $("nomatch"); if (nm) { nm.hidden = !!shown || !blocks.length; nm.textContent = view.filter === "unread" ? "You marked everything read. Choose All to see it again." : "Nothing here for this filter. Choose All to see every block."; }
     /* the band */
@@ -2140,12 +2256,13 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const who = [r.reviewer, r.iteration ? "review pass " + r.iteration : ""].filter(Boolean).join(" · ");
     return `<details class="block" id="b-brief" data-block="review"${open.length ? " open" : ""}><summary>${CARET}<h2>Review</h2>${verdict}${count}<span class="hint wide">${esc(who)}</span><span class="end">${rdot("review")}</span></summary><div class="body" id="briefbody"></div></details>`;
   }
-  function fillBrief(g) {
-    const body = $("briefbody"); const b = parseBrief(g.brief);
-    if (!b) { body.className = "body md"; renderMarkdown(body, g.brief, true); return; }
+  function fillBrief(g) { const body = $("briefbody"); fillBriefInto(body, g.brief, true); }
+  function fillBriefInto(body, brief, live) {
+    const b = parseBrief(brief);
+    if (!b) { if (live) body.className = "body md"; renderMarkdown(body, brief, true); return; }
     const h = b.head;
     body.innerHTML = `<p class="outcome" style="margin-top:10px">${h["Review outcome"] ? `<b>${esc(h["Review outcome"])}</b>` : ""}${h["Why now"] ? `<span>${esc(h["Why now"])}</span>` : ""}${h["Review artifact"] ? `<span class="mono" data-tip="Where the review is written in the project">${esc(h["Review artifact"])}</span>` : ""}</p>`;
-    if (b.rows.length) body.appendChild(findingsTable(b.rows));
+    if (b.rows.length) body.appendChild(findingsTable(b.rows, true));
   }
 
   /* ---------- a document block ---------- */
@@ -2153,13 +2270,14 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const note = (view.notes[d.key] || "").trim();
     const file = d.path ? `<span class="file wide" data-tip="${esc("Where this document lives in the project: " + d.path)}"><span>${esc(d.path)}</span></span>` : "";
     const size = d.bytes ? `<span class="hint mono wide" data-tip="The file’s size">${kb(d.bytes)}</span>` : "";
-    const closed = (d.kind === "json" && !viewFor(d)) || d.kind === "questions" || d.kind === "review";
+    const mx = isMatrixDoc(d);  /* its targets table is the matrix above: folded, with a line saying so */
+    const closed = mx || (d.kind === "json" && !viewFor(d)) || d.kind === "questions" || d.kind === "review";
     const ch = view.changed[d.key]; const t = ch ? revTone(roundNo()) : "";
     const kind = KIND[d.kind] ? `<span class="pill quiet" data-tip="${esc(KIND_TIP[d.kind])}">${KIND[d.kind]}</span>` : "";
     const showNote = view.openNotes.has(d.key) || note;
-    return `<details class="block doc${ch ? " rev" + t.slice(1) : ""}" id="d-${esc(d.key)}" data-block="${esc(d.key)}"${closed ? "" : " open"}>
-      <summary>${CARET}<h2>${esc(d.title || d.key)}</h2>${revTag(d.key)}${kind}${file}<span class="end">${size}${note ? '<i class="notedot" data-tip="You left a note on this document"></i>' : ""}<span class="seg" id="seg-${esc(d.key)}" role="group" aria-label="Show the document as" hidden><button type="button" data-mode="view" data-key="${esc(d.key)}" data-tip="A view made for this kind of document">View</button><button type="button" data-mode="text" data-key="${esc(d.key)}" data-tip="The document as written">Text</button></span><button type="button" class="notebtn" data-key="${esc(d.key)}" aria-controls="nb-${esc(d.key)}" aria-pressed="${showNote ? "true" : "false"}">${note ? "Your note" : "Add a note"}</button>${aw ? "" : rdot(d.key)}</span></summary>
-      <div class="body"><div class="notebox" id="nb-${esc(d.key)}"${showNote ? "" : " hidden"}><label for="nt-${esc(d.key)}"><b>Note to Claude</b><span>on this document; it goes with your answer in chat</span><span class="stat" id="ns-${esc(d.key)}" aria-live="polite"></span></label><textarea id="nt-${esc(d.key)}" rows="2" placeholder="Something to change, check or keep in mind"></textarea></div><div id="db-${esc(d.key)}"></div></div>
+    return `<details class="block doc${ch ? " rev" + t.slice(1) : ""}" id="d-${esc(d.key)}" data-block="${esc(d.key)}"${mx ? " data-matrixdoc" : ""}${closed ? "" : " open"}>
+      <summary>${CARET}<h2>${esc(d.title || d.key)}</h2>${revTag(d.key)}${kind}${mx ? '<span class="hint mxsum">its targets table is shown above as the target matrix</span>' : ""}${file}<span class="end">${size}${note ? '<i class="notedot" data-tip="You left a note on this document"></i>' : ""}<span class="seg" id="seg-${esc(d.key)}" role="group" aria-label="Show the document as" hidden><button type="button" data-mode="view" data-key="${esc(d.key)}" data-tip="A view made for this kind of document">View</button><button type="button" data-mode="text" data-key="${esc(d.key)}" data-tip="The document as written">Text</button></span><button type="button" class="notebtn" data-key="${esc(d.key)}" aria-controls="nb-${esc(d.key)}" aria-pressed="${showNote ? "true" : "false"}">${note ? "Your note" : "Add a note"}</button>${aw ? "" : rdot(d.key)}</span></summary>
+      <div class="body">${mx ? '<p class="mxnote">The targets table of this file is shown above as the <a href="#" data-mxgo="1">target matrix</a>. This is the file as written.</p>' : ""}<div class="notebox" id="nb-${esc(d.key)}"${showNote ? "" : " hidden"}><label for="nt-${esc(d.key)}"><b>Note to Claude</b><span>on this document; it goes with your answer in chat</span><span class="stat" id="ns-${esc(d.key)}" aria-live="polite"></span></label><textarea id="nt-${esc(d.key)}" rows="2" placeholder="Something to change, check or keep in mind"></textarea></div><div id="db-${esc(d.key)}"></div></div>
     </details>`;
   }
   function fillDoc(d, i) {
@@ -2198,6 +2316,12 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const tmp = document.createElement("div"); tmp.innerHTML = html; decorate(tmp);
     if (detached) { const f = tmp.firstElementChild; if (f && f.tagName === "H1" && tmp.querySelectorAll("h1").length === 1) f.remove(); } else promoteTitle(tmp, d);
     sectionize(tmp, d, i === 0);
+    /* a document shown as written has no cards or rows of its own: each section is its element, with its own mark (a file
+       the evaluation covers is its items' raw record and has none) */
+    if (!(d.covered && ev())) {
+      tmp.querySelectorAll(":scope > details.sec").forEach((sec) => { sec.dataset.elem = ""; sec.dataset.elemId = plainTitle(sec.dataset.title); });
+      if (!detached) markElements(tmp, d);
+    }
     body.innerHTML = ""; body.appendChild(tmp); tmp.className = "md" + (tmp.querySelector("details.sec") ? "" : " flat");
     tmp.querySelectorAll("details.sec").forEach((s) => s.addEventListener("toggle", () => { if (s.open) drawDiagrams(s); }));
     registerMdRefs(tmp);
@@ -3422,10 +3546,12 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
   }
 
   /* --- review copies: the findings table, the validation results as a grid, the summary as prose --- */
-  function findingsTable(rows) {
+  /* brief: a finding that is also a card to sort is told once, on its card; its row here only points there */
+  function findingsTable(rows, brief) {
+    const sorted = new Set(brief && fnd() ? fnd().items.map((f) => f.id) : []);
     const wrapEl = node(`<div class="tablewrap"><table class="ftable"><thead><tr><th>ID</th><th>Severity</th><th>Where</th><th>Status</th></tr></thead><tbody>` + rows.map((r, i) => {
-      const open = isOpenStatus(r.status); const det = r.Finding || r.Where || r["Required action"] || r.Recheck;
-      return `<tr class="frow${open ? "" : " closed"}" data-i="${i}" data-ref="${esc(r.id)}" aria-expanded="${open && i < 3 ? "true" : "false"}"><td>${esc(r.id)}</td><td><span class="sev${isHi(r.severity) ? " hi" : ""}">${esc(r.severity)}</span></td><td class="where">${inline(r.where)}</td><td>${esc(r.status)}</td></tr>` +
+      const open = isOpenStatus(r.status); const here = sorted.has(r.id); const det = here ? "" : r.Finding || r.Where || r["Required action"] || r.Recheck;
+      return `<tr class="frow${open ? "" : " closed"}${here ? " sorted" : ""}" data-i="${i}" data-ref="${esc(r.id)}" aria-expanded="${open && i < 3 && !here ? "true" : "false"}"><td>${esc(r.id)}</td><td><span class="sev${isHi(r.severity) ? " hi" : ""}">${esc(r.severity)}</span></td><td class="where">${here ? "" : inline(r.where)}</td><td>${esc(r.status)}${here ? ` <button type="button" class="src" data-src="f:${esc(r.id)}" data-tip="This finding is a card to sort, below">to sort in Findings</button>` : ""}</td></tr>` +
         (det ? `<tr class="fdet" data-for="${i}"${open && i < 3 ? "" : " hidden"}><td colspan="4"><dl>${r.Finding ? `<dt>Finding</dt><dd>${inline(r.Finding)}</dd>` : ""}${r.Where ? `<dt>Where</dt><dd>${inline(r.Where)}</dd>` : ""}${r["Required action"] ? `<dt>Required action</dt><dd>${inline(r["Required action"])}</dd>` : ""}${r.Recheck ? `<dt>Re-check</dt><dd>${inline(r.Recheck)}</dd>` : ""}</dl></td></tr>` : "");
     }).join("") + `</tbody></table></div>`);
     wrapEl.querySelectorAll("tr.frow").forEach((tr) => { regRef(tr.dataset.ref, tr, tr.textContent.trim().replace(/\s+/g, " ")); tr.addEventListener("click", (e) => {
@@ -3615,6 +3741,8 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
   function openAll() {
     el.col.querySelectorAll("details").forEach((d) => { d.open = true; });
     el.col.querySelectorAll("details.block[data-block]").forEach((b) => { if (isRead(b.dataset.block)) b.open = false; });
+    el.col.querySelectorAll("details.tm-fold").forEach((d) => { d.open = foldWanted(); });
+    el.col.querySelectorAll("details.block.doc[data-matrixdoc]").forEach((b) => { b.open = false; });  /* its targets table is the matrix above; the file opens on request */
     const rg = $("b-reference"); if (rg) rg.open = false;  /* the instruction files stay folded until asked for */
     if (dg() || ev()) el.col.querySelectorAll("details.block.doc").forEach((b) => { b.open = false; });  /* the digest or the evaluation leads; the documents wait below */
     if (ev()) {
@@ -3642,7 +3770,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     if (t.dataset.rvstep) { rvStep(+t.dataset.rvstep); return; }
     if (t.dataset.filter) { view.filter = t.dataset.filter; paintChrome(docList()); }
     else if (t.dataset.all) expandAll(t.dataset.all === "open");
-    else if (t.dataset.allread) { readAndFold(blocksOf(docList()).map((b) => b.key), true); setRead(itemKeys(), true); paintItems(); }
+    else if (t.dataset.allread) { readAndFold(blocksOf(docList()).map((b) => b.key), true); setRead(Object.keys(view.hashes), true); paintItems(); }
     else if (t.dataset.outline) { el.rail.classList.toggle("show"); t.setAttribute("aria-expanded", String(el.rail.classList.contains("show"))); if (el.rail.classList.contains("show")) el.rail.scrollIntoView({ block: "nearest" }); }
     else if (t.dataset.retry) { view.unsaved = true; view.failed = false; flushNotes(); }
     else if (t.dataset.go) go(t.dataset.go, t);
@@ -3654,7 +3782,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     if (rd) { e.preventDefault(); e.stopPropagation(); readAndFold([rd.dataset.read], !isRead(rd.dataset.read)); return; }
     const sb = e.target.closest(".seg button");
     if (sb) { e.preventDefault(); e.stopPropagation(); view.mode[sb.dataset.key] = sb.dataset.mode; view.painted = ""; paintAll(); return; }
-    const nb = e.target.closest(".notebtn");
+    const nb = e.target.closest(".notebtn[data-key]");
     if (nb) {
       e.preventDefault(); e.stopPropagation();
       const key = nb.dataset.key; const box = $("nb-" + key); const det = nb.closest("details");
@@ -3668,10 +3796,12 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
      A view builds its cards, table rows and sections as it always did; markElements then finds them in what the view made
      (a section a view flags with data-elem, a .card, a table row, a unit tile), gives each a dot at the right edge, and
      stores the mark as el:<doc key>:<element id>, hashed on the element's text. The document's block is read when all are. */
+  /* read progress counts the things themselves: every key with a mark that is not a container of other marks */
+  const leafProgress = () => { const keys = Object.keys(view.hashes).filter((k) => !(view.groups[k] && view.groups[k].length)); return { total: keys.length, read: keys.filter(rawRead).length }; };
   const elProgress = () => { const keys = Object.keys(view.hashes).filter((k) => k.startsWith("el:")); return { total: keys.length, read: keys.filter(isRead).length }; };
   /* the elements a view drew, each with its id: [{n, id, det}]; markElements and the diff of a revision both use it */
   function elemList(root) {
-    const nodes = [...root.querySelectorAll("[data-elem], .card, table.grid > tbody > tr, .layer > .unit")].filter((n) => {
+    const nodes = [...root.querySelectorAll("[data-elem], .card, table.grid > tbody > tr, table.ftable > tbody > tr.frow, .layer > .unit")].filter((n) => {
       if (n.matches("tr")) return n.cells.length && !n.classList.contains("rdet") && !n.classList.contains("fdet") && !n.closest("table.attr") && !n.parentElement.closest(".card, details.sub, [data-elem], .vtools");
       return !n.parentElement.closest(".card, [data-elem]");
     });
@@ -3682,8 +3812,13 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
       if (n.matches("tr.rrow")) { det = n.nextElementSibling; if (!det || !det.classList.contains("rdet")) det = null; }
       else if (n.matches("tr.frow")) det = n.parentElement.querySelector(`tr.fdet[data-for="${n.dataset.i}"]`);
       const lead = n.dataset.elemId || n.dataset.ref || (n.matches("tr") ? (n.cells[0] || {}).textContent : ((n.querySelector("h1, h2, h3, h4, .iid, b") || {}).textContent));
-      let id = norm(lead).slice(0, 80) || "n" + (i + 1);
-      const c = (seen.get(id) || 0) + 1; seen.set(id, c); if (c > 1) id += "#" + c;
+      /* an element's id is what it leads with, never where it stands: a twin of an earlier lead takes its text's hash, so an
+         element inserted above does not rename the ones below, and an element with no lead is named by its text */
+      let id = norm(lead).slice(0, 80);
+      const body = norm(n.textContent);
+      if (!id) id = "n#" + hash(body);
+      else if (seen.has(id)) id += "#" + hash(body);
+      const c = (seen.get(id) || 0) + 1; seen.set(id, c); if (c > 1) id += "~" + c;
       return { n, id, det };
     });
   }
@@ -3778,11 +3913,47 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     }
     return parts.length ? `<section class="card0 bt-strip" id="b-bt-strip" aria-label="Results">${parts.join("")}</section>` : "";
   }
+  /* One list of targets: the open ones (Not Met, Unverified) at the top, each with its three picks and its note in the row;
+     Met and N/A fold under a count. A target has one read key, target:<unit>/<id>, hashed on what the row shows (verdict,
+     expected, actual, evidence, source, owner, the sources' disagreement), never on the picks. */
+  const tkey = (t) => "target:" + (t.unit ? t.unit + "/" : "") + t.id;
+  const tHash = (t) => hash(JSON.stringify([t.unit || "", t.verdict, t.expected || "", t.actual || "", t.evidence || "", t.source || "", t.owner || "", t.disagree || null]));
+  const isOpenT = (t) => t.verdict === "Not Met" || t.verdict === "Unverified";
+  const disagreeText = (t) => (t.disagree || []).map((x) => x.verdict + " in " + x.file).join("; ");
+  const disagreeTag = (t) => !(t.disagree && t.disagree.length) ? "" : `<span class="tag dis" style="background:var(--warn-bg);color:var(--warn-fg)" data-tip="${esc("The files that list this target disagree: " + disagreeText(t) + ". The worst verdict is shown.")}">sources disagree: ${esc(t.disagree.map((x) => x.verdict).join(" / "))}</span>`;
+  /* the digest item that is this target: shown once, in the matrix; the item links to the row. null when ambiguous. */
+  const bareId = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9.]/g, "");
+  function targetOfItem(it) {
+    const B = bt(); if (!B || !(B.targets || []).length) return null;
+    const a = bareId(it.id); if (!a) return null;
+    const hits = B.targets.filter((t) => bareId(t.id) === a || bareId(String(t.id).replace(/^[^:]*:/, "")) === a);
+    return hits.length === 1 ? hits[0] : null;
+  }
+  const MATRIX_HEAD = /^\s*\|[^\n]*\bverdict\b[^\n]*\|[ \t]*\n\s*\|[\s:|-]+\|/im;
+  const isMatrixDoc = (d) => !!(bt() && (bt().targets || []).length && MATRIX_HEAD.test(String(d.text || "")) && /\btarget( id)?\b/i.test((String(d.text).match(MATRIX_HEAD) || [""])[0]));
   function btMatrixBlock(B) {
-    return `<details class="block bt" open id="b-bt-matrix" data-block="bt-matrix"><summary>${CARET}<h2>Target matrix</h2><span class="hint wide">every quality target and how it ended</span><span class="end"><span class="pill quiet num">${plural(B.targets.length, "target")}</span>${rdot("bt-matrix")}</span></summary>` +
-      `<div class="body"><div class="btool"><input type="search" id="bt-q" placeholder="Search by ID or text" aria-label="Search the targets" autocomplete="off"><div class="bchips" id="bt-vchips" role="group" aria-label="Filter by verdict"></div><div class="bchips" id="bt-uchips" role="group" aria-label="Filter by Unit"></div></div>` +
+    const open = openTargets(B).length;
+    return `<details class="block bt" open id="b-bt-matrix" data-block="bt-matrix"><summary>${CARET}<h2>Target matrix</h2><span class="hint wide">every quality target once${open ? "; the open ones carry your decision" : ""}</span><span class="end"><span class="pill quiet num" id="bt-dcount"></span>${rdot("bt-matrix")}</span></summary>` +
+      `<div class="body">${open ? '<p class="dsum">Choose for each open target: <b>Accept as known</b> keeps it as a known limit, <b>Follow-up</b> records it as work for later, <b>Fix now</b> sends it back as a Request Changes naming the targets. Your choices go to Claude with your answer in chat.</p>' : ""}` +
+      `<div class="btool"><input type="search" id="bt-q" placeholder="Search by ID or text" aria-label="Search the targets" autocomplete="off"><div class="bchips" id="bt-vchips" role="group" aria-label="Filter by verdict"></div><div class="bchips" id="bt-uchips" role="group" aria-label="Filter by Unit"></div></div>` +
       `<div class="tm" id="bt-tm" role="table" aria-label="Targets"></div></div></details>`;
   }
+  function tmRow(t, B, f) {
+    const open = f.rows.has(t.id), key = tkey(t), id = esc(t.id);
+    const det = [["Unit", t.unit], ["Source", t.source], ["Owning stage", t.owner], ["Evidence", t.evidence], ["Sources disagree", disagreeText(t)]].filter((x) => x[1]);
+    let decide = "";
+    if (isOpenT(t)) {
+      const p = view.picks[t.id] || {}, note = (p.note || "").trim();
+      decide = `<div class="tm-decide"><div class="dpick" role="radiogroup" aria-label="Decision for ${id}">${PICKS.map(([k, l]) => `<button type="button" role="radio" aria-checked="${p.pick === k}" data-pick="${k}" data-tid="${id}">${l}</button>`).join("")}</div>` +
+        `<div class="dfoot"><button type="button" class="notebtn" data-pnote="${id}" aria-pressed="${!!note}">${note ? "Your note" : "Add a note"}</button><span class="stat" id="ns-pick:${id}" aria-live="polite"></span></div>` +
+        `<textarea rows="2" class="dnote" data-tid="${id}" aria-label="Note on ${id}" placeholder="Optional: why, or what to do"${note || view.openNotes.has("pick:" + t.id) ? "" : " hidden"}>${esc(p.note || "")}</textarea></div>`;
+    }
+    return `<div class="tm-row ${VCLS(t.verdict)}${(view.picks[t.id] || {}).pick ? " chosen" : ""}${isRead(key) ? " read" : ""}" role="row" id="tgt-${esc(anchorId(key))}" data-tid="${id}" data-item="${esc(key)}"><div class="tm-line">` +
+      `<div class="tm-id" role="cell"><button type="button" class="tm-x" data-btx="${id}" aria-expanded="${open}" aria-label="Details of ${id}">${CHEV}</button><span class="mono">${id}</span>${idot(key, t.id)}</div>` +
+      `<div role="cell">${vtag(t.verdict)}${disagreeTag(t)}</div><div class="c-exp" role="cell" data-l="Expected">${esc(t.expected || "")}</div><div class="c-act" role="cell" data-l="Actual">${esc(t.actual || "")}</div><div class="c-ev" role="cell" data-l="Evidence">${evidenceHtml(t.evidence || "", B.evidence)}</div></div>` +
+      `<div class="tm-det"${open ? "" : " hidden"}><dl>${det.map((x) => `<dt>${esc(x[0])}</dt><dd>${esc(x[1])}</dd>`).join("")}</dl></div>${decide}</div>`;
+  }
+  const anchorId = (s) => String(s).replace(/[^A-Za-z0-9_-]+/g, "-");
   function btRender() {
     const B = bt(); const tm = $("bt-tm"); if (!B || !tm) return;
     const f = view.bt, all = B.targets;
@@ -3793,32 +3964,36 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     $("bt-vchips").innerHTML = verdicts.map((v) => `<button type="button" class="bchip" data-btv="${esc(v)}" aria-pressed="${f.v.has(v)}">${esc(v)}<span class="n">${all.filter((t) => t.verdict === v).length}</span></button>`).join("");
     const units = [...new Set(all.map((t) => t.unit || ""))].filter(Boolean);
     $("bt-uchips").innerHTML = units.length > 1 ? units.map((u) => `<button type="button" class="bchip" data-btu="${esc(u)}" aria-pressed="${f.u.has(u)}">${esc(u)}<span class="n">${all.filter((t) => t.unit === u).length}</span></button>`).join("") : "";
+    const top = rows.filter(isOpenT), rest = rows.filter((t) => !isOpenT(t));
+    const names = ["Met", "N/A"].filter((v) => rest.some((t) => t.verdict === v)).concat(rest.some((t) => ["Met", "N/A"].indexOf(t.verdict) < 0) ? ["Other"] : []);
+    const foldOpen = foldWanted();
     tm.innerHTML = `<div class="tm-head" role="row"><div role="columnheader">Target</div><div role="columnheader">Verdict</div><div role="columnheader">Expected</div><div role="columnheader">Actual</div><div role="columnheader">Evidence</div></div>` +
-      (rows.length ? rows.map((t) => {
-        const open = f.rows.has(t.id);
-        const det = [["Unit", t.unit], ["Source", t.source], ["Owning stage", t.owner], ["Evidence", t.evidence]].filter((x) => x[1]);
-        return `<div class="tm-row ${VCLS(t.verdict)}" role="row" data-tid="${esc(t.id)}"><div class="tm-line">` +
-          `<div class="tm-id" role="cell"><button type="button" class="tm-x" data-btx="${esc(t.id)}" aria-expanded="${open}" aria-label="Details of ${esc(t.id)}">${CHEV}</button><span class="mono">${esc(t.id)}</span></div>` +
-          `<div role="cell">${vtag(t.verdict)}</div><div class="c-exp" role="cell" data-l="Expected">${esc(t.expected || "")}</div><div class="c-act" role="cell" data-l="Actual">${esc(t.actual || "")}</div><div class="c-ev" role="cell" data-l="Evidence">${evidenceHtml(t.evidence || "", B.evidence)}</div></div>` +
-          `<div class="tm-det"${open ? "" : " hidden"}><dl>${det.map((x) => `<dt>${esc(x[0])}</dt><dd>${esc(x[1])}</dd>`).join("")}</dl></div></div>`;
-      }).join("") : '<div class="tm-none">No target matches. Clear a filter or the search.</div>');
+      top.map((t) => tmRow(t, B, f)).join("") +
+      (rest.length ? `<details class="tm-fold"${foldOpen ? " open" : ""}><summary>${CARET}${esc(names.join(" and "))}<span class="n">${rest.length}</span></summary>${rest.map((t) => tmRow(t, B, f)).join("")}</details>` : "") +
+      (rows.length ? "" : '<div class="tm-none">No target matches. Clear a filter or the search.</div>');
+    Object.keys(view.picks).forEach((id) => { const st = view.noteStat["pick:" + id]; if (st) setNoteStat("pick:" + id, st[0], st[1]); });
   }
-  function btDecideBlock(B) {
-    const open = openTargets(B); if (!open.length) return "";
-    return `<details class="block bt" open id="b-bt-decide" data-block="bt-decide"><summary>${CARET}<h2>Decisions</h2><span class="hint wide">what to do with each target that is not met or unverified</span><span class="end"><span class="pill quiet num" id="bt-dcount"></span>${rdot("bt-decide")}</span></summary>` +
-      `<div class="body"><p class="dsum">Choose for each: <b>Accept as known</b> keeps it as a known limit, <b>Follow-up</b> records it as work for later, <b>Fix now</b> sends it back as a Request Changes naming the targets. Your choices go to Claude with your answer in chat.</p>` +
-      `<div class="dcards">${open.map((t) => {
-        const p = view.picks[t.id] || {}; const note = (p.note || "").trim(); const id = esc(t.id);
-        return `<div class="dcard ${VCLS(t.verdict)}${p.pick ? " chosen" : ""}" data-did="${id}"><div class="dtop">${vtag(t.verdict)}<span class="mono">${id}</span><span class="hint">${esc(t.unit || "")}</span></div>` +
-          `<p class="dwhy">${t.expected ? `<span><b>Expected</b> ${esc(t.expected)}</span>` : ""}${t.actual ? `<span><b>Actual</b> ${esc(t.actual)}</span>` : ""}</p>` +
-          `<div class="dpick" role="radiogroup" aria-label="Decision for ${id}">${PICKS.map(([k, l]) => `<button type="button" role="radio" aria-checked="${p.pick === k}" data-pick="${k}" data-tid="${id}">${l}</button>`).join("")}</div>` +
-          `<div class="dfoot"><button type="button" class="notebtn" data-pnote="${id}" aria-pressed="${!!note}">${note ? "Your note" : "Add a note"}</button><span class="stat" id="ns-pick:${id}" aria-live="polite"></span></div>` +
-          `<textarea rows="2" class="dnote" data-tid="${id}" aria-label="Note on ${id}" placeholder="Optional: why, or what to do"${note || view.openNotes.has("pick:" + t.id) ? "" : " hidden"}>${esc(p.note || "")}</textarea></div>`;
-      }).join("")}</div></div></details>`;
+  const foldWanted = () => view.bt.fold || !!view.bt.q.trim() || [...view.bt.v].some((v) => !isOpenT({ verdict: v }));
+  /* the rows are drawn again: their round marks come back with them */
+  function btRepaint() {
+    btRender(); btDecideCount();
+    const sp = view.prev && recSpecs().find((x) => x.key === "bt-matrix"), D = sp && (view.recDelta || {})["bt-matrix"];
+    if (sp && D && D.n) { rvMarkRecs(sp, D, null); if (!rvOn() && view.chainReady) { RevDiff.unmark($("bt-tm")); rvAttributeRecs(rvChain(), sp); } }
+    paintChrome(docList());
   }
   function btDecideCount() {
     const B = bt(); const c = $("bt-dcount"); if (!B || !c) return;
-    const open = openTargets(B), n = pickedCount(B); c.textContent = n + " of " + open.length + " chosen";
+    const open = openTargets(B), n = pickedCount(B); c.textContent = open.length ? n + " of " + open.length + " chosen" : plural(B.targets.length, "target");
+  }
+  /* open the matrix on a target, folding it out if it is Met or N/A, and land on its row */
+  function jumpTarget(id) {
+    const B = bt(); const t = B && (B.targets || []).find((x) => x.id === id); if (!t) return;
+    const b = $("b-bt-matrix"); if (b) b.open = true;
+    const f = view.bt; f.v = new Set(); f.u = new Set(); f.q = ""; const q = $("bt-q"); if (q) q.value = "";
+    if (!isOpenT(t)) f.fold = true;
+    if (view.filter === "unread" && isRead(tkey(t))) { view.filter = "all"; }
+    btRepaint();
+    const row = $("tgt-" + anchorId(tkey(t))); if (row) { jumpTo(row); row.classList.remove("flash"); void row.offsetWidth; row.classList.add("flash"); }
   }
   function refGroup(docs) {
     return `<details class="block refgrp" id="b-reference" data-block="reference"><summary>${CARET}<h2>Reference</h2><span class="hint wide">build, integration, performance and security instructions: how to run things, not what happened</span><span class="end"><span class="pill quiet num">${plural(docs.length, "file")}</span></span></summary><div class="body">${docs.map((d, i) => docBlock(d, i)).join("")}</div></details>`;
@@ -3832,32 +4007,44 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
   }
   function onBtClick(e) {
     const B = bt(); if (!B) return;
+    const mg = e.target.closest("[data-mxgo]"); if (mg) { e.preventDefault(); const m = $("b-bt-matrix"); if (m) { m.open = true; jumpTo(m); } return; }
+    const tg = e.target.closest("[data-tgo]"); if (tg) { e.preventDefault(); jumpTarget(tg.dataset.tgo); return; }
+    const fold = e.target.closest("details.tm-fold > summary"); if (fold) { view.bt.fold = !fold.parentElement.open; return; }
     const v = e.target.closest("[data-btv]");
     if (v) {
       e.preventDefault(); const f = view.bt, val = v.dataset.btv;
       if (v.dataset.btonly) { f.v = new Set([val]); f.u = new Set(); f.q = ""; const q = $("bt-q"); if (q) q.value = ""; } else if (f.v.has(val)) f.v.delete(val); else f.v.add(val);
-      btRender(); if (v.dataset.btonly) { const m = $("b-bt-matrix"); if (m) jumpTo(m); } return;
+      btRepaint(); if (v.dataset.btonly) { const m = $("b-bt-matrix"); if (m) jumpTo(m); } return;
     }
-    const u = e.target.closest("[data-btu]"); if (u) { e.preventDefault(); const f = view.bt; if (f.u.has(u.dataset.btu)) f.u.delete(u.dataset.btu); else f.u.add(u.dataset.btu); btRender(); return; }
+    const u = e.target.closest("[data-btu]"); if (u) { e.preventDefault(); const f = view.bt; if (f.u.has(u.dataset.btu)) f.u.delete(u.dataset.btu); else f.u.add(u.dataset.btu); btRepaint(); return; }
     const x = e.target.closest("[data-btx]");
     if (x) { e.preventDefault(); const id = x.dataset.btx; if (view.bt.rows.has(id)) view.bt.rows.delete(id); else view.bt.rows.add(id); const row = x.closest(".tm-row"), det = row.querySelector(".tm-det"); det.hidden = !view.bt.rows.has(id); x.setAttribute("aria-expanded", String(!det.hidden)); return; }
     const pk = e.target.closest("[data-pick]");
     if (pk) {
       e.preventDefault(); const id = pk.dataset.tid; const same = (view.picks[id] || {}).pick === pk.dataset.pick;
       pickEdited(id, { pick: same ? undefined : pk.dataset.pick });
-      const card = pk.closest(".dcard"); card.classList.toggle("chosen", !!(view.picks[id] || {}).pick);
-      card.querySelectorAll("[data-pick]").forEach((b) => b.setAttribute("aria-checked", String((view.picks[id] || {}).pick === b.dataset.pick)));
-      btDecideCount(); paintChrome(docList()); return;
+      const row = pk.closest(".tm-row"); row.classList.toggle("chosen", !!(view.picks[id] || {}).pick);
+      row.querySelectorAll("[data-pick]").forEach((b) => b.setAttribute("aria-checked", String((view.picks[id] || {}).pick === b.dataset.pick)));
+      const t = B.targets.find((x) => x.id === id);
+      if (!same && t) setRead([tkey(t)], true);  /* choosing is proof the row was read; un-choosing leaves the mark alone */
+      btDecideCount(); paintChrome(docList());
+      if (view.filter === "unread" && t && isRead(tkey(t))) {  /* the row left the page: focus goes to the next row, or the block header */
+        const rows = [...el.col.querySelectorAll(".tm-row[data-item]")], at = rows.indexOf(row);
+        const next = rows.slice(at + 1).concat(rows.slice(0, at)).find((r) => !r.hidden && !r.closest("[hidden]") && r.querySelector("[data-pick]"));
+        const to = next && next.querySelector("[data-pick]"); const b = $("b-bt-matrix"); const sum = b && !b.hidden && b.querySelector(":scope > summary");
+        if (to) to.focus(); else if (sum) { sum.tabIndex = -1; sum.focus(); } else { const fb = el.bar.querySelector("[data-filter]"); if (fb) fb.focus(); }
+      }
+      return;
     }
     const pn = e.target.closest("[data-pnote]");
-    if (pn) { e.preventDefault(); const card = pn.closest(".dcard"), ta = card.querySelector(".dnote"), id = pn.dataset.pnote; ta.hidden = !ta.hidden; if (ta.hidden) view.openNotes.delete("pick:" + id); else { view.openNotes.add("pick:" + id); ta.focus(); } pn.setAttribute("aria-pressed", String(!ta.hidden || !!(ta.value || "").trim())); }
+    if (pn) { e.preventDefault(); const card = pn.closest(".tm-row"), ta = card.querySelector(".dnote"), id = pn.dataset.pnote; ta.hidden = !ta.hidden; if (ta.hidden) view.openNotes.delete("pick:" + id); else { view.openNotes.add("pick:" + id); ta.focus(); } pn.setAttribute("aria-pressed", String(!ta.hidden || !!(ta.value || "").trim())); }
   }
   el.col.addEventListener("click", onBtClick);
   el.col.addEventListener("input", (e) => {
-    if (e.target.id === "bt-q") { view.bt.q = e.target.value; btRender(); return; }
+    if (e.target.id === "bt-q") { view.bt.q = e.target.value; btRepaint(); return; }
     if (e.target.classList && e.target.classList.contains("dnote")) {
       const id = e.target.dataset.tid; pickEdited(id, { note: e.target.value });
-      const nb = e.target.closest(".dcard").querySelector("[data-pnote]"); if (nb) nb.textContent = e.target.value.trim() ? "Your note" : "Add a note";
+      const nb = e.target.closest(".tm-row").querySelector("[data-pnote]"); if (nb) nb.textContent = e.target.value.trim() ? "Your note" : "Add a note";
       btDecideCount();
     }
   });
@@ -3873,7 +4060,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const by = f.actionBy === "model" ? "suggested by a model" : f.actionBy === "reviewer" ? "the reviewer's action" : "";
     return `<div class="dcard fcard ${f.blocking ? "blocking" : "carried"}${p.pick ? " chosen" : ""}${isRead("finding:" + f.id) ? " read" : ""}" data-fid="${id}" data-item="finding:${id}"><div class="dtop">${sev}<span class="mono">${id}</span>${f.proposed ? `<span class="hint" data-tip="${esc(f.why || "")}">suggested: ${esc(f.proposed)}</span>` : ""}${idot("finding:" + f.id, f.id)}</div>` +
       `<h3>${inline(f.title)}</h3>${f.plain ? `<p class="fplain">${inline(f.plain)}</p>` : ""}` +
-      `<p class="faction"><b>Suggested</b>${inline(f.action || "")}${by ? ` <span class="fsugg">(${esc(by)})</span>` : ""}</p>` +
+      `<p class="faction"><b class="flab">Suggested</b>${inline(f.action || "")}${by ? ` <span class="fsugg">(${esc(by)})</span>` : ""}</p>` +
       (f.where ? `<span class="fwhere">${esc(f.where)}</span>` : "") +
       `<div class="dpick" role="radiogroup" aria-label="What to do with ${id}">${FPICKS.map(([k, l, tip]) => {
         const off = k === "accept" && f.blocking;
@@ -3985,7 +4172,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
       (F ? `<div class="tile${fpickedCount(F) === F.items.length ? " good" : ""}"><span class="lbl">Findings sorted</span><b class="num">${fpickedCount(F)}<small> / ${F.items.length}</small></b><span class="sub">${F.blocking ? F.blocking + " blocking" : "none blocking"}</span></div>` : "") +
       `<div class="tile${unhandled ? " bad" : " good"}"><span class="lbl">Not handled</span><b class="num">${unhandled}</b><span class="sub">${accepted ? accepted + " accepted with a reason" : "every traced item links somewhere"}</span></div>` +
       (D.settled ? `<div class="tile"><span class="lbl">Settled earlier</span><b class="num">${D.settled}</b><span class="sub">quoted, approved in an earlier stage</span></div>` : "") + "</div>";
-    return `<details class="block digest" open id="b-digest" data-block="digest"><summary>${CARET}<h2>At a glance</h2><span class="hint wide">the stage item by item; the documents as written follow below</span></summary><div class="body" id="digestbody">${tiles}${coverageHtml(D)}${traceHtml(D)}${lanesHtml(D, docs)}</div></details>`;
+    return `<details class="block digest" open id="b-digest" data-block="digest"><summary>${CARET}<h2>At a glance</h2><span class="hint wide">the stage item by item; the documents as written follow below</span><span class="end">${rdot("digest")}</span></summary><div class="body" id="digestbody">${tiles}${coverageHtml(D)}${traceHtml(D)}${lanesHtml(D, docs)}</div></details>`;
   }
   function paintItems() {
     if (ev()) { paintItems2(); paintChrome(docList()); return; }
@@ -4023,7 +4210,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
   const coveredDocs = () => ev() ? docList().filter((d) => d.covered) : [];
   const critOf = (key) => ((view.gate && view.gate.criteria) || []).find((c) => c.key === key);
   const itemOf = (id) => ((dg() || {}).items || []).find((i) => i.id === id);
-  const judgedItems = () => ((dg() || {}).items || []).filter((i) => !(i.settled && !i.coveredBy));
+  const judgedItems = () => ((dg() || {}).items || []).filter((i) => !(i.settled && !i.coveredBy) && !targetOfItem(i));
   const toneOf = (t) => `style="background:var(--${t}-bg);color:var(--${t}-fg)"`;
   function srcChip(ref) {
     const c = critOf(ref);
@@ -4047,7 +4234,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
       return `<span class="k">${esc(ORIGIN[o][0])}</span><div class="sbar" role="img" aria-label="${esc(ORIGIN[o][0] + ": " + said)}">${Object.keys(n).filter((v) => n[v]).map((v) => `<i class="cv-${v === "n/a" ? "na" : v}" style="flex:${n[v]} 1 0" data-tip="${esc(n[v] + " " + CVERDICT[v][0].toLowerCase())}"></i>`).join("")}</div><span class="n">${n.fails ? `<b class="bad">${n.fails} fail${n.fails === 1 ? "s" : ""}</b> · ` : ""}${its.length}</span>`;
     }).join("");
     const groups = Object.keys(ORIGIN).filter((o) => by(o).length).map((o) => `<details class="cgroup" data-origin="${o}"${view.iopen.has("cg:" + o) || by(o).some((c) => c.verdict === "fails") ? " open" : ""}><summary>${esc(ORIGIN[o][0])} <span class="hint">${esc(ORIGIN[o][2])} · ${by(o).length}</span></summary>` +
-      by(o).sort((a, b) => (a.verdict === "fails" ? 0 : a.verdict === "holds" ? 1 : 2) - (b.verdict === "fails" ? 0 : b.verdict === "holds" ? 1 : 2)).map((c) => `<details class="crow" id="crit-${esc(c.key)}"><summary><span class="tag" ${toneOf(CVERDICT[c.verdict] ? CVERDICT[c.verdict][1] : "low")}>${esc(CVERDICT[c.verdict] ? CVERDICT[c.verdict][0] : "?")}</span><span class="ctitle">${inline(c.title)}</span></summary><div class="cbody">${c.note ? `<p class="cnote"><b>Claude:</b> ${inline(c.note)}</p>` : ""}${c.text && c.text !== c.title ? `<div class="md" data-md="${esc(c.text)}"></div>` : ""}<span class="mono hint">${esc(String(c.source || "").replace(/^path:/, ""))}</span></div></details>`).join("") + `</details>`).join("");
+      by(o).sort((a, b) => (a.verdict === "fails" ? 0 : a.verdict === "holds" ? 1 : 2) - (b.verdict === "fails" ? 0 : b.verdict === "holds" ? 1 : 2)).map((c) => `<details class="crow${isRead("crit:" + c.key) ? " read" : ""}" id="crit-${esc(c.key)}" data-item="crit:${esc(c.key)}"><summary><span class="tag" ${toneOf(CVERDICT[c.verdict] ? CVERDICT[c.verdict][1] : "low")}>${esc(CVERDICT[c.verdict] ? CVERDICT[c.verdict][0] : "?")}</span><span class="ctitle">${inline(c.title)}</span>${idot("crit:" + c.key, c.key)}</summary><div class="cbody">${c.note ? `<p class="cnote"><b>Claude:</b> ${inline(c.note)}</p>` : ""}${c.text && c.text !== c.title ? `<div class="md" data-md="${esc(c.text)}"></div>` : ""}<span class="mono hint">${esc(String(c.source || "").replace(/^path:/, "").replace(/#L\d+.*$/, ""))}</span></div></details>`).join("") + `</details>`).join("");
     return `<section class="esec"><h3>Rules checked<span class="hint">${C.length} criteria from the stage's definition, its reviewer, the project's rules and earlier stages${fails ? ` · <b class="bad">${fails} fail</b>` : ""}</span></h3><div class="cov2 ctally">${bars}</div>` +
       `<div class="lg"><span><i class="cv-holds"></i>Holds</span><span><i class="cv-fails"></i>Fails</span><span><i class="cv-na"></i>Not relevant here</span></div>${groups}</section>`;
   }
@@ -4059,9 +4246,9 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
       .filter(([k]) => (E[k] || []).length).map(([k, t, tip]) => `<section class="ecol k-${k}"><h3 data-tip="${esc(tip)}">${t}<span class="n">${E[k].length}</span></h3>${pointList(E[k], k)}</section>`).join("");
     const noConflict = !(E.conflicts || []).length && C.some((c) => c.origin === "rule" || c.origin === "earlier") ? `<p class="hint none">No conflict found with the project's rules or earlier stages.</p>` : "";
     return `<details class="block evalb" open id="b-eval" data-block="evaluation"><summary>${CARET}<h2>Claude's evaluation</h2><span class="pill ${v[1]}" data-tip="${esc(v[2])}">${esc(v[0])}</span><span class="end">${rdot("evaluation")}</span></summary>` +
-      `<div class="body"><p class="decides">${inline(E.decides || "")}</p>` +
+      `<div class="body"><div class="etext${isRead("eval:text") ? " read" : ""}" data-item="eval:text">${idot("eval:text", "the evaluation")}<p class="decides">${inline(E.decides || "")}</p>` +
       ((E.lookFirst || []).length ? `<section class="esec lf"><h3>Look at first</h3><ol class="lfl">${E.lookFirst.map((p) => `<li><p class="pt1">${inline(p.text)}</p>${p.why ? `<p class="why"><b>Why first</b>${inline(p.why)}</p>` : ""}${srcs(p)}</li>`).join("")}</ol></section>` : "") +
-      (cols ? `<div class="egrid">${cols}</div>` : "") + noConflict + criteriaHtml(C) + `</div></details>`;
+      (cols ? `<div class="egrid">${cols}</div>` : "") + noConflict + `</div>` + criteriaHtml(C) + `</div></details>`;
   }
   function asWritten(it) {
     if (!it.body) return "";
@@ -4074,7 +4261,14 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     }
     return `<div class="md aw" data-md="${esc(it.body)}"></div>`;
   }
+  /* an item that is a target: said once in the matrix, so here only its summary and a link to its row; the row's read key is the target's */
+  function targetItemRow(it, tg) {
+    const key = tkey(tg), L = LABEL[it.label];
+    return `<div class="irow j tlink${isRead(key) ? " read" : ""}" id="item-${esc(it.key)}" data-item="${esc(key)}" data-aidlc-id="${esc(it.id)}"><div class="ih"><div class="imain"><div class="imeta"><span class="iid">${esc(it.id)}</span><span class="kind">${esc(KIND_SHORT[it.kind] || it.kind)}</span>${L ? `<span class="tag" ${toneOf(L[1])} data-tip="${esc(L[2])}">${esc(L[0])}</span>` : ""}<a class="tag tgo" href="#" data-tgo="${esc(tg.id)}" data-tip="${esc("This is a quality target. Its verdict, expected and actual are in the target matrix; press to go to its row.")}">in the target matrix</a></div>` +
+      `<span class="isum">${inline(it.summary || it.title)}</span></div></div></div>`;
+  }
   function itemRow2(it, docs) {
+    const tg = targetOfItem(it); if (tg) return targetItemRow(it, tg);
     const key = "item:" + it.key, read = isRead(key), open = view.iopen.has(it.key);
     const doc = docs.find((d) => d.key === it.doc); const L = LABEL[it.label];
     const rel = (it.relates || it.mentions || []).length ? `<div class="rel"><span>Relates to</span>${(it.relates || it.mentions).map((m) => `<span class="chip">${esc(m)}</span>`).join("")}</div>` : "";
@@ -4099,7 +4293,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const folded = (k, title, its) => its.length ? `<details class="settled" data-settled="${k}"${view.iopen.has("settled:" + k) ? " open" : ""}><summary>${esc(title)} (${its.length})</summary><div class="lane">${its.map((i) => k === "earlier" ? itemRow(i, docs) : itemRow2(i, docs)).join("")}</div></details>` : "";
     const kinds = KIND_ORDER.filter((k) => judged.some((i) => i.kind === k)).map((k) => plural(judged.filter((i) => i.kind === k).length, KIND_NAMES[k][1])).join(", ");
     const T = D.trace || [];
-    return `<details class="block items" open id="b-items" data-block="items"><summary>${CARET}<h2>What the stage says</h2><span class="hint wide">${esc(kinds)}; open one to read it as written</span><span class="end"><span class="pill quiet num" id="items-read"></span></span></summary>` +
+    return `<details class="block items" open id="b-items" data-block="items"><summary>${CARET}<h2>What the stage says</h2><span class="hint wide">${esc(kinds)}; open one to read it as written</span><span class="end"><span class="pill quiet num" id="items-read"></span>${rdot("items")}</span></summary>` +
       `<div class="body" id="itemsbody">${tiers}${folded("unchanged", "Unchanged since the last round", fold)}${folded("earlier", "Settled in an earlier stage, quoted here", settled)}` +
       (T.length ? `<details class="settled" data-settled="trace"${view.iopen.has("settled:trace") ? " open" : ""}><summary>Traceability: ${T.filter((t) => t.ok).length} of ${T.length} covered</summary>${traceHtml(D)}</details>` : "") + `</div></details>`;
   }
