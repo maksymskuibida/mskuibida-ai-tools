@@ -398,6 +398,14 @@ Until Units Generation has finished and produced Units, Construction's seven sta
 is listed with its stages but carries no count or ring (its row says `not included yet`, in `local only`'s amber), and the plan counts only the other phases. Once the Units exist
 (or when Units Generation is skipped), Construction counts again, as below.
 
+### Units built and merged, though the table is empty (0.27.2)
+
+The engine can rebuild `## Unit Progress` with every stage cell `[ ]` while the audit receipts say the work is done. The
+table and the receipts combine like this: a `[ ]` cell whose latest receipt for that stage and Unit is `UNIT_COMPLETED`
+(or `UNIT_MERGED`) reads `[x]`; `[?]` and `[R]` approval gates stay the table's. A Unit is done when its `merged` cell is
+`[x]`, its latest code-generation receipt is `UNIT_MERGED`, or it is `UNIT_COMPLETED` and the table does not hold
+code-generation at an approval gate. `merged` and `gate` are never stage rows.
+
 ### Units whose plan skips stages (0.27.1)
 
 A per-Unit stage with no column in the engine's `## Unit Progress` table is not part of the Unit, the same as a cell
