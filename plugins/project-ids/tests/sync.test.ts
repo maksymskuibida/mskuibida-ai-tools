@@ -14,7 +14,7 @@ function world(on: On, code = 0, out = 'demo: id map written (/maps/x.json); 708
   return ran
 }
 
-describe('/aidlc-ids:sync', () => {
+describe('/project-ids:sync', () => {
   test('runs the sync and answers with what it printed', async ($, on) => {
     const ran = world(on)
 

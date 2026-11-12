@@ -1,12 +1,12 @@
-# aidlc-ids
+# project-ids
 
 Every id an AI-DLC project's documents define (US1.1, AC1.1.2, FR1.4, NFR3, BR1.2, Q4, U31, C2, E7, ADR-009, R-01 and
 the rest) becomes, on the plugins' pages, a link with a tooltip saying what it is. This plugin keeps the map those
 pages read: for each id, its kind, its title, the start of its text and the document that defines it.
 
 ```
-/aidlc-ids:sync            build the map, or bring it up to date (only changed documents are read again)
-/aidlc-ids:sync --force    build it from scratch
+/project-ids:sync            build the map, or bring it up to date (only changed documents are read again)
+/project-ids:sync --force    build it from scratch
 ```
 
 The command runs without a model turn, so it costs no tokens. Agents run the same script before they build a page:
@@ -24,16 +24,25 @@ the script, so they work without this plugin; the map they read and write is the
 which of several definitions of an id it gets (every stage has its own Q1, every Unit its own BR1.1), is in
 [`shared/aidlc-ids/README.md`](../../shared/aidlc-ids/README.md).
 
+## Renamed from aidlc-ids
+
+0.2.0 renames the plugin (it was `aidlc-ids`, command `/aidlc-ids:sync`): the AI-DLC engine treats any plugin named
+`aidlc-<name>` without `.aidlc-plugin/plugin.json` as an older engine plugin and warns that it needs a sync. Kept on
+purpose, so nothing has to migrate: the map folder `~/.claude/plugins/data/aidlc-ids/` (the script computes it itself,
+and approval-gates, question-forms, story-points and review-findings read the same folder through their own copies of
+the script), the `AIDLC_IDS_DIR` variable, and the `shared/aidlc-ids/` folder in the repository. Nothing finds this
+plugin by name, so no other plugin needed a lookup change.
+
 ## Install
 
 ```bash
 claude plugin marketplace add maksymskuibida/mskuibida-ai-tools
-claude plugin install aidlc-ids@mskuibida-tooling
+claude plugin install project-ids@mskuibida-tooling
 ```
 
 ## Tests
 
 ```bash
 python3 -m unittest scripts/tests/test_sync_shared.py
-claude plugin test plugins/aidlc-ids
+claude plugin test plugins/project-ids
 ```

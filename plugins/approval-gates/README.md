@@ -88,7 +88,7 @@ On both pages every id (US1.1, AC1.1.2, FR1.4, NFR3, BR1.2, Q4, U31, C2, E7, ADR
 project's documents define) is a link with a tooltip, on hover and on keyboard focus, saying what it is and where it is
 written: live when the page shows its definition (a click opens what holds it, lands there and flashes it), dotted when
 it is defined elsewhere in the project (a click says so), dashed when no document defines it. The pages find ids the one
-shared way (`shared/aidlc-ids`, the `aidlc-ids` plugin): the writer syncs the project's id map and stores what each id
+shared way (`shared/aidlc-ids`, the `project-ids` plugin): the writer syncs the project's id map and stores what each id
 the page shows is, nearest the stage's documents, so a Q1 or R-01 is this stage's and a BR1.1 this Unit's.
 
 A page per gate, newest first in a list grouped by intent. A gate looks and works like the unit approvals page:

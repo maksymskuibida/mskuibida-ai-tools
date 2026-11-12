@@ -22,7 +22,7 @@ appears: in prose, in a table, in a reference list, in a note.
 
 The map is the project's own and stays out of the project: `~/.claude/plugins/data/aidlc-ids/maps/<checkout>/<space>--<intent>.json`,
 one per checkout, since a worktree's branch may hold other documents. Every plugin's copy reads and writes that one
-folder (`AIDLC_IDS_DIR` moves it). The `aidlc-ids` plugin adds `/aidlc-ids:sync`, which syncs it without a model turn.
+folder (`AIDLC_IDS_DIR` moves it). The `aidlc-ids` plugin adds `/project-ids:sync`, which syncs it without a model turn.
 
 `scripts/sync-shared.py` writes the copies. `scripts/sync-shared.py --check` fails CI when a copy differs. Edit the
 files here, never a plugin's copy, then run `scripts/sync-shared.py`.
