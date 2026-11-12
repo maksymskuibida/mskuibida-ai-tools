@@ -10,7 +10,7 @@ The order, for the session that opens a gate:
  2. This hook notices the write of a `gates` row for the stage (PostToolUse ArtifactData).
  3. Until that has happened, the Approval question (header `Approval`, options such as Approve) and the
     approved or rejected report are refused (PreToolUse). The page's link `<artifact url>#<gate id>` goes
-    to the developer in a message of its own before the question: the question is refused until a message
+    to the developer in the text before the question (anywhere in it): the question is refused until a text block
     of the assistant in the session's transcript (the `transcript_path` of the hook input) carries that
     link, and a question that carries the link itself is refused, so the dialog stays readable.
  4. A write that sets `status: "decided"`, or carries `decision` or `notes`, on a `gates` row is refused: those
@@ -25,7 +25,7 @@ Under the unit-end rhythm (the Unit's claim, `aidlc/.aidlc-unit-scope.json`, say
 directive carries `unit_gate: "unit-end"`) a Unit has two pages instead of one per stage: the plan page at the Code
 Generation plan approval and the unit-end page at the Unit's one gate. Both are `bundles/<id>` rows built by
 `scripts/unit_bundle.py`, and the same order holds with them in place of the `gates` row: the question and the closing
-report wait for the row of the right page, and the link goes in a message of its own. Per-stage gates are unchanged.
+report wait for the row of the right page, and the link goes in the text before the question. Per-stage gates are unchanged.
 
 The plan approval is also opened by the engine's own ask: when the active directive is an `ask` with `ask_type:
 "plan-approval"` (what `aidlc engine orchestrate next` returns once the plan is written), the gate is open for that Unit
@@ -616,8 +616,9 @@ def publish_instruction(stage, unit, page=None):
             "AskUserQuestion call (never inside the question, and never end the turn on the link alone)")
 
 
-LINK_THEN_ASK = ("In ONE response, write a text message whose first line is the link `<artifact url>#<id>` (the artifact's "
-                 "URL, `#`, the id you wrote), then call AskUserQuestion with the engine's question as it is, with no link in "
+LINK_THEN_ASK = ("In ONE response, include the link `<artifact url>#<id>` (the artifact's URL, `#`, the id you wrote) anywhere "
+                 "in the text you write before the question (for example `Page: <link>`; first, middle or last line, plain or "
+                 "as a markdown link), then call AskUserQuestion with the engine's question as it is, with no link in "
                  "it. Do not end the turn on the link alone.")
 
 
@@ -1018,10 +1019,11 @@ def wait_for_link(event, pub, after=False):
 
 def plan_hint(plan_ids, state, with_bundle):
     links = " and ".join(f"`{link_of(state['plans'][i])}`" for i in plan_ids)
-    text = (f"the test plan is published (plans/{', plans/'.join(plan_ids)}). Send the developer the link {links} as a text block "
-            "in a message of its own, and in the SAME response make the AskUserQuestion call (header \"Test plan\": "
-            "**Do the agent step for A** / **Change the plan**). Never ask before the link: every question is refused until "
-            "a message of yours written after this write carries it, and never end the turn on the link alone.")
+    text = (f"the test plan is published (plans/{', plans/'.join(plan_ids)}). The developer has NOT seen the link {links}: this "
+            "hook note, tool results and your thinking are invisible to them. Your next response must contain the link in its "
+            "text (anywhere in it, for example `Plan: <link>`), and then, in the SAME response, the AskUserQuestion call "
+            "(header \"Test plan\": **Do the agent step for A** / **Change the plan**). Every question is refused until a text "
+            "block of yours written after this write carries it; never end the turn on the link alone.")
     if with_bundle:
         text += (" This batch also wrote the unit-end page: put both links in that one message. The question that follows is "
                  "the test-plan ask above, not the unit-end Approval question (the gate waits until the test plan is done and "
@@ -1052,7 +1054,8 @@ def guard_plan_links(event, state):
                       f"yours written since plans/{plan.get('id', '')} was published carries it (since then: "
                       f"{counts['thinking']} thinking, {counts['tool_use']} tool-call and {counts['text']} text block(s), none "
                       "with the link; thinking is not output and a tool call is not a message).",
-                      [f"In ONE response, write a text message whose first line is `**Read:** {link_of(plan)}`.",
+                      [f"In ONE response, include this link anywhere in the text you write before the question (for example "
+                       f"`Plan: {link_of(plan)}`): {link_of(plan)}",
                        "In that same response, make the AskUserQuestion call (header \"Test plan\": **Do the agent step for "
                        "A** / **Change the plan**).",
                        "Do not end the turn on the link alone: a response with only the link ends your turn and the developer "
@@ -1107,9 +1110,10 @@ def guard_question(event, state, project, questions):
         url = str(pub.get("url", "")).strip()
         if (url and url in text) or re.search(r"claude\.ai/artifact/|#[0-9]{6}-[a-z0-9.-]+-\d{8}T\d{4}\b", text, re.I):
             raise Refusal("this Approval question, because its text carries a link: the page's link goes to the developer in "
-                          "a message of its own, before the question, so the dialog stays readable.",
+                          "the text before the question, so the dialog stays readable.",
                           ["Remove every link, URL and gate id from the question text.",
-                           f"In ONE response, write a text message whose first line is exactly this link: {link_of(pub)}",
+                           f"In ONE response, include this link anywhere in the text you write before the question (for example "
+                           f"`Page: {link_of(pub)}`): {link_of(pub)}",
                            "Then, in the same response, call AskUserQuestion with the engine's question as it is."],
                           "the question goes through.")
         pubs[id(q)] = pub
@@ -1362,20 +1366,39 @@ WHY = {
 }
 
 
-def visible_refusal(case, link, urls, tokens, session_lost):
+def evidence_of(items, case):
+    """What the guard found since the developer's last message, as one sentence: the visible text blocks, and where the
+    words before the question were instead."""
+    shown = sum(1 for k, _t, h in items if k == "text" and not h)
+    thinking = sum(1 for k, _t, _h in items if k == "thinking")
+    after = sum(1 for k, _t, h in items if k == "text" and h)
+    found = f"Found since the developer's last message: {shown} visible text block(s), none holding the page's link"
+    extra = []
+    if thinking:
+        extra.append(f"{thinking} thinking block(s), which the developer never sees" + (" (the link is in one of them)" if case == "thinking" else ""))
+    if after:
+        extra.append(f"{after} text block(s) after the question box, which the app does not show")
+    if case == "tool":
+        extra.append("the link appears only in a tool call, a tool result or hook context")
+    return found + ("; " + "; ".join(extra) if extra else "") + "."
+
+
+def visible_refusal(case, link, urls, tokens, session_lost, items=()):
     if link:
-        first = f"exactly this link, in full, with nothing else on that line (copy it, no backticks): {link}"
+        first = f"this link, in full (copy it, no backticks): {link}"
     elif urls:
         first = ("a link to the page of this " + (f"Unit ({tokens[0]})" if tokens else "stage") + " in the artifact where you wrote it: "
-                 + " or ".join(f"`{u}#<the row id you wrote>`" for u in urls) + ", the whole link, nothing else on that line")
+                 + " or ".join(f"`{u}#<the row id you wrote>`" for u in urls) + ", the whole link")
     else:
         first = ("a link to the page, `<artifact url>#<the row id you wrote>` (find the artifact with Artifact `action: \"list\"`: "
-                 "AI-DLC unit approvals, or AI-DLC approval gates), the whole link, nothing else on that line")
+                 "AI-DLC unit approvals, or AI-DLC approval gates), the whole link")
     lost = (" The session was restarted or its record of the page was lost, so the link below is found again, not "
             "as it was recorded." if session_lost else "")
-    return Refusal(f"this AI-DLC Approval question, because {WHY[case]}. Thinking is not output, and tool calls, tool results "
-                   f"and text written after a question box are not shown to the developer.{lost}",
-                   [f"Write a text message whose first line is {first}",
+    return Refusal(f"this AI-DLC Approval question, because {WHY[case]}. {evidence_of(items, case)} Thinking, tool calls, tool "
+                   f"results, hook context and text written after a question box are not shown to the developer. Nothing will "
+                   f"make this pass later; write the link as text now.{lost}",
+                   [f"Include {first} anywhere in the text you write before the question (first, middle or last line, plain or "
+                    "as a markdown link; for example `Page: <link>`).",
                     "Put nothing after the question: no text and no link after the AskUserQuestion call.",
                     "Then call AskUserQuestion with the engine's question as it is, with no link in it. Do steps 1 to 3 in "
                     "ONE response, in this order. Do not end the turn on the link alone."],
@@ -1402,7 +1425,7 @@ def guard_visible_link(event, state, project, questions, pubs):
             time.sleep(0.2)
         if not ok:
             case = where_it_went(items, link, urls) or "none"
-            raise visible_refusal(case, link, urls, tokens, not pub)
+            raise visible_refusal(case, link, urls, tokens, not pub, items)
 
 
 def guard_report(state, project, call):
@@ -1666,12 +1689,12 @@ def record_artifact(project, state, tool_input, response):
             if note:
                 say("PostToolUse", note)
         if not changed:
-            say("PostToolUse", f"gates/{doc_id} is published. Send the developer the link `{link_of(pub)}` in "
-                               "a message of its own (the `**Read:**` line of the completion message), then "
-                               "ask the engine's Approval question with no link in it; the question is "
-                               "refused until that message was sent. Do both in ONE response: a text block with "
-                               "the link first, then the AskUserQuestion call in the same response; never end the "
-                               "turn on the link alone.")
+            say("PostToolUse", f"gates/{doc_id} is published. The developer has NOT seen its link `{link_of(pub)}`: this hook "
+                               "note, tool results and your thinking are invisible to them. Your next response must contain "
+                               "the link in its text (anywhere in it; for example write the line `Page: "
+                               f"{link_of(pub)}`), and then, in the SAME response, the engine's Approval question with no "
+                               "link in it. The question is refused until a text block of yours carries the link; never end "
+                               "the turn on the link alone.")
         changed = True
     if plan_ids:
         say("PostToolUse", plan_hint(plan_ids, state, bool(bundle_ids)))
@@ -1728,10 +1751,12 @@ def record_bundle(state, project, intent, doc_id, url):
     state["published"][make_key(pending["stage"], unit) + "@" + page] = pub
     kind, revision, _head = aidlc_links.bundle_page(doc_id)
     register_link(project, kind, url, doc_id, UNIT_END_STAGE, unit, "unit-end", revision)
-    say("PostToolUse", f"bundles/{doc_id} is published in the AI-DLC unit approvals artifact. Send the developer the link `{link_of(pub)}` in a message of its "
-                       "own, then ask the engine's Approval question with no link in it; the question is refused until "
-                       "that message was sent. Do both in ONE response: a text block with the link first, then the "
-                       "AskUserQuestion call in the same response; never end the turn on the link alone.")
+    say("PostToolUse", f"bundles/{doc_id} is published in the AI-DLC unit approvals artifact. The developer has NOT seen its link "
+                       f"`{link_of(pub)}`: this hook note, tool results and your thinking are invisible to them. Your next "
+                       "response must contain the link in its text (anywhere in it; for example write the line `Page: "
+                       f"{link_of(pub)}`), and then, in the SAME response, the engine's Approval question with no link in "
+                       "it. The question is refused until a text block of yours carries the link; never end the turn on "
+                       "the link alone.")
     return True
 
 
@@ -1854,7 +1879,8 @@ def stop(event, project):
             print(json.dumps({"decision": "block", "reason": stop_reason(
                 f"ending the turn, because the test plan {unsent[0].get('id', '')} is published but its link was never sent, "
                 "so the developer cannot open it.",
-                [f"In ONE response, write a text message whose first line is `**Read:** {links}`.",
+                [f"In ONE response, include {links} anywhere in the text you write before the question (for example "
+                 f"`Plan: {links}`).",
                  "In that same response, ask the test-plan question with AskUserQuestion (**Do the agent step for A** / "
                  "**Change the plan**)."],
                 "the question box is shown to the developer.")}))
@@ -1872,7 +1898,8 @@ def stop(event, project):
                     reason = stop_reason(
                         f"ending the turn, because the gate for {pub.get('id', 'this page')} is published but its question "
                         "was never asked and its link was never sent, so the developer cannot answer it.",
-                        [f"In ONE response, write a text message whose first line is `**Read:** {link_of(pub)}`.",
+                        [f"In ONE response, include {link_of(pub)} anywhere in the text you write before the question (for "
+                         f"example `Page: {link_of(pub)}`).",
                          "In that same response, ask the engine's Approval question with AskUserQuestion, with no link in it."],
                         "the question box is shown to the developer.")
             if reason is None:
@@ -1949,8 +1976,8 @@ def show_page_hint(event):
             sync_pending(state, project)
             pub = pending_page(state, project) if state["pending"] else unit_end_page(state, project)
         if pub and pub.get("id"):
-            say("UserPromptSubmit", f"the developer asks to see the approval page. Write `**Read:** {link_of(pub)}` as plain "
-                                    "text in a message of its own now (thinking does not count and `Artifact open` does not "
+            say("UserPromptSubmit", f"the developer asks to see the approval page. Write the link {link_of(pub)} as plain "
+                                    "text in your reply now (thinking does not count and `Artifact open` does not "
                                     "show it to them), then ask the question again if the gate is still open.")
     except Exception:
         return

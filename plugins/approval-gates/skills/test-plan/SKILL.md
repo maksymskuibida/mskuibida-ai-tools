@@ -14,7 +14,7 @@ The developer wants to test the unit-end page's "Not verified yet" points before
 2. Write the plan: sections A, B, C … (a new section wherever you must do something first). Sections are split by what you do first, never by not-verified point; one section may verify several V-points. A section after A whose agent step does nothing ("nothing to prepare", "app stays open") is refused: put its steps at the end of A. Each with your agent step
    and the developer's steps (`do`, `criteria` — at least one short checkable sentence, numbered A.1.1, A.1.2 … on the page — and the V rows it `verifies`). `test_plan.py publish` validates it.
 3. Publish the plan in the **AI-DLC test plans** artifact (once per developer, `test-plan.html`, `capabilities:
-   {db: {}, user: {}}`), send its link as a text block in a message of its own (a hook refuses every question until it is sent) and, in the same response, ask **Do the agent step for A** /
+   {db: {}, user: {}}`), put its link in the text of your next response, anywhere in it (a hook refuses every question until a text block carries it) and, in the same response, ask **Do the agent step for A** /
    **Change the plan**.
 4. After each agent step: set `agentDone`, ask **Section A completed, go on** / **Change the plan**; after the last, **Test plan completed** / **Change the plan**
    (a question has at least two options). Read the page's results with `ArtifactData` before moving on.

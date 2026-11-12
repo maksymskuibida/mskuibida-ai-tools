@@ -51,7 +51,7 @@ class TestNoRecordedPublication(VisibleCase):
         code, _out, err = self.end_ask()
         self.assertEqual(code, 2)
         self.assertIn("no text message of yours since the developer's last message carries the page's link", err)
-        self.assertIn("1. Write a text message whose first line is", err)
+        self.assertIn("anywhere in the text you write before the question", err)
         self.assertIn("2. Put nothing after the question", err)
         self.assertIn("3. Then call AskUserQuestion", err)
         self.assertIn("Artifact", err)
@@ -136,7 +136,7 @@ class TestInvisibleWays(VisibleCase):
         self.assertEqual(code, 2)
         self.assertIn(why, err)
         self.assertIn(self.link, err)
-        self.assertIn("1. Write a text message whose first line is", err)
+        self.assertIn("anywhere in the text you write before the question", err)
         return err
 
     def test_the_link_only_in_thinking(self):
@@ -200,6 +200,42 @@ class TestInvisibleWays(VisibleCase):
         self.assertEqual(self.end_ask()[0], 2)
 
 
+class TestAnyPosition(VisibleCase):
+    """The link counts wherever it sits in a visible text block before the question."""
+
+    def setUp(self):
+        super().setUp()
+        self.wrote_in_transcript(self.end_id)
+
+    def test_first_middle_and_last_line_and_inside_a_sentence(self):
+        for text in (f"{self.link}\nThe rest.", f"Intro.\n{self.link}\nMore.", f"Intro.\nMore.\n{self.link}",
+                     f"The unit-end page is at {self.link}, please read it.", f"[the page]({self.link}) is ready"):
+            with self.subTest(text=text):
+                self.developer_says("go on")
+                self.said(text)
+                self.assertEqual(self.end_ask(), (0, "", ""))
+
+    def test_a_link_to_another_gate_does_not_count(self):
+        self.said(f"{URL}#{INTENT}-u9-other-unit-end-v1-{self.now}")
+        self.assertEqual(self.end_ask()[0], 2)
+
+    def test_the_refusal_shows_what_was_found_and_asks_for_no_position(self):
+        self.said("I will ask now.", block="thinking")
+        self.said("Here is the summary, no link.")
+        err = self.end_ask()[2]
+        self.assertIn("Found since the developer's last message: 1 visible text block(s), none holding the page's link", err)
+        self.assertIn("1 thinking block(s)", err)
+        self.assertIn("Nothing will make this pass later; write the link as text now.", err)
+        self.assertNotIn("first line", err)
+        self.assertNotIn("nothing else on that line", err)
+
+    def test_the_hook_context_alone_is_named_as_not_seen(self):
+        self.tool_result(f"gates is published. Send the developer the link `{self.link}`")
+        err = self.end_ask()[2]
+        self.assertIn("hook context", err)
+        self.assertIn("0 visible text block(s)", err)
+
+
 class TestPerStageApprovalToo(Case):
     def wrote_gate(self, gate_id):
         self.raw({"type": "assistant", "message": {"role": "assistant", "content": [
@@ -221,7 +257,7 @@ class TestPerStageApprovalToo(Case):
         self.wrote_gate(gate_id)
         code, _out, err = self.ask("Stage complete. How would you like to proceed?")
         self.assertEqual(code, 2)
-        self.assertIn("1. Write a text message whose first line is", err)
+        self.assertIn("anywhere in the text you write before the question", err)
         self.assertIn(f"{URL}#{gate_id}", err)
 
     def test_a_per_stage_gate_with_the_link_in_the_text_passes(self):

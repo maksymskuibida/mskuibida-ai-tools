@@ -317,7 +317,7 @@ class TestTheQuestion(Case):
         self.assertEqual((code, err), (0, ""))
         code, _out, err = self.ask(f"User Stories complete, read the documents at {URL}#{gate_id}. How would you like to proceed?")
         self.assertEqual(code, 2)
-        self.assertIn("in a message of its own", err)
+        self.assertIn("the text before the question", err)
         self.assertIn(f"{URL}#{gate_id}", err)
 
     def test_any_gate_link_in_the_question_is_refused(self):
@@ -328,18 +328,18 @@ class TestTheQuestion(Case):
                      f"Read claude.ai/artifact/zzz#{INTENT}-user-stories-20250101T0000 and decide."):
             code, _out, err = self.ask(text)
             self.assertEqual(code, 2, text)
-            self.assertIn("in a message of its own", err)
+            self.assertIn("the text before the question", err)
 
     def test_the_question_waits_for_the_link_message(self):
         self.open_gate()
         gate_id = self.publish(link=False)
-        self.assertIn(f"Send the developer the link `{URL}#{gate_id}`", self.context(self.last_publish))
+        self.assertIn(f"has NOT seen its link `{URL}#{gate_id}`", self.context(self.last_publish))
         self.said("I will write the Read line now", block="thinking")
         self.said("x", block="tool_use")
         code, _out, err = self.ask("User Stories complete. How would you like to proceed?")
         self.assertEqual(code, 2)
         self.assertIn("no text message of yours since the developer's last message carries the page's link", err)
-        self.assertIn("Thinking is not output", err)
+        self.assertIn("Nothing will make this pass later", err)
         self.assertIn(f"{URL}#{gate_id}", err)
         self.said(f"Ready to review.\n\n**Read:** {URL}#{gate_id}")
         code, _out, err = self.ask("User Stories complete. How would you like to proceed?")
@@ -469,7 +469,7 @@ class TestTheQuestion(Case):
         # a question carrying the link is still a gate (so it is refused for the link, not passed as a pull request)
         code, _out, err = self.ask(f"Read {URL}#{gate_id} (2 documents).")
         self.assertEqual(code, 2)
-        self.assertIn("in a message of its own", err)
+        self.assertIn("the text before the question", err)
         self.assertEqual(self.ask("Read the documents (2 of them). How would you like to proceed?")[0], 0)
         self.assertEqual(self.ask("Read it; also see #12.")[0], 0)  # a pull request is named: not an AI-DLC gate
 
@@ -693,7 +693,7 @@ class TestWorktrees(Case):
         main = self.main_checkout()
         gate_id = self.publish(f"{INTENT}-user-stories-20260101T0900", project=main, cwd=main)
         self.assertEqual(list(self.state_of()["published"]), ["id:" + gate_id])
-        self.assertIn(f"Send the developer the link `{URL}#{gate_id}`", self.context(self.last_publish))
+        self.assertIn(f"has NOT seen its link `{URL}#{gate_id}`", self.context(self.last_publish))
         cmd = report("approved", extra=' --user-input "Approve"')
         self.assertEqual(self.pre("Bash", {"command": cmd}, project=main, cwd=main)[0], 0)
         code, _out, err = self.pre("Bash", {"command": report("approved", stage="delivery-planning")}, project=main, cwd=main)
@@ -764,7 +764,7 @@ class TestFailingOpen(Case):
         os.remove(os.path.join(self.record, "aidlc-state.md"))
         code, _out, err = self.ask("x")
         self.assertEqual(code, 2)
-        self.assertIn("1. Write a text message whose first line is", err)
+        self.assertIn("anywhere in the text you write before the question", err)
         other = gate_question("Which database?", header="Database", labels=("Postgres", "SQLite"))
         self.assertEqual(self.pre("AskUserQuestion", other), (0, "", ""))
 
@@ -906,7 +906,7 @@ class TestStopNet(Case):
     def test_the_failed_sequence_is_caught_once(self):
         self.open_gate()
         gate_id = self.publish(link=False)
-        self.assertIn("ONE response", self.context(self.last_publish))
+        self.assertIn("SAME response", self.context(self.last_publish))
         self.assertIn("never end the turn on the link alone", self.context(self.last_publish))
         code, _out, err = self.ask(self.Q)                    # a bare ask: refused
         self.assertEqual(code, 2)
@@ -925,7 +925,7 @@ class TestStopNet(Case):
         self.open_gate()
         gate_id = self.publish(link=False)
         reason = self.blocked(self.stop()[1])
-        self.assertIn(f"**Read:** {URL}#{gate_id}", reason)
+        self.assertIn(f"include {URL}#{gate_id} anywhere", reason)
         self.assertIn("ONE response", reason)
 
     def test_stop_hook_active_never_blocks(self):

@@ -116,8 +116,8 @@ the stage has a reviewer:
    same recipe shape. If a write is refused because the id exists, run draft and finalize again a minute later: an id is
    a time stamp.
 6. **Present the gate** as the protocol says. The completion message gets the line `**Read:** <artifact url>#<id>` next
-   to the `**Review:**` line; that message is where the link lives, and it is sent first: the guard refuses the question
-   until a message of yours carries the link. Then ask the engine's question exactly as the protocol words it ("Delivery
+   to the `**Review:**` line; the link may sit anywhere in your text before the question: the guard refuses the question
+   until a text block of yours carries it. Then ask the engine's question exactly as the protocol words it ("Delivery
    Planning complete. How would you like to proceed?"): no link, no URL and no gate id in the question text. The options
    stay the engine's. End the turn.
 
@@ -245,8 +245,7 @@ republish from this file to the same URL after a plugin update.
    `refs` over every text of the bundle with `--near` the Unit's stage folders), validates the bundle, and refuses
    with one problem per line until it holds to the contract. Pass `--project-dir` when the project is not the working
    directory. Never edit `ids` by hand: run finalize again.
-4. Write `writes.json` with one `ArtifactData` `batch`, send `**Read:** <artifact url>#<bundle id>` in a message of its
-   own, then ask the engine's question as the protocol words it, with no link in it. End the turn. **At the unit-end
+4. Write `writes.json` with one `ArtifactData` `batch`, put `<artifact url>#<bundle id>` anywhere in the text before the question, then ask the engine's question as the protocol words it, with no link in it. End the turn. **At the unit-end
    gate** (not the plan approval) the question carries a third option, **Test first**, after Approve and Request
    Changes; see § 7.
 
@@ -280,10 +279,10 @@ no test plan.
    `test-plan.html` once: `capabilities: {db: {}, user: {}}`, `icon: "checklist"`, description "Steps to check a Unit's
    not-verified points; Pass or Fail each, notes come back to Claude." Reuse its URL; republish from the file after a
    plugin update. Write the plan's `writes.json` with one `ArtifactData` batch (a `plans/<id>` row).
-4. **Drive it in chat.** Send `**Read:** <artifact url>#<plan id>` as a text block in a message of its own right after
+4. **Drive it in chat.** Put `<artifact url>#<plan id>` in the text of your next response, anywhere in it (e.g. `Plan: <link>`), right after
    the write (the hook names the exact link), and in the same response ask (`AskUserQuestion`, header "Test plan"): **Do
    the agent step for A** / **Change the plan**. Never ask before the link: the plugin refuses every question until a
-   message of yours written after the plan was published carries it, and blocks a turn that ends without it. A plan
+   text block of yours written after the plan was published carries it, and blocks a turn that ends without it. A plan
    published again needs its link again. Every question here has two options, never one.
    - *Change the plan*: ask what to change, revise the plan (a new id, `-test-v2-`), publish it again, send the link, ask again.
    - *Do the agent step for A*: do it, then `ArtifactData` `update` of `plans/<id>` with `agentDone` (all keys done so
@@ -308,7 +307,7 @@ no test plan.
 6. **Back to the gate.** `unit_bundle.py draft --page unit-end --unit <unit> --tested <stage folder>/test-plan.json
    --out <scratch>/bundle.json`, then the todo list and `finalize` as in § 5. The page splits the not-verified section:
    *Verified by you* (passed), *Still not verified* (picked Later, or failed and being fixed), *Failed, left as known*.
-   Write the row, send the link in a message of its own, and ask the unit-end gate question again (Approve / Request
+   Write the row, put the link in the text before the question, and ask the unit-end gate question again (Approve / Request
    Changes / Test first).
 
 ## Diagrams and visuals (1.33.0)
@@ -403,7 +402,7 @@ calls and their results (ArtifactData, `Artifact` open, Bash output), text writt
 hides it), "see the linked artifact" with no URL, and a markdown link whose target is another address. The same order every
 time, in ONE response:
 
-1. A text message whose first line is the exact link `<artifact url>#<bundle or gate id>`, in full.
+1. Text of yours that includes the link `<artifact url>#<bundle or gate id>`, in full, anywhere in it (first, middle or last line; plain or as a markdown link whose target is the link; e.g. `Page: <link>`). The hook note after the row write, tool results and thinking are invisible to the developer: they have NOT seen the link until you write it as text. Nothing will make a refusal pass later.
 2. Nothing after the question.
 3. Then the AskUserQuestion call, with no link in it.
 
@@ -419,7 +418,7 @@ The test-plan flow (§ 7) is the same: the unit-end question asked again after t
 `hooks/gate_guard.py` refuses the Approval question and the approved, rejected or accepted report until
 a `gates` row for the stage (under the unit-end rhythm: the `bundles` row of the page the gate needs) was written in this session after the gate was opened and a message of yours
 (in the session's transcript) carries its link `<artifact url>#<id>`, and refuses a question that carries
-the link itself: the link goes in a message of its own. Send it as a text block and make the AskUserQuestion call in that same response; never end the turn on the link alone (a Stop hook catches it once). The plan approval counts as open as soon as the engine asks for it (the active
+the link itself: the link goes in the text before the question, anywhere in it. Send it as a text block and make the AskUserQuestion call in that same response; never end the turn on the link alone (a Stop hook catches it once). The plan approval counts as open as soon as the engine asks for it (the active
 directive is an `ask` with `ask_type: "plan-approval"`), and any question offering Approve Plan, Approve or Accept
 as-is while a gate is open is guarded, whatever its header. The developer clears it with `/approval-gates:release`.
 
