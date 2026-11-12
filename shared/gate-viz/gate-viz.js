@@ -390,9 +390,22 @@ var GateViz = (function () {
     return '<nav class="fo-side" data-rv-skip aria-label="Headings of this file"><p class="fo-h">In this file</p><ol>' + li + '</ol></nav><details class="fo-strip" data-rv-skip><summary>In this file<span class="n">' + items.length + ' headings</span></summary><ol>' + li + "</ol></details>";
   }
 
+  /* a diagram wider than its frame scrolls inside the frame, and says so: a note under it while it overflows (the fade and the scrollbar are the CSS's) */
+  function cue(root) {
+    [].forEach.call(root.querySelectorAll(".vz-scroll"), function (s) {
+      var more = s.scrollWidth > s.clientWidth + 2, c = s.nextElementSibling && s.nextElementSibling.classList.contains("vz-cue") ? s.nextElementSibling : null;
+      if (more && !c) { c = document.createElement("p"); c.className = "vz-cue"; c.textContent = "Wider than the page: scroll sideways for the rest."; s.parentNode.insertBefore(c, s.nextSibling); }
+      else if (!more && c) c.remove();
+      s.classList.toggle("vz-more", more);
+    });
+  }
+
   /* hover or focus a box: it and what it is linked to stand out, the rest steps back */
   function bind(root) {
     if (!root || root.__vz) return; root.__vz = true;
+    var queued = false, again = function () { if (queued) return; queued = true; (window.requestAnimationFrame || setTimeout)(function () { queued = false; cue(root); }); };
+    again(); window.addEventListener("resize", again); root.addEventListener("toggle", again, true); root.addEventListener("click", again);
+    if (window.MutationObserver) new MutationObserver(again).observe(root, { childList: true, subtree: true });
     function on(e) {
       var n = e.target.closest && e.target.closest(".vz-node, .vz-item"); if (!n) return;
       var fig = n.closest(".vz"), id = n.getAttribute("data-id"), rel = {}; rel[id] = 1;
@@ -423,6 +436,6 @@ var GateViz = (function () {
     });
   }
 
-  return { diagram: diagram, heat: heat, funnel: funnel, timeline: timeline, lanes: lanes, dots: dots, outline: outline, bind: bind, keysOf: keysOf, esc: esc };
+  return { diagram: diagram, heat: heat, funnel: funnel, timeline: timeline, lanes: lanes, dots: dots, outline: outline, bind: bind, cue: cue, keysOf: keysOf, esc: esc };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GateViz;

@@ -419,8 +419,9 @@ class TestRender(Base):
         _path, end, _info = self.finished("unit-end")
         end_built = rows_of(end, "built")
         next(s for s in end["sections"] if s["key"] == "built")["map"] = {
-            "nodes": [{"id": "r", "title": "Slot rules", "weight": "core", "target": "#B-1"}, {"id": "l", "title": "Slot list", "weight": "main", "target": "#B-2"}],
-            "edges": [{"from": "r", "to": "l", "label": "full slots"}]}
+            "nodes": [{"id": "r", "title": "Slot rules", "weight": "core", "target": "#B-1"}, {"id": "l", "title": "Slot list", "weight": "main", "target": "#B-2"},
+                      {"id": "m", "title": "Slot mail", "weight": "minor", "target": "#B-1"}],
+            "edges": [{"from": "r", "to": "l", "label": "full slots"}, {"from": "l", "to": "m"}]}
         self.assertEqual(validate_bundle.validate(end), [], end_built)
         page = render(end, {"summary": {"mode": "summary", "sec": {"records": True}}})["summary"]
         self.assertIn("The design you approved", page)

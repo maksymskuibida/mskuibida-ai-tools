@@ -124,7 +124,7 @@ h1 { margin: 0; font-size: 22px; line-height: 1.25; font-weight: 600; }
 .seg button { min-height: 32px; padding: 0 11px; border: 0; background: var(--surface); font-size: 13px; white-space: nowrap; }
 .seg button + button { border-left: 1px solid var(--control); }
 .seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
-#map-search { min-height: 34px; width: 190px; max-width: 100%; padding: 0 10px; border: 1px solid var(--control); border-radius: 8px; background: var(--surface); color: var(--fg); font: inherit; font-size: 13.5px; }
+#map-search { min-height: 34px; width: 160px; max-width: 100%; padding: 0 10px; border: 1px solid var(--control); border-radius: 8px; background: var(--surface); color: var(--fg); font: inherit; font-size: 13.5px; }
 .grow-sp { flex: 1; }
 .pop { position: absolute; top: calc(100% + 6px); z-index: 12; padding: 14px 16px; max-width: min(520px, calc(100vw - 24px)); box-shadow: 0 8px 28px rgba(0, 0, 0, .16); font-size: 13.5px; }
 .pop[hidden] { display: none; }
@@ -143,6 +143,7 @@ kbd { font: 500 11.5px var(--mono); padding: 1px 5px; border: 1px solid var(--co
 /* one badge shape, as on the gate pages: .tag toned by meaning; .rnd takes the colour of the round the thing came in */
 .tag { display: inline-flex; align-items: center; gap: 4px; flex: none; font: 600 11px/1.3 var(--body); padding: 2px 7px; border-radius: 4px; background: var(--low-bg); color: var(--low-fg); white-space: nowrap; }
 .tag.rnd { background: var(--rnd-bg); color: var(--rnd-fg); }
+.tag.rdcmp { font-size: 12px; padding: 4px 10px; border-radius: 15px; }
 .tag.gone { background: var(--rv-del-bg); color: var(--rv-del-fg); }
 .tag.rdy { background: var(--accent); color: var(--on-accent); }
 .tag.ok { background: var(--ok-bg); color: var(--ok-fg); }
@@ -1083,7 +1084,8 @@ var MapView = (function () {
       '<button type="button" class="tog" data-act="groups" aria-expanded="' + !!st.groupsOpen + '" title="Show or hide whole groups of blocks">Groups <span class="n">' + shown + "/" + groups.length + '</span></button>');
     if (graph && R.on) tools.push('<button type="button" class="tog rdy" data-act="ready" aria-pressed="' + !!st.ready + '" title="Only the blocks you could start now: every block they need has landed, and they have not landed themselves. The rest are dimmed.">Ready now <span class="n">' + R.count + "</span></button>");
     if (!graph) { var gn = gapsOf(row).length; tools.push('<button type="button" class="tog" data-act="gaps" aria-pressed="' + !!st.gaps + '"' + (gn ? "" : " disabled") + ' title="' + (gn ? "Only the " + esc(noun(row.rowsTitle || "row", 2).toLowerCase()) + " " + esc(gapWords(row).toLowerCase()) + " (" + gn + ")" : "No gaps: every " + esc((row.rowsTitle || "row").toLowerCase()) + " is covered") + '">Gaps only <span class="n">' + gn + "</span></button>"); }
-    if (d.has) tools.push('<button type="button" class="tog" data-act="changes" aria-pressed="' + !!st.changed + '" title="Only what is new or changed since round ' + esc(d.rev) + ". The rest is " + (graph ? "dimmed" : "left out") + '.">Only changes since r' + esc(d.rev) + "</button>");
+    if (d.has) tools.push('<button type="button" class="tog" data-act="changes" aria-pressed="' + !!st.changed + '" title="Only what is new or changed since round ' + esc(d.rev) + ". The rest is " + (graph ? "dimmed" : "left out") + '.">Only changes</button>');
+    if (d.has && row.revision) tools.push('<span class="tag rnd rdcmp" id="map-round" title="Round ' + esc(row.revision) + " compared with round " + esc(d.rev) + '" aria-label="Round ' + esc(row.revision) + " compared with round " + esc(d.rev) + '">' + (narrow ? "r" + esc(row.revision) + " vs r" + esc(d.rev) : "Round " + esc(row.revision) + " vs " + esc(d.rev)) + "</span>");
     tools.push('<span class="grow-sp"></span>');
     if (graph && !narrow) {
       tools.push('<span class="seg" role="group" aria-label="View: the map as a drawing or as a list"><button type="button" data-view="graph" aria-pressed="' + (view === "graph") + '" title="Draw the map">Graph</button><button type="button" data-view="list" aria-pressed="' + (view === "list") + '" title="The same blocks as a list, grouped by ' + esc((row.layerName || "layer").toLowerCase()) + '">List</button></span>');

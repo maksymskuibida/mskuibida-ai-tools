@@ -2,6 +2,7 @@
 bakery's pre-order app); the bundles are checked with scripts/validate_bundle.py and the maps are built by scripts/map_bundle.py.
 Standard library only."""
 
+import re
 import copy
 import io
 import json
@@ -25,14 +26,14 @@ LAYERS = ["setup", "data", "logic", "logic", "api", "api", "UI", "UI", "tests", 
 
 
 def row(rid, title, label, rev, extra=None):
-    r = {"id": rid, "title": title.rstrip(".")[:150], "label": label, "body": pc.para((rid, title, rev), 2), "refs": []}
+    r = {"id": rid, "title": pc.cut(title.rstrip("."), 150), "label": label, "body": pc.para((rid, title, rev), 2), "refs": []}
     if extra:
         r.update(extra)
     return r
 
 
 def refs(rid, n=2):
-    return [{"label": f"Q{(pc.rnd_of(rid, i) % 6) + 1}", "tip": "Your answer to a question in an earlier stage: " + pc.sentence((rid, i, "tip"))[:80], "target": f"#fd-q{(pc.rnd_of(rid, i) % 6) + 1}"} for i in range(n)]
+    return [{"label": f"Q{(pc.rnd_of(rid, i) % 6) + 1}", "tip": "Your answer to a question in an earlier stage: " + pc.cut(pc.sentence((rid, i, "tip")), 80), "target": f"#fd-q{(pc.rnd_of(rid, i) % 6) + 1}"} for i in range(n)]
 
 
 def suggested(rows):
@@ -47,7 +48,7 @@ def sections_plan(rev):
         """`new`: the section that gets the two rows later rounds add (each such row lives in one section, not five)."""
         out = []
         for i in range(1, n + 1):
-            r = row(f"{prefix}-{i}", pc.sentence((kind_seed, i))[:110], pc.pick(LABELS, kind_seed, i), rev, {"refs": refs(f"{prefix}{i}")})
+            r = row(f"{prefix}-{i}", pc.cut(pc.sentence((kind_seed, i)), 110), pc.pick(LABELS, kind_seed, i), rev, {"refs": refs(f"{prefix}{i}")})
             if pc.rnd_of(kind_seed, i) % 5 == 0 and r["label"] in ("critical", "high"):
                 r["lookFirst"] = True
             out.append(r)
@@ -78,9 +79,9 @@ def steps_plan(rev):
     for n in range(1, 17 + (2 if rev >= 2 else 0)):
         layer = LAYERS[(n - 1) * len(LAYERS) // 17 % len(LAYERS)] if n <= 17 else "UI"
         out.append({"n": n, "title": pc.pick(["Slot rules", "Order endpoint", "Slot calendar", "Stock check", "Baker list query", "Reminder job", "Order page", "List page", "Seed data"], "st", n) + f" {n}",
-                    "layer": layer, "files": 1 + n % 4, "subs": [{"text": pc.sentence(("sub", n, k))[:100]} for k in range(3)],
-                    "implements": [{"label": f"FR{n % 14 + 1}", "tip": pc.sentence(("imp", n))[:80], "target": f"path:aidlc/x/requirements.md#FR{n % 14 + 1}"},
-                                   {"label": f"SR{n % 8 + 1}", "tip": pc.sentence(("imp2", n))[:80], "target": f"path:aidlc/x/functional-spec.md#SR{n % 8 + 1}"}]})
+                    "layer": layer, "files": 1 + n % 4, "subs": [{"text": pc.cut(pc.sentence(("sub", n, k)), 100)} for k in range(3)],
+                    "implements": [{"label": f"FR{n % 14 + 1}", "tip": pc.cut(pc.sentence(("imp", n)), 80), "target": f"path:aidlc/x/requirements.md#FR{n % 14 + 1}"},
+                                   {"label": f"SR{n % 8 + 1}", "tip": pc.cut(pc.sentence(("imp2", n)), 80), "target": f"path:aidlc/x/functional-spec.md#SR{n % 8 + 1}"}]})
     layer_order = {}
     for st in out:  # the plan is in build order: a layer's place is where it first appears
         layer_order.setdefault(st["layer"], len(layer_order))
@@ -96,7 +97,7 @@ def answers():
     groups = []
     for key, stage, title in (("fd-answers", "functional-design", "Functional Design"), ("nfr-answers", "nfr-requirements", "NFR Requirements"), ("code-answers", "code-generation", "Code Generation")):
         groups.append({"key": key, "stage": stage, "title": title, "file": f"aidlc/x/{stage}-questions.md",
-                       "questions": [{"id": f"Q{i}", "anchor": f"fd-q{i}" if key == "fd-answers" else f"{key[:3]}-q{i}", "text": pc.sentence((key, i))[:100], "answer": pc.pick("ABCD", key, i), "proposed": pc.pick("ABCD", key, i, "p")} for i in range(1, 7)]})
+                       "questions": [{"id": f"Q{i}", "anchor": f"fd-q{i}" if key == "fd-answers" else f"{key[:3]}-q{i}", "text": pc.cut(pc.sentence((key, i)), 100), "answer": pc.pick("ABCD", key, i), "proposed": pc.pick("ABCD", key, i, "p")} for i in range(1, 7)]})
     return groups
 
 
@@ -126,7 +127,7 @@ def plan_bundle(rev):
 
 def end_bundle(rev, tested=False):
     def rows(prefix, n, seed, weight=False):
-        return [row(f"{prefix}-{i}", pc.sentence((seed, i))[:110], pc.pick(["core", "main", "main", "minor"] if weight else LABELS, seed, i), rev) for i in range(1, n + 1)]
+        return [row(f"{prefix}-{i}", pc.cut(pc.sentence((seed, i)), 110), pc.pick(["core", "main", "main", "minor"] if weight else LABELS, seed, i), rev) for i in range(1, n + 1)]
     changes = rows("D", 3, "dev")
     unverified, verified, failed = rows("V", 8, "unv"), rows("V", 6, "ver"), rows("V", 3, "fail")
     for i, r in enumerate(verified):
@@ -148,7 +149,7 @@ def end_bundle(rev, tested=False):
                  {"key": "failed", "kind": "failed", "title": "Failed, left as known", "short": "Failed", "hint": "Failed in your test plan, accepted as known", "refsLabel": "For", "rows": failed}]
     else:
         secs.append({"key": "unverified", "kind": "unverified", "title": "Not verified yet", "short": "Not verified", "hint": "Left for Build and Test or CI", "refsLabel": "For", "rows": unverified})
-    nodes = [{"id": f"n{i}", "title": r["title"][:30], "weight": r["label"], "target": f"#{r['id']}"} for i, r in enumerate(built[:8])]
+    nodes = [{"id": f"n{i}", "title": piece_name(r["title"]), "weight": r["label"], "target": f"#{r['id']}"} for i, r in enumerate(built[:8])]
     secs.append({"key": "built", "kind": "built", "title": "What was built", "short": "Built", "hint": "One line per piece that matters", "refsLabel": "Uses", "rows": built,
                  "map": {"nodes": nodes, "edges": [{"from": f"n{i}", "to": f"n{i + 1}"} for i in range(len(nodes) - 1)]}})
     b = {"schema": "aidlc-gate-bundle/1", "page": "unit-end", "id": f"{INTENT}-{UNIT}-unit-end-v{rev}-2026010{rev}T1000", "createdAt": f"2026-01-0{rev}T10:00:00Z",
@@ -204,13 +205,25 @@ def bundles():
     ]
 
 
+def piece_name(title):
+    """A short whole name for a built piece (the contract allows 40 characters): the last clause of the sentence, cut at a word."""
+    name = re.split(r",\s*", title.rstrip("."))[-1]
+    name = name[:1].upper() + name[1:]
+    while len(name) > 40:
+        name = name.rsplit(" ", 1)[0]
+    words = name.rstrip(" ,;:").split(" ")
+    while len(words) > 2 and words[-1].lower() in ("to", "the", "a", "an", "is", "of", "for", "that", "move", "and", "it", "are"):
+        words.pop()
+    return " ".join(words)
+
+
 def test_plan_row():
     plan = {"schema": "aidlc-test-plan/1", "id": f"{INTENT}-{UNIT}-test-v1-20260101T1100", "intent": INTENT, "unit": UNIT, "bundle": end_bundle(1)["id"], "title": "Unit u2-pickup-slots: test plan",
-            "now": [f"V-{i}" for i in range(1, 7)], "allByDefault": False, "rows": {f"V-{i}": pc.sentence(("unv", i))[:110].rstrip(".") for i in range(1, 9)},
+            "now": [f"V-{i}" for i in range(1, 7)], "allByDefault": False, "rows": {f"V-{i}": pc.cut(pc.sentence(("unv", i)), 110).rstrip(".") for i in range(1, 9)},
             "sections": [{"key": "A", "title": "Run the app", "agent": "Start the dev server and seed three days of orders.",
-                          "steps": [{"id": f"A.{n}", "do": pc.sentence(("do", n)), "expect": pc.sentence(("ex", n)), "criteria": [pc.sentence(("c", n))[:80], pc.sentence(("c2", n))[:80]], "verifies": [f"V-{n % 6 + 1}"]} for n in range(1, 5)]},
+                          "steps": [{"id": f"A.{n}", "do": pc.sentence(("do", n)), "expect": pc.sentence(("ex", n)), "criteria": [pc.cut(pc.sentence(("c", n)), 80), pc.cut(pc.sentence(("c2", n)), 80)], "verifies": [f"V-{n % 6 + 1}"]} for n in range(1, 5)]},
                          {"key": "B", "title": "Reset the data", "agent": "Wipe and seed the test database, then restart the app.",
-                          "steps": [{"id": f"B.{n}", "do": pc.sentence(("dob", n)), "expect": pc.sentence(("exb", n)), "criteria": [pc.sentence(("cb", n))[:80]], "verifies": [f"V-{n + 3}"]} for n in range(1, 4)]}]}
+                          "steps": [{"id": f"B.{n}", "do": pc.sentence(("dob", n)), "expect": pc.sentence(("exb", n)), "criteria": [pc.cut(pc.sentence(("cb", n)), 80)], "verifies": [f"V-{n + 3}"]} for n in range(1, 4)]}]}
     return plan["id"], {"plan": plan, "intent": INTENT, "unit": UNIT, "title": plan["title"], "createdAt": "2026-01-01T11:00:00Z", "status": "open", "agentDone": ["A"],
                         "results": {"A.1": {"result": "pass", "note": "", "at": "2026-01-01T11:10:00Z"}, "A.2": {"result": "fail", "note": "The full slot stays clickable on a phone.", "at": "2026-01-01T11:12:00Z"}}}
 

@@ -162,7 +162,8 @@ h2 .hint { margin-left: 8px; font-weight: 400; font-size: 13px; color: var(--mut
 .counts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .lc { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
 .lc b { font-family: var(--mono); font-weight: 500; }
-.nsettled { opacity: .55; } .nsettled:hover, .nsettled:focus-within { opacity: 1; }
+.nsettled { opacity: .55; }
+.nsdone { flex: none; font: 600 11px/1.3 var(--body, inherit); padding: 2px 7px; border-radius: 4px; background: var(--ok-bg); color: var(--ok-fg); white-space: nowrap; } .nsettled:hover, .nsettled:focus-within { opacity: 1; }
 .pill .n { margin-left: 6px; font: 12px var(--mono); opacity: .7; }
 .ready { display: inline-flex; align-items: center; gap: 2px; font-size: 13px; color: var(--fg-2); }
 .ready .sep { color: var(--muted); }
@@ -254,13 +255,13 @@ a.aidlc-id:hover { color: var(--accent-strong); }
 /* the map of how the pieces connect */
 .mapwrap { padding: 14px 16px; border-bottom: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 10px; }
 .mapwrap > span { font-size: 13px; color: var(--muted); }
-.mapscroll { overflow-x: auto; }
-.map { position: relative; }
-.map svg { position: absolute; inset: 0; overflow: visible; }
-.node { position: absolute; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--control); background: var(--surface); color: var(--fg); text-decoration: none; overflow: hidden; }
-.node b { font-weight: 500; font-size: 13px; line-height: 1.3; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.node small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.node small { font-size: 12px; color: var(--muted); line-height: 1.3; }
+.mapflow { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 8px; }
+.mapcol { display: flex; flex-direction: column; gap: 8px; flex: 0 1 200px; min-width: 150px; }
+.mapar { align-self: center; color: var(--muted); font-size: 16px; flex: none; }
+@media (max-width: 640px) { .mapar { display: none; } .mapcol { flex: 1 1 100%; } }
+.node { display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--control); background: var(--surface); color: var(--fg); text-decoration: none; min-width: 0; }
+.node b { font-weight: 500; font-size: 13px; line-height: 1.3; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; overflow-wrap: break-word; }
+.node small { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; font-size: 12px; color: var(--muted); line-height: 1.3; }
 .node.core { background: var(--core-bg); color: var(--core-fg); border-color: var(--core-bg); } .node.core small { color: var(--core-fg); opacity: .8; }
 .node.minor { background: var(--raised); }
 .node.existing { border-style: dashed; background: transparent; }
@@ -388,7 +389,12 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
 .vz-title { font-size: 12px; font-weight: 600; color: var(--fg-2); margin: 0 0 6px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 .vz-title .hint { font-weight: 400; font-size: 12px; }
 .vz-sr, .vz .sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; list-style: none; }
-.vz-scroll { overflow: auto; max-width: 100%; max-height: 70vh; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 6px; }
+.vz-scroll { overflow: auto; max-width: 100%; max-height: 70vh; border: 1px solid var(--line); border-radius: 8px; padding: 6px;
+  /* wider than the frame: a fade on the edge that has more, and a scrollbar that stays visible */
+  background: linear-gradient(to right, var(--surface), var(--surface)) left center / 28px 100% no-repeat local, linear-gradient(to left, var(--surface), var(--surface)) right center / 28px 100% no-repeat local,
+    linear-gradient(to right, color-mix(in srgb, var(--fg, #000) 16%, transparent), transparent) left center / 18px 100% no-repeat scroll, linear-gradient(to left, color-mix(in srgb, var(--fg, #000) 16%, transparent), transparent) right center / 18px 100% no-repeat scroll, var(--surface); }
+.vz-scroll::-webkit-scrollbar { height: 10px; width: 10px; } .vz-scroll::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--muted, #888) 70%, transparent); border-radius: 6px; border: 2px solid var(--surface); } .vz-scroll::-webkit-scrollbar-track { background: var(--line-soft); border-radius: 6px; }
+.vz-cue { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
 .vz-flat { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 10px 12px; }
 .vz-svg { display: block; max-width: none; font: 500 12px var(--body); }
 .vz-svg text { fill: var(--fg); }
@@ -553,8 +559,11 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
 .bmb { height: 30px; min-height: 30px; padding: 0 11px; display: inline-flex; align-items: center; gap: 6px; border-radius: 15px; white-space: nowrap; border: 1px solid var(--control); background: var(--surface); color: var(--fg); font-weight: 500; }
 .bmb:hover { border-color: var(--accent); }
 .bmb .n { font: 500 11px var(--mono); color: var(--muted); }
+.bmb .rl-s, .bmb .vl-s { display: none; }
+.bmb.rndb { color: var(--rvc, inherit); border-color: color-mix(in srgb, var(--rvc, var(--line)) 45%, var(--control, var(--line))); font-weight: 600; }
+.bpop .keys { display: grid; grid-template-columns: 64px 1fr 1fr; gap: 4px 12px; align-items: center; font-size: 12px; color: var(--fg-2); } .bpop .keys kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; background: var(--surface); }
 .bmb[aria-expanded="true"] { background: var(--accent-soft); border-color: var(--accent); }
-.bpop { position: absolute; right: 0; top: calc(100% + 8px); z-index: 20; min-width: 240px; max-width: min(520px, calc(100vw - 32px)); display: grid; gap: 10px; padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 28px rgba(23, 26, 33, .18); }
+.bpop { position: absolute; right: 0; top: calc(100% + 8px); z-index: 20; min-width: 330px; max-width: min(520px, calc(100vw - 32px)); display: grid; gap: 10px; padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 28px rgba(23, 26, 33, .18); }
 .bmrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .bml { font-size: 12px; font-weight: 600; color: var(--fg-2); min-width: 64px; }
 .bmh { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--fg-2); }
@@ -581,6 +590,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
   .bmenus { gap: 4px; }
   .bmb { padding: 0 9px; height: 26px; min-height: 26px; font-size: 12.5px; }
   .bmb .n { display: none; }
+  .bmb .rl-l, .bmb .vl-l { display: none; } .bmb .rl-s, .bmb .vl-s { display: inline; }
   .bm { position: static; }  /* the menu opens under the bar, across its width */
   .bpop { position: absolute; left: 0; right: 0; top: calc(100% + 8px); max-width: none; }
   /* a row's sentence keeps its width; the tags wrap under it */
@@ -1632,9 +1642,22 @@ var GateViz = (function () {
     return '<nav class="fo-side" data-rv-skip aria-label="Headings of this file"><p class="fo-h">In this file</p><ol>' + li + '</ol></nav><details class="fo-strip" data-rv-skip><summary>In this file<span class="n">' + items.length + ' headings</span></summary><ol>' + li + "</ol></details>";
   }
 
+  /* a diagram wider than its frame scrolls inside the frame, and says so: a note under it while it overflows (the fade and the scrollbar are the CSS's) */
+  function cue(root) {
+    [].forEach.call(root.querySelectorAll(".vz-scroll"), function (s) {
+      var more = s.scrollWidth > s.clientWidth + 2, c = s.nextElementSibling && s.nextElementSibling.classList.contains("vz-cue") ? s.nextElementSibling : null;
+      if (more && !c) { c = document.createElement("p"); c.className = "vz-cue"; c.textContent = "Wider than the page: scroll sideways for the rest."; s.parentNode.insertBefore(c, s.nextSibling); }
+      else if (!more && c) c.remove();
+      s.classList.toggle("vz-more", more);
+    });
+  }
+
   /* hover or focus a box: it and what it is linked to stand out, the rest steps back */
   function bind(root) {
     if (!root || root.__vz) return; root.__vz = true;
+    var queued = false, again = function () { if (queued) return; queued = true; (window.requestAnimationFrame || setTimeout)(function () { queued = false; cue(root); }); };
+    again(); window.addEventListener("resize", again); root.addEventListener("toggle", again, true); root.addEventListener("click", again);
+    if (window.MutationObserver) new MutationObserver(again).observe(root, { childList: true, subtree: true });
     function on(e) {
       var n = e.target.closest && e.target.closest(".vz-node, .vz-item"); if (!n) return;
       var fig = n.closest(".vz"), id = n.getAttribute("data-id"), rel = {}; rel[id] = 1;
@@ -1665,7 +1688,7 @@ var GateViz = (function () {
     });
   }
 
-  return { diagram: diagram, heat: heat, funnel: funnel, timeline: timeline, lanes: lanes, dots: dots, outline: outline, bind: bind, keysOf: keysOf, esc: esc };
+  return { diagram: diagram, heat: heat, funnel: funnel, timeline: timeline, lanes: lanes, dots: dots, outline: outline, bind: bind, cue: cue, keysOf: keysOf, esc: esc };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GateViz;
 /* gate-viz.js:end */
@@ -1747,7 +1770,7 @@ var GateView = (function () {
     readKey = readKey || key;
     var was = st.picks[key] === val;
     st.picks[key] = was ? "" : val;
-    if (was || !item || (val !== "now" && val !== "later")) return false;
+    if (was || !item || (val !== "now" && val !== "later" && val !== "do" && val !== "leave")) return false;
     var open = isOpen(st, key, isRead(st, readKey, item));
     st.read[readKey] = Math.max(st.read[readKey] || 0, revOf(item));
     if (open) st.open[key] = true;
@@ -1920,11 +1943,12 @@ var GateView = (function () {
       (r.where ? '<span class="where' + (r.whereIsPath ? " path" : "") + '" title="' + esc(r.where) + '">' + esc(r.where) + "</span>" : "") +
       (vs ? '<span class="tag vst" style="' + tone(vs[1]) + '">' + esc(vs[0]) + "</span>" : "") +
       ((r._state || sec.kind) === "unverified" ? testPick(st, key) : "") + (r.suggestion ? suggestPick(st, key) : "") +
+      (st.filter === "needs" && !(st.needsNow || {})[rowKey(r)] ? '<span class="nsdone" title="You settled this just now. It stays here until you leave this view, and the number no longer counts it.">Done</span>' : "") +
       '<span class="lab" style="' + tone(LABEL_TONE[r.label] || "low") + '">' + esc(r.label) + "</span>" +
       '<button type="button" class="dot" data-act="read" data-key="' + esc(key) + '" aria-label="Mark ' + esc(r.id) + (read ? " unread" : " read") + '" title="Mark ' + (read ? "unread" : "read") + '"><i></i></button></div>';
     var body = "";
     if (open) {
-      var refs = (r.refs || []).map(function (x) { return refHtml(x, bundle); }).join("");
+      var seenRef = {}, refs = (r.refs || []).filter(function (x) { var k = x.label + "\u0000" + x.target; if (seenRef[k]) return false; seenRef[k] = 1; return true; }).map(function (x) { return refHtml(x, bundle); }).join("");
       var cov = r.coveredBy && !r.coveredBy.link && !r.coveredBy.acceptanceReason ? '<span class="covered" style="' + tone(r.coveredBy.settled ? "ok" : "warn") + '">' + esc(r.coveredBy.text) + "</span>" : "";
       body = '<div class="rowbody">' +
         (r.rev && r.revNote && r.revNote !== st.commonNote ? '<p class="revnote" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">' + esc(r.revNote) + "</p>" : "") +
@@ -1955,33 +1979,29 @@ var GateView = (function () {
       }).join("");
   }
 
+  /* How the pieces connect: the pieces in columns (what feeds what, left to right), the columns wrapping onto lines, never a sideways scroll.
+     A piece's label is whole, or cut at a word with an ellipsis and its title; fewer than three pieces is a list, not a chain, so nothing is drawn. */
   function mapHtml(m) {
-    var nodes = m.nodes || [], edges = m.edges || [], layer = {}, i, changed = true, guard = 0;
+    var nodes = m.nodes || [], edges = m.edges || [], layer = {}, changed = true, guard = 0;
+    if (nodes.length < 3) return "";
     nodes.forEach(function (n) { layer[n.id] = 0; });
     while (changed && guard++ < 50) {
       changed = false;
       edges.forEach(function (e) { if (layer[e.from] != null && layer[e.to] != null && layer[e.to] < layer[e.from] + 1 && layer[e.from] < nodes.length) { layer[e.to] = layer[e.from] + 1; changed = true; } });
     }
-    var cols = {}, W = 196, H = 64, GX = 56, GY = 18;
-    nodes.forEach(function (n) { (cols[layer[n.id]] = cols[layer[n.id]] || []).push(n); });
-    var pos = {}, maxRows = 0, ncols = 0;
-    Object.keys(cols).forEach(function (c) { cols[c].forEach(function (n, r) { pos[n.id] = { x: +c * (W + GX), y: r * (H + GY) }; }); maxRows = Math.max(maxRows, cols[c].length); ncols = Math.max(ncols, +c + 1); });
-    var width = ncols * W + (ncols - 1) * GX, height = maxRows * H + (maxRows - 1) * GY;
-    var lines = edges.map(function (e) {
-      var a = pos[e.from], b = pos[e.to]; if (!a || !b) return "";
-      var x1 = a.x + W, y1 = a.y + H / 2, x2 = b.x, y2 = b.y + H / 2;
-      if (b.x <= a.x) { x1 = a.x + W / 2; y1 = a.y + H; x2 = b.x + W / 2; y2 = b.y; }
-      var mx = (x1 + x2) / 2;
-      var d = b.x > a.x ? "M" + x1 + " " + y1 + " C" + mx + " " + y1 + " " + mx + " " + y2 + " " + (x2 - 6) + " " + y2 : "M" + x1 + " " + y1 + " L" + x2 + " " + (y2 - 6);
-      return '<path class="edge" d="' + d + '" marker-end="url(#arrow)"></path>' + (e.label ? '<text class="edgelabel" x="' + (mx) + '" y="' + ((y1 + y2) / 2 - 6) + '" text-anchor="middle">' + esc(e.label) + "</text>" : "");
+    var cols = [], byId = {};
+    nodes.forEach(function (n) { byId[n.id] = n; (cols[layer[n.id]] = cols[layer[n.id]] || []).push(n); });
+    var out = {};
+    edges.forEach(function (e) { if (byId[e.from] && byId[e.to]) (out[e.from] = out[e.from] || []).push(byId[e.to].title + (e.label ? " (" + e.label + ")" : "")); });
+    var flow = cols.filter(Boolean).map(function (col, i) {
+      var boxes = col.map(function (n) {
+        var tag = n.target ? "a" : "div", nt = n.target ? safeHref(n.target) : "";
+        var tip = n.title + (n.note ? " - " + n.note : "") + (out[n.id] ? ". Leads to: " + out[n.id].join(", ") : "");
+        return "<" + tag + ' class="node ' + esc(n.weight) + '"' + (n.target ? ' href="' + esc(nt) + '" data-jump="' + esc(nt.slice(1)) + '"' : "") + ' title="' + esc(tip) + '"><b>' + esc(n.title) + "</b>" + (n.note ? "<small>" + esc(n.note) + "</small>" : "") + "</" + tag + ">";
+      }).join("");
+      return (i ? '<span class="mapar" aria-hidden="true">&rarr;</span>' : "") + '<div class="mapcol">' + boxes + "</div>";
     }).join("");
-    var boxes = nodes.map(function (n) {
-      var p = pos[n.id], tag = n.target ? "a" : "div";
-      var nt = n.target ? safeHref(n.target) : "";
-      return "<" + tag + ' class="node ' + esc(n.weight) + '"' + (n.target ? ' href="' + esc(nt) + '" data-jump="' + esc(nt.slice(1)) + '"' : "") + ' style="left:' + p.x + "px;top:" + p.y + "px;width:" + W + "px;height:" + H + 'px" title="' + esc(n.title + (n.note ? " - " + n.note : "")) + '"><b>' + esc(n.title) + "</b>" + (n.note ? "<small>" + esc(n.note) + "</small>" : "") + "</" + tag + ">";
-    }).join("");
-    return '<div class="mapwrap"><span>' + esc(m.caption || "How the pieces connect: dark boxes matter most; dashed ones already existed.") + (width > 640 ? " Scroll sideways for the rest." : "") + '</span><div class="mapscroll"><div class="map" style="width:' + width + "px;height:" + height + 'px">' +
-      '<svg width="' + width + '" height="' + height + '" aria-hidden="true"><defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--muted)"></path></marker></defs>' + lines + "</svg>" + boxes + "</div></div></div>";
+    return '<div class="mapwrap"><span>' + esc(m.caption || "How the pieces connect: dark boxes matter most; dashed ones already existed.") + '</span><div class="mapflow">' + flow + "</div></div>";
   }
 
   /* The verification funnel: the points the code's own tests cover, then the ones you verified, the ones still not verified and
@@ -2100,8 +2120,11 @@ var GateView = (function () {
     var groups = [
       { id: "suggestions", title: "Suggestion picks", rows: w.filter(function (x) { return !x.isStep && x.item.suggestion && (pk[x.anchor] === "do" || pk[x.anchor] === "leave"); }).map(function (x) { return [x, pk[x.anchor] === "do" ? "Do it" : "Leave it"]; }) },
       { id: "tests", title: "Test picks", rows: w.filter(function (x) { return !x.isStep && (x.item._state || x.kind) === "unverified" && (pk[x.anchor] === "now" || pk[x.anchor] === "later"); }).map(function (x) { return [x, pk[x.anchor] === "now" ? "Test now" : "Later"]; }) },
-      { id: "notes", title: "Notes", rows: w.filter(function (x) { return (nt[x.anchor] || "").trim(); }).map(function (x) { return [x, ""]; }) }
-    ].filter(function (g) { return g.rows.length; });
+      { id: "notes", title: "Notes", rows: [] }
+    ];
+    var picked = {}; groups.forEach(function (g) { g.rows.forEach(function (p) { picked[p[0].anchor] = 1; }); });
+    groups[2].rows = w.filter(function (x) { return (nt[x.anchor] || "").trim() && !picked[x.anchor]; }).map(function (x) { return [x, ""]; });
+    groups = groups.filter(function (g) { return g.rows.length; });
     var left = needs(bundle, st).filter(function (n) { return n.decision; }).length;
     return '<section class="card answer" id="answer" data-sec="answer"><div class="sechead"><h2><span>Your answer</span> <span class="hint">what will reach the agent with your answer in chat</span></h2></div><div class="secbody answerbody">' +
       '<p class="answernote">The decision itself, approve or request changes, is given in chat. Your picks and notes below reach the agent when you answer there; this block only lists them and stores nothing.</p>' +
@@ -2177,23 +2200,24 @@ var GateView = (function () {
     var nd = needs(bundle, st);
     var lookN = 0, topN = 0;
     sectionsOf(bundle).forEach(function (s) { (s.rows || []).forEach(function (r) { if (r.lookFirst) lookN++; if (r.label === "critical" || r.label === "high" || r.label === "core") topN++; }); });
-    var filters = [["all", "All", null, "Every block of the page"], ["needs", "Needs you", nd.length, "Only what waits on you: a decision with no pick, or a row not handled that you have not read"], ["unread", "Unread", items.length - read, "Only the rows you have not read yet (key u goes to the next)"]]
+    var filters = [["all", "All", null, "Every block of the page"], ["needs", "Needs you", nd.length, "Only what waits on you: a decision with no pick, or a row not handled that you have not read. A row you just settled stays in place marked Done until you leave this view; the number counts only what still waits"], ["unread", "Unread", items.length - read, "Only the rows you have not read yet (key u goes to the next)"]]
       .concat(rv && rv.n ? [["changed", "Changed", rv.n, "Only what changed, is new or was removed since round " + int(rv.since) + " (" + rv.changed + " changed, " + rv.added + " new, " + rv.removed + " removed)"]] : []);
     var pills = filters.map(function (f) { return '<button type="button" class="pill" data-act="filter" data-val="' + f[0] + '" aria-pressed="' + (st.filter === f[0]) + '" title="' + esc(f[3]) + '">' + f[1] + (f[2] != null ? '<b class="n">' + f[2] + "</b>" : "") + "</button>"; }).join("");
     var pop = function (name, body) { return '<div class="bpop" id="m-' + name + '" role="group" aria-label="' + name + '"' + (on === name ? "" : " hidden") + ">" + body + "</div>"; };
-    var mb = function (name, label, tip, extra) { return '<button type="button" class="bmb" data-act="menu" data-val="' + name + '" aria-haspopup="true" aria-expanded="' + (on === name) + '" aria-controls="m-' + name + '" title="' + esc(tip) + '">' + label + (extra || "") + "</button>"; };
-    var rounds = rv ? '<div class="bm">' + mb("rounds", "Rounds", "The rounds of this page and what each one changed", '<span class="n">v' + int(rv.cur) + "</span>") +
+    var mb = function (name, label, tip, extra, cls, aria) { return '<button type="button" class="bmb' + (cls ? " " + cls : "") + '" data-act="menu" data-val="' + name + '" aria-haspopup="true" aria-expanded="' + (on === name) + '" aria-controls="m-' + name + '"' + (aria ? ' aria-label="' + esc(aria) + '"' : "") + ' title="' + esc(tip) + '">' + label + (extra || "") + "</button>"; };
+    var rounds = rv ? '<div class="bm">' + mb("rounds", '<span class="rl-l">Round ' + int(rv.cur) + " vs " + int(rv.since) + '</span><span class="rl-s">r' + int(rv.cur) + " vs r" + int(rv.since) + "</span>", "Rounds: round " + int(rv.cur) + " compared with round " + int(rv.since) + ". Open for the rounds of this page and what each one changed", "", "rndb rv-t" + revTone(int(rv.cur)).slice(1), "Rounds: round " + int(rv.cur) + " compared with round " + int(rv.since)) +
       pop("rounds", '<p class="bmh">What each round changed<span class="hint">press a round to show only its colour</span></p><span id="rvlegend">' + (st.rvTimeline || "") + "</span>" +
         ((st.rvPick || []).length ? '<label class="rvpick"><span>Compared with</span><select data-rvbase aria-label="The earlier round to compare with">' + st.rvPick.map(function (o) { return '<option value="' + esc(o.id) + '"' + (o.on ? " selected" : "") + ">" + esc(o.label) + "</option>"; }).join("") + "</select></label>" : "") + '<p class="bmh hint">Round ' + int(rv.cur) + " against round " + int(rv.since) + ": " + rv.changed + " changed · " + rv.added + " new · " + rv.removed + " removed</p>") + "</div>" : "";
     var sections = keys.length ? '<div class="bm">' + mb("sections", "Sections", "Jump to a block of the page") + pop("sections", '<p class="bmh">Jump to<span class="hint">blocks are ordered by what costs most if it is wrong, so the order can change from round to round; the number is rows not read yet of the total</span></p><nav class="chips" aria-label="Sections">' + keys.map(function (k) { return chipFor(st, bundle, k); }).join("") + "</nav>") + "</div>" : "";
-    var view = '<div class="bm">' + mb("view", "View", "Detail, changes, extra filters and the bulk actions") +
+    var view = '<div class="bm">' + mb("view", '<span class="vl-l">View and actions</span><span class="vl-s">View</span>', "View and actions: detail, changes, extra filters, Expand all, Collapse all, Mark all read, the keyboard shortcuts (?)", "", "", "View and actions") +
       pop("view", '<div class="bmrow"><span class="bml">Detail</span><div class="seg" role="group" aria-label="Detail"><button type="button" data-act="mode" data-val="summary" aria-pressed="' + (st.mode === "summary") + '" title="One line per row; open a row to read it and write a note">Summary</button><button type="button" data-act="mode" data-val="full" aria-pressed="' + (st.mode === "full") + '" title="Every row open, with its note field">Full</button></div></div>' +
         (rv ? '<div class="bmrow"><span class="bml">Changes</span><span class="seg rvseg" role="group" aria-label="How the changes show"><button type="button" data-rvview="show" aria-pressed="' + (st.rvShow === true) + '" title="Mark what changed: words added are highlighted, words removed struck">Changes</button><button type="button" data-rvview="clean" aria-pressed="' + (st.rvShow !== true) + '" title="The page as it is now, each round&#39;s changes in that round&#39;s colour">Clean</button></span>' + (st.rvShow === true ? '<span class="rvnav"><button type="button" class="btn" data-rvstep="-1" aria-label="Previous change" title="Previous change (k)">↑</button><span class="num" id="rvpos">' + (st.rvPos || "–") + '</span><button type="button" class="btn" data-rvstep="1" aria-label="Next change" title="Next change (j)">↓</button></span>' : "") + "</div>" : "") +
         (lookN || topN ? '<div class="bmrow"><span class="bml">Only</span>' +
           (lookN ? '<button type="button" class="pill" data-act="filter" data-val="look" aria-pressed="' + (st.filter === "look") + '" title="Rows the agent marked to look at first">Look first<b class="n">' + lookN + "</b></button>" : "") +
           (topN ? '<button type="button" class="pill" data-act="filter" data-val="top" aria-pressed="' + (st.filter === "top") + '" title="' + (unitEnd ? "Rows labelled high or core" : "Rows labelled high or critical") + '">' + (unitEnd ? "High and core" : "High and critical") + '<b class="n">' + topN + "</b></button>" : "") + "</div>" : "") +
-        '<div class="bmrow"><button type="button" class="btn" data-act="expand" title="Open every section and row">Expand all</button><button type="button" class="btn" data-act="collapse" title="Close every section and row">Collapse all</button></div>' +
-        '<div class="bmrow"><button type="button" class="btn" data-act="allread" title="Mark every row read (a decision still waits for its pick)">Mark all read</button></div>') + "</div>";
+        '<div class="bmrow"><span class="bml">Actions</span><button type="button" class="btn" data-act="expand" title="Open every section and row">Expand all</button><button type="button" class="btn" data-act="collapse" title="Close every section and row">Collapse all</button></div>' +
+        '<div class="bmrow"><span class="bml"></span><button type="button" class="btn" data-act="allread" title="Mark every row read (a decision still waits for its pick)">Mark all read</button></div>' +
+        '<div class="bmrow keys"><span class="bml">Keys</span><span><kbd>n</kbd> next decision</span><span><kbd>u</kbd> next unread</span>' + (rv ? "<span><kbd>j</kbd> <kbd>k</kbd> next, previous change</span>" : "") + "<span><kbd>?</kbd> this menu</span><span><kbd>Esc</kbd> closes it</span></div>") + "</div>";
     return '<div class="bar" id="bar"><div class="barrow"><div class="filters" role="group" aria-label="Show">' + pills + "</div>" + readyHtml(nd, items.length - read) + '<div class="bmenus">' + rounds + sections + view + "</div></div></div>";
   }
 
@@ -2473,6 +2497,7 @@ if (typeof module !== "undefined") module.exports = GateView;
   document.addEventListener("keydown", function (e) {
     if (e.metaKey || e.ctrlKey || e.altKey || !view.st || !view.bundle || (e.target.closest && e.target.closest("textarea, input, select, [contenteditable]"))) return;
     if (e.key === "n" || e.key === "u") { e.preventDefault(); goNext(e.key); }
+    else if (e.key === "?") { e.preventDefault(); view.st.menu = view.st.menu === "view" ? "" : "view"; paint(); }
   });
   window.addEventListener("resize", barHeight);
   /* every id on the page: a link with a tooltip, by the shared AidlcIds */
@@ -2552,6 +2577,10 @@ if (typeof module !== "undefined") module.exports = GateView;
       var node = document.getElementById(x.anchor); if (!node) return;
       node.classList.add(x.t === "new" ? "rv-new" : "rv-chg", "rv-stop");
       var head = node.querySelector(".rowhead"), span = document.createElement("span"), tagged = head && head.querySelector(".rvb");
+      if (tagged && it.rev) {  /* "v3 changed" on a row that did not exist in the round compared with is new since then: the tag says what the banner counts */
+        tagged.textContent = "v" + Number(it.rev) + " " + x.t;
+        tagged.title = (x.t === "new" ? "New since round " : "Changed since round ") + Number((view.base.row.bundle.header || {}).revision || 1) + (Number(it.rev) !== Number((view.base.row.bundle.header || {}).revision || 1) ? ", last touched in round " + Number(it.rev) : "");
+      }
       span.className = "rv-tags"; span.setAttribute("data-rv-skip", ""); span.innerHTML = (tagged ? "" : rvTagHtml(x.t, cur)) + (show ? rvCount(c) : "");
       if (head && span.innerHTML) head.insertBefore(span, head.querySelector(".lab, .layer, .dot"));
       if (!show || x.t !== "changed") return;
