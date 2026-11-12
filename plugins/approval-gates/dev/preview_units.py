@@ -192,6 +192,11 @@ def test_plan_row():
 
 # ---------------------------------------------------------------- maps
 
+def phrase(seed):
+    """A short whole name for a Unit (never a sentence cut in the middle)."""
+    return f"{pc.pick(pc.TOPICS, seed, 't').capitalize()} for {pc.pick(pc.LOAVES, seed, 'l')}"
+
+
 def map_project(tmp, rev):
     """A bakery project with 50 Units, 24 components and what the maps read; rev 2 adds Units, changes some and lands more."""
     units = [(f"u{i}-{pc.pick(['orders', 'slots', 'stock', 'list', 'mail', 'pay', 'stamps', 'bake'], i, 'u')}", f"U{i}") for i in range(1, 51 + (3 if rev >= 2 else 0))]
@@ -207,9 +212,15 @@ def map_project(tmp, rev):
     put(os.path.join(project, "aidlc", "active-space"), "default\n")
     put(os.path.join(root, "..", "active-intent"), INTENT + "\n")
     base = os.path.join(root, "inception", "units-generation")
-    rows = "".join(f"| {uid} | {slug} | {pc.sentence((slug, 'name'))[:46].rstrip('.')} | {pc.pick(['service', 'ui'], slug)} | {pc.pick([1, 2, 3, 5, 8], slug)} | {1 + i * 7 // len(units)} |\n" for i, (slug, uid) in enumerate(units))
+    rows = "".join(f"| {uid} | {slug} | {phrase((slug, 'name'))} | {pc.pick(['service', 'ui'], slug)} | {pc.pick([1, 2, 3, 5, 8], slug)} | {1 + i * 7 // len(units)} |\n" for i, (slug, uid) in enumerate(units))
     put(os.path.join(base, "unit-of-work.md"), "# Units of Work\n\n## Units\n\n| Unit ID | Dir | Unit | Kind | Points | Wave |\n|---|---|---|---|---|---|\n" + rows)
-    dep = "".join(f"  - name: {slug}\n    kind: {pc.pick(['service', 'ui'], slug)}\n    depends_on: [{', '.join(units[j][0] for j in sorted({max(0, i - 1 - pc.rnd_of(slug, k) % 4) for k in range(1 + i % 3)} - {i}) if i)}]\n" for i, (slug, _u) in enumerate(units))
+    def needs_of(i, slug):
+        if not i:
+            return set()
+        if i >= 26 and i % 4 == 1:  # a few later Units rest only on work that has landed: they are ready to start
+            return {pc.rnd_of(slug, "early") % 20}
+        return {max(0, i - 1 - pc.rnd_of(slug, k) % 4) for k in range(1 + i % 3)} - {i}
+    dep = "".join(f"  - name: {slug}\n    kind: {pc.pick(['service', 'ui'], slug)}\n    depends_on: [{', '.join(units[j][0] for j in sorted(needs_of(i, slug)))}]\n" for i, (slug, _u) in enumerate(units))
     put(os.path.join(base, "unit-of-work-dependency.md"), "# Unit Dependencies\n\n```yaml\nunits:\n" + dep + "```\n")
     stories = [f"US{i}.{k}" for i in range(1, 19) for k in (1, 2)]
     smap = "".join(f"| {s} | {units[(i * 3 + k) % len(units)][1]} | {units[(i * 3 + k) % len(units)][0]} |\n" for i, s in enumerate(stories) for k in range(1 + i % 2))
@@ -222,7 +233,7 @@ def map_project(tmp, rev):
     put(os.path.join(root, "aidlc-state.md"), "# AI-DLC State Tracking\n\n## Current Status\n- **Current Stage**: functional-design\n\n## Unit Progress\n" + prog)
     ents = ["Customer", "Order", "OrderLine", "Loaf", "Slot", "StockDay", "Reminder", "Payment"]
     names = [f"{pc.pick(['Order', 'List', 'Slot', 'Stock', 'Mail', 'Pay', 'Stamp', 'Bake'], i)}{pc.pick(['Service', 'Store', 'Page', 'Job', 'Rules'], i, 'c')}{i}" for i in range(24)]
-    comps = "".join(f"  - name: {n}\n    summary: {pc.sentence((n, 's'))[:80]}\n    group: {pc.pick(['presentation', 'application', 'domain', 'data'], n)}\n" +
+    comps = "".join(f"  - name: {n}\n    summary: {pc.sentence((n, 's'))}\n    group: {pc.pick(['presentation', 'application', 'domain', 'data'], n)}\n" +
                     (f"    depends_on:\n" + "".join(f"      - component: {names[j]}\n        interaction: reads from it\n" for j in sorted({max(0, i - 1 - pc.rnd_of(n, k) % 5) for k in range(1 + i % 3)} - {i})) if i else "") +
                     "    entities:\n" + "".join(f"      - name: {e}\n" for e in {pc.pick(ents, n, k) for k in range(2)}) for i, n in enumerate(names))
     put(os.path.join(root, "inception", "domain-design", "components.md"), "# Components\n\n```yaml\ncomponents:\n" + comps + "```\n")
@@ -269,7 +280,7 @@ def fill_map_judgment(out):
             j = json.load(f)
         groups = ["Ordering", "Slots", "The baker", "Messages", "Money"]
         for i, (k, e) in enumerate(j["blocks"].items()):
-            e["summary"] = e.get("summary") or pc.sentence((k, "sum"))[:120]
+            e["summary"] = e.get("summary") or pc.sentence((k, "sum"))
             e["group"] = e.get("group") or groups[i % len(groups)]
         with open(path, "w", encoding="utf-8") as f:
             json.dump(j, f)

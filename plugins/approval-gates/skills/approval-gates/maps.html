@@ -31,9 +31,17 @@
 
   The page writes nothing to the row. Per-viewer conveniences (the last view, a hidden group) stay in this browser.
   The render functions between RENDER-START and RENDER-END use no DOM, so tests render a map under Node.
-  Stable hooks for tests and checks: #map-bar, #map-canvas, #map-panel, [data-block=<id>], [data-row=<id>],
-  [data-col=<id>], [data-kind-tab=<kind>], [data-group-chip=<key>], #map-search, [data-act="edges"|"changes"|"gaps"],
-  [data-view="graph"|"list"], .rv-tag.new|chg|gone, .landed.
+  The page: a head that scrolls away (title, round, stats) and one sticky tools row (the map kind switch, search, Groups, Ready now,
+  Gaps only, Only changes, the view switch and Fit / Comfortable, the Legend). The graph opens in Fit: compact cards, every wave
+  in view without sideways scrolling, a long wave wrapped into columns and, when the width asks for it, the waves wrapped into
+  bands; Comfortable is the full card and scrolls. The side panel is a narrow rail until a block is picked and never more than a
+  third of the width. A Unit is Ready when every block it needs has landed and it has not landed (nor is it being built); the
+  panel says for each need whether it landed. Stories and Entities open as a grouped list (gaps first); the matrix is the other
+  view, offered when it shows something (a gap, or rows and columns that each hold several dots). A new or changed thing wears the
+  colour of the round it came in, as on the gate pages; landed is a quiet filled tick.
+  Stable hooks for tests and checks: #map-head, #map-bar, #map-canvas, #map-panel, [data-block=<id>], [data-row=<id>],
+  [data-col=<id>], [data-kind-tab=<kind>], [data-group-chip=<key>], #map-search, [data-act="ready"|"changes"|"gaps"|"legend"|"groups"],
+  [data-view="graph"|"list"], [data-zoom="fit"|"comfy"], [data-mview="list"|"matrix"], .tag.rnd.new|chg, .tag.gone, .landed, [data-ready].
 -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
@@ -80,105 +88,171 @@ a { color: var(--accent); }
 h1 { margin: 0; font-size: 22px; line-height: 1.25; font-weight: 600; }
 .lede { margin: 4px 0 0; color: var(--fg-2); font-size: 14px; }
 
-/* the sticky bar */
-#map-bar { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(6px);
-  padding: 14px 0 10px; margin: 0 0 12px; border-bottom: 1px solid var(--line); }
+/* the round colours, as the gate pages define them (approval-gate.html): a new or changed thing wears the colour of the round it came in */
+:root { --r2-bg: #EDE5FC; --r2-fg: #5B2FA8; --r3-bg: #DCF2EE; --r3-fg: #0F665F; --r4-bg: #FCEBCB; --r4-fg: #8A5A00; --r5-bg: #F9DCE8; --r5-fg: #9B2C5C; --rnd-bg: var(--r2-bg); --rnd-fg: var(--r2-fg); --bar-h: 56px; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --r2-bg: #2E2547; --r2-fg: #C7B1F5; --r3-bg: #1A3833; --r3-fg: #86DACB; --r4-bg: #3D3016; --r4-fg: #F0C36B; --r5-bg: #45212F; --r5-fg: #F2A2C2; } }
+:root[data-theme="dark"] { --r2-bg: #2E2547; --r2-fg: #C7B1F5; --r3-bg: #1A3833; --r3-fg: #86DACB; --r4-bg: #3D3016; --r4-fg: #F0C36B; --r5-bg: #45212F; --r5-fg: #F2A2C2; }
+.rt2 { --rnd-bg: var(--r2-bg); --rnd-fg: var(--r2-fg); } .rt3 { --rnd-bg: var(--r3-bg); --rnd-fg: var(--r3-fg); }
+.rt4 { --rnd-bg: var(--r4-bg); --rnd-fg: var(--r4-fg); } .rt5 { --rnd-bg: var(--r5-bg); --rnd-fg: var(--r5-fg); }
+
+/* the head scrolls away; only the tools row below it stays */
+#map-head { padding: 16px 0 6px; }
 .bar-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; }
 .bar-top .grow { flex: 1; min-width: 0; }
-.tabs { display: inline-flex; gap: 4px; flex-wrap: wrap; margin-top: 10px; }
-.tab { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border-radius: 9px; border: 1px solid var(--control);
-  background: var(--surface); color: var(--fg); text-decoration: none; font-weight: 500; font-size: 14px; }
+.stats { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 6px 0 0; color: var(--fg-2); font-size: 13.5px; }
+.stats b { font-weight: 600; font-variant-numeric: tabular-nums; }
+#map-bar { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 94%, transparent); backdrop-filter: blur(6px);
+  padding: 8px 0; margin: 0 0 12px; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.tabs { display: inline-flex; gap: 4px; flex-wrap: nowrap; }
+.tab { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 11px; border-radius: 9px; border: 1px solid var(--control);
+  background: var(--surface); color: var(--fg); text-decoration: none; font-weight: 500; font-size: 14px; white-space: nowrap; }
 .tab[aria-current="page"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .tab small { font: 500 11px var(--mono); opacity: .8; }
-.stats { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 10px 0 0; color: var(--fg-2); font-size: 13.5px; }
-.stats b { font-weight: 600; font-variant-numeric: tabular-nums; }
-.tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.sep { width: 1px; align-self: stretch; margin: 4px 2px; background: var(--line); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 11px 0 9px; border-radius: 999px; border: 1px solid var(--control);
-  background: var(--surface); font-size: 13px; font-weight: 500; }
+.chip, .tog { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 11px; border-radius: 999px; border: 1px solid var(--control);
+  background: var(--surface); font-size: 13px; font-weight: 500; white-space: nowrap; }
 .chip i { width: 10px; height: 10px; border-radius: 3px; background: var(--c, var(--accent)); }
 .chip[aria-pressed="false"] { color: var(--muted); background: transparent; } .chip[aria-pressed="false"] i { opacity: .35; }
-.tog { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 11px; border-radius: 8px; border: 1px solid var(--control); background: var(--surface); font-size: 13px; }
-.tog[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); }
+.tog { border-radius: 8px; }
+.tog[aria-pressed="true"], .tog[aria-expanded="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); }
+.tog:disabled { opacity: .5; cursor: default; }
+.tog .n { font: 600 11.5px var(--mono); font-variant-numeric: tabular-nums; opacity: .85; }
+.tog.rdy[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .seg { display: inline-flex; border: 1px solid var(--control); border-radius: 8px; overflow: hidden; }
-.seg button { min-height: 30px; padding: 0 12px; border: 0; background: var(--surface); font-size: 13px; }
+.seg button { min-height: 32px; padding: 0 11px; border: 0; background: var(--surface); font-size: 13px; white-space: nowrap; }
 .seg button + button { border-left: 1px solid var(--control); }
 .seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
-#map-search { min-height: 30px; width: 220px; max-width: 100%; padding: 0 10px; border: 1px solid var(--control); border-radius: 8px; background: var(--surface); color: var(--fg); font: inherit; font-size: 13.5px; }
+#map-search { min-height: 34px; width: 190px; max-width: 100%; padding: 0 10px; border: 1px solid var(--control); border-radius: 8px; background: var(--surface); color: var(--fg); font: inherit; font-size: 13.5px; }
+.grow-sp { flex: 1; }
+.pop { position: absolute; top: calc(100% + 6px); z-index: 12; padding: 14px 16px; max-width: min(520px, calc(100vw - 24px)); box-shadow: 0 8px 28px rgba(0, 0, 0, .16); font-size: 13.5px; }
+.pop[hidden] { display: none; }
+.pop h3 { margin: 12px 0 6px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); } .pop h3:first-child { margin-top: 0; }
+.pop p { margin: 4px 0; } .pop .chips { margin: 4px 0; }
+#map-legend { right: 0; width: 480px; } #map-groups { left: 200px; }
 .hint { color: var(--muted); font-size: 12.5px; }
+kbd { font: 500 11.5px var(--mono); padding: 1px 5px; border: 1px solid var(--control); border-bottom-width: 2px; border-radius: 4px; background: var(--surface); }
+.sw { display: inline-block; width: 16px; height: 12px; border-radius: 3px; vertical-align: -1px; border: 1px solid var(--control); background: var(--surface); }
+.sw.landed { background: color-mix(in srgb, var(--ok-bg) 70%, var(--surface)); border-color: var(--ok-line); }
+.sw.rdy { border: 2px solid var(--accent); background: var(--accent-tint); }
+.sw.new { border: 2px solid var(--rnd-fg); background: var(--rnd-bg); }
+.sw.chg { border: 2px dashed var(--rnd-fg); }
+.sw.out { height: 3px; background: var(--edge-out); border: 0; vertical-align: 3px; } .sw.in { height: 3px; background: var(--edge-in); border: 0; vertical-align: 3px; }
 
-/* the revision strip */
-.rvbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 0 12px; padding: 10px 14px; font-size: 13.5px;
-  border-color: color-mix(in srgb, var(--rv-chg) 40%, var(--line)); }
+/* one badge shape, as on the gate pages: .tag toned by meaning; .rnd takes the colour of the round the thing came in */
+.tag { display: inline-flex; align-items: center; gap: 4px; flex: none; font: 600 11px/1.3 var(--body); padding: 2px 7px; border-radius: 4px; background: var(--low-bg); color: var(--low-fg); white-space: nowrap; }
+.tag.rnd { background: var(--rnd-bg); color: var(--rnd-fg); }
+.tag.gone { background: var(--rv-del-bg); color: var(--rv-del-fg); }
+.tag.rdy { background: var(--accent); color: var(--on-accent); }
+.tag.ok { background: var(--ok-bg); color: var(--ok-fg); }
+
+/* the round strip */
+.rvbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 12px; padding: 8px 14px; font-size: 13.5px; border-color: color-mix(in srgb, var(--rnd-fg) 40%, var(--line)); }
 .rvbar b { font-weight: 600; }
 .rvbar .gone { display: flex; flex-wrap: wrap; gap: 4px 8px; width: 100%; }
 .rvbar .ghost { font: 500 12px var(--mono); text-decoration: line-through; color: var(--rv-del-fg); padding: 1px 6px; border-radius: 4px; background: var(--rv-del-bg); cursor: help; }
-.rv-tag.landed { background: var(--ok-bg); color: var(--ok-fg); }
+.rvbar .why-n { color: var(--muted); font-size: 12.5px; }
 
-/* body: canvas and panel */
-.body { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; align-items: start; }
-.canvas { overflow: auto; max-height: calc(100vh - 230px); min-height: 320px; padding: 8px; position: relative; }
+/* body: canvas and panel. The panel is a narrow rail until something is picked, and never more than a third of the width */
+.body { display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 16px; align-items: start; }
+.body.open { grid-template-columns: minmax(0, 1fr) clamp(280px, 33.333%, 400px); }
+.canvas { position: relative; padding: 8px; }
+.canvas.fit { overflow-x: auto; overflow-y: hidden; min-height: 200px; }
+.canvas.comfy { overflow: auto; max-height: calc(100vh - var(--bar-h) - 28px); min-height: 320px; }
 .plane { position: relative; }
 .plane svg { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
-.collabel { position: absolute; top: 6px; font: 600 11.5px var(--body); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-.collabel small { font-weight: 500; letter-spacing: 0; text-transform: none; margin-left: 6px; }
-.edge { fill: none; stroke: var(--edge); stroke-width: 1.2; opacity: 0; transition: opacity .12s; }
-.canvas.all .edge { opacity: .45; }
-.edge.on { opacity: 1; stroke-width: 2; }
-.edge.out { stroke: var(--edge-out); } .edge.in { stroke: var(--edge-in); }
-.node { position: absolute; display: block; padding: 7px 10px 7px 15px; border-radius: 9px; border: 1px solid var(--control); background: var(--surface);
-  cursor: pointer; overflow: hidden; text-align: left; transition: opacity .12s, box-shadow .12s, border-color .12s; }
-.node::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--c, var(--accent)); }
+.collabel { position: absolute; font: 600 11px var(--body); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-bottom: 4px; }
+.collabel small { display: block; font: 500 10.5px var(--mono); letter-spacing: 0; text-transform: none; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; }
+.collabel .bar { display: block; height: 3px; margin-top: 3px; border-radius: 2px; background: var(--line); overflow: hidden; } .collabel .bar b { display: block; height: 100%; background: var(--ok-line); }
+.edge { fill: none; stroke: var(--edge); stroke-width: 1.4; stroke-linejoin: round; }
+.edge.out { stroke: var(--edge-out); stroke-width: 2; } .edge.in { stroke: var(--edge-in); stroke-width: 2; }
+.edge.pv { stroke: var(--accent); stroke-width: 1.6; opacity: .85; }
+.ah-out { fill: var(--edge-out); } .ah-in { fill: var(--edge-in); } .ah-pv { fill: var(--accent); }
+.node { position: absolute; display: block; padding: 5px 8px 5px 13px; border-radius: 8px; border: 1px solid var(--control); background: var(--surface);
+  cursor: pointer; text-align: left; transition: opacity .12s, box-shadow .12s, border-color .12s; }
+.node::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; border-radius: 8px 0 0 8px; background: var(--c, var(--accent)); }
 .node:hover { border-color: var(--c, var(--accent)); }
-.node .n1 { display: block; font: 600 13px/1.3 var(--body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node .n1 { display: block; flex: 1; min-width: 0; font: 600 12.5px/1.3 var(--body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .node .n2 { display: flex; gap: 6px; align-items: center; font: 500 11.5px/1.3 var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; }
-.node .mark { margin-left: auto; flex: none; }
-.node.landed { background: color-mix(in srgb, var(--ok-bg) 55%, var(--surface)); border-color: var(--ok-line); }
-.node.landed .tick { color: var(--ok-fg); font-weight: 700; }
+.node .mark { flex: none; margin-left: auto; font-size: 12px; line-height: 1; }
+.node.cmp { display: flex; align-items: center; gap: 6px; padding: 0 7px 0 12px; }
+.node.cmp .n1 { font: 600 12px/1 var(--body); }
+.node:not(.cmp) { display: flex; flex-direction: column; justify-content: center; padding-top: 6px; padding-bottom: 6px; }
+.node:not(.cmp) .n1-row { display: flex; align-items: center; gap: 6px; }
+.node.landed { background: color-mix(in srgb, var(--ok-bg) 70%, var(--surface)); border-color: color-mix(in srgb, var(--ok-line) 60%, var(--control)); }
+.node.landed .n1 { color: var(--fg-2); font-weight: 500; }
+.node .tick { color: var(--ok-fg); font-weight: 700; }
 .node.building .st { color: var(--warn-fg); }
-.node.sel { box-shadow: 0 0 0 3px var(--accent-soft); border-color: var(--accent); border-width: 2px; padding: 6px 9px 6px 14px; }
-.node.dep { border-color: var(--edge-out); border-width: 2px; padding: 6px 9px 6px 14px; }
-.node.user { border-color: var(--edge-in); border-width: 2px; padding: 6px 9px 6px 14px; }
+.node.ready { background: var(--accent-tint); border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.node.sel { box-shadow: 0 0 0 3px var(--accent-soft); border-color: var(--accent); border-width: 2px; }
+.node.dep { border-color: var(--edge-out); border-width: 2px; }
+.node.user { border-color: var(--edge-in); border-width: 2px; }
 .node.dim { opacity: .28; }
 .node.off { opacity: .12; pointer-events: none; }
-.node.rv-new { box-shadow: inset 0 0 0 1px var(--rv-new); }
-.node.rv-chg { box-shadow: inset 0 0 0 1px var(--rv-chg); }
-.node .rv-tag { position: absolute; top: 0; right: 0; border-radius: 0 8px 0 6px; padding: 1px 6px; font-size: 10px; }
+.node.is-new { border: 2px solid var(--rnd-fg); }
+.node.is-chg { border: 1.5px dashed var(--rnd-fg); }
+.node .rtag { position: absolute; top: -11px; right: 6px; font-size: 9.5px; padding: 0 5px; line-height: 14px; z-index: 1; pointer-events: none; }
+.node .rtag.rl { right: auto; left: 12px; }
+.node:not(.cmp) .rtag { top: -9px; }
 
-.panel { padding: 16px 18px; position: sticky; top: 168px; max-height: calc(100vh - 190px); overflow: auto; }
+.panel { padding: 16px 18px; position: sticky; top: calc(var(--bar-h) + 8px); max-height: calc(100vh - var(--bar-h) - 24px); overflow: auto; }
+.panel.rail { padding: 10px 0; display: flex; justify-content: center; max-height: none; min-height: 150px; }
+.panel.rail .rail-t { writing-mode: vertical-rl; color: var(--muted); font-size: 12.5px; letter-spacing: .02em; white-space: nowrap; }
 .panel h2 { margin: 0 0 4px; font-size: 18px; line-height: 1.3; font-weight: 600; overflow-wrap: anywhere; }
 .panel h3 { margin: 16px 0 6px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.panel h3 .n { text-transform: none; letter-spacing: 0; font-weight: 500; }
 .panel p { margin: 4px 0; }
 .panel .sum { color: var(--fg-2); }
+.verdict { margin: 10px 0 0; padding: 8px 10px; border-radius: 8px; font-size: 13.5px; border: 1px solid var(--line); background: var(--raised); }
+.verdict.ready { background: var(--accent-tint); border-color: var(--accent); } .verdict.landed { background: color-mix(in srgb, var(--ok-bg) 60%, var(--surface)); border-color: var(--ok-line); }
+.verdict.wait { background: var(--warn-bg); border-color: transparent; color: var(--warn-fg); }
 .pill { display: inline-flex; align-items: center; gap: 5px; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 500; background: var(--low-bg); color: var(--low-fg); vertical-align: middle; }
 .pill.landed { background: var(--ok-bg); color: var(--ok-fg); } .pill.building { background: var(--warn-bg); color: var(--warn-fg); }
+.pill.ready { background: var(--accent); color: var(--on-accent); }
 .pill i { width: 8px; height: 8px; border-radius: 2px; background: var(--c, var(--accent)); }
 .links { display: flex; flex-wrap: wrap; gap: 6px; }
-.lnk { display: inline-flex; align-items: center; min-height: 28px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--control); background: var(--surface); font: 500 12.5px var(--mono); }
+.lnk { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--control); background: var(--surface); font: 500 12.5px var(--mono); }
+.lnk .sm { font-style: normal; font-size: 11px; } .lnk .sm.landed { color: var(--ok-fg); font-weight: 700; } .lnk .sm.building { color: var(--warn-fg); } .lnk .sm.planned { color: var(--muted); }
 .lnk.out { border-color: var(--edge-out); color: var(--accent-strong); } .lnk.in { border-color: var(--edge-in); }
+.lnk.landed { background: color-mix(in srgb, var(--ok-bg) 55%, var(--surface)); }
+.need { margin: 0 0 6px; } .need .why { margin: 2px 0 0; }
 .why { color: var(--muted); font-size: 13px; margin: 2px 0 8px; }
 .panel ul { margin: 4px 0; padding-left: 18px; } .panel li { margin: 2px 0; }
-.chg { border-left: 3px solid var(--rv-chg); padding: 2px 0 2px 10px; margin: 8px 0; font-size: 13.5px; }
-.chg.new { border-color: var(--rv-new); } .chg.gone { border-color: var(--rv-gone); }
-.chg del { color: var(--rv-del-fg); } .chg ins { background: var(--rv-ins-bg); text-decoration: none; border-radius: 3px; padding: 0 2px; }
+.cl { border-left: 3px solid var(--rnd-fg); padding: 2px 0 2px 10px; margin: 8px 0; font-size: 13.5px; }
+.cl.gone { border-color: var(--rv-gone); }
+.cl del { color: var(--rv-del-fg); } .cl ins { background: var(--rv-ins-bg); text-decoration: none; border-radius: 3px; padding: 0 2px; }
 details.beh summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .empty { color: var(--muted); font-size: 14px; }
 
 /* the list (phone width, or by choice) */
 .list { padding: 8px 12px 16px; }
 .list h2 { margin: 14px 0 6px; font-size: 13px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
-.lrow { display: block; width: 100%; padding: 10px 12px; margin: 4px 0; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); text-align: left; position: relative; cursor: pointer; }
+.list h2 .n { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.lrow { display: block; width: 100%; padding: 10px 12px; margin: 4px 0; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); text-align: left; position: relative; }
+button.lrow { cursor: pointer; }
 .lrow::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 4px; border-radius: 0 3px 3px 0; background: var(--c, var(--accent)); }
 .lrow.sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .lrow.landed { background: color-mix(in srgb, var(--ok-bg) 45%, var(--surface)); }
+.lrow.ready { border-color: var(--accent); }
+.lrow.is-new { border-color: var(--rnd-fg); }
 .lrow.dim { opacity: .35; } .lrow.off { display: none; }
 .lrow .l1 { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .lrow .l1 b { font-weight: 600; overflow-wrap: anywhere; } .lrow .l1 small { font: 500 12px var(--mono); color: var(--muted); }
 .lrow .l2 { color: var(--fg-2); font-size: 14px; margin-top: 2px; }
 .inline-panel { margin: 0 0 8px; border-top: 0; }
+.mlist { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(380px, 100%), 1fr)); gap: 0 12px; align-items: start; } .mlist > h2, .mlist > .okline, .mlist > .inline-panel, .mlist > .empty { grid-column: 1 / -1; }
+.mlist .inline-panel { margin: 4px 0 8px; } .mlist .lrow { margin: 3px 0; }
+.okline { margin: 6px 0 2px; color: var(--fg-2); font-size: 14px; }
+.mrow { padding: 8px 12px 10px; } .mrow.gap { border-color: var(--warn-dot, #B26B00); }
+.lhd { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; width: 100%; padding: 2px 0; border: 0; background: transparent; text-align: left; }
+.lhd b { font: 600 13px var(--mono); } .lhd span.t { color: var(--fg-2); font-size: 14px; flex: 1; min-width: 140px; }
+.lchips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; }
+.mrow.sel .lhd { color: var(--accent-strong); }
 
 /* the matrix */
-.mwrap { overflow: auto; max-height: calc(100vh - 230px); padding: 0; }
+.mwrap { overflow: auto; padding: 0; position: sticky; top: calc(var(--bar-h) + 6px); max-height: calc(100vh - var(--bar-h) - 14px); }
+.mleg { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--fg-2); position: sticky; left: 0; background: var(--surface); }
 table.matrix { border-collapse: separate; border-spacing: 0; font-size: 13px; }
 .matrix th, .matrix td { border-bottom: 1px solid var(--line-soft); padding: 0; text-align: center; background: var(--surface); }
 .matrix thead th { position: sticky; top: 0; z-index: 2; border-bottom: 1px solid var(--line); }
@@ -188,12 +262,16 @@ table.matrix { border-collapse: separate; border-spacing: 0; font-size: 13px; }
 .matrix button.hd { display: block; width: 100%; border: 0; background: transparent; text-align: left; padding: 6px 12px; font-size: 13px; }
 .matrix button.hd b { font-weight: 600; margin-right: 6px; font: 600 12.5px var(--mono); } .matrix button.hd span { color: var(--fg-2); }
 .matrix .ch button { border: 0; background: transparent; font: 600 12px var(--mono); padding: 2px; width: 100%; }
+.matrix td.gone { color: var(--rv-del-fg); background: var(--rv-del-bg); font-size: 12px; }
+.ghostlnk { color: var(--rv-del-fg); background: var(--rv-del-bg); border-color: transparent; text-decoration: line-through; }
 .matrix td.on { background: color-mix(in srgb, var(--c, var(--accent)) 22%, var(--surface)); color: var(--accent-strong); font-weight: 700; }
 .matrix tr.sel th, .matrix tr.sel td { background: var(--accent-soft); } .matrix td.colsel, .matrix th.colsel { background: var(--accent-soft); }
 .matrix tr.gap th.rh { box-shadow: inset 3px 0 0 var(--warn-fg); }
 .matrix .ch.landed button { color: var(--ok-fg); }
-.matrix tr.rv-new th.rh { box-shadow: inset 3px 0 0 var(--rv-new); } .matrix td.rv-new { outline: 2px solid var(--rv-new); outline-offset: -2px; }
+.matrix .ch.is-new button { color: var(--rnd-fg); box-shadow: inset 0 -3px 0 var(--rnd-fg); }
+.matrix tr.is-new th.rh { box-shadow: inset 3px 0 0 var(--rnd-fg); } .matrix td.is-new { outline: 2px solid var(--rnd-fg); outline-offset: -2px; }
 .gapchip { display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 999px; background: var(--warn-bg); color: var(--warn-fg); font: 600 11px var(--body); }
+.cov { color: var(--ok-fg); }
 
 .rows-list { margin: 0; padding: 0; list-style: none; }
 .idx { padding: 16px 18px; margin: 12px 0; }
@@ -203,12 +281,21 @@ table.matrix { border-collapse: separate; border-spacing: 0; font-size: 13px; }
 
 #tip { position: fixed; z-index: 30; max-width: min(360px, calc(100vw - 24px)); padding: 8px 10px; border-radius: 6px; background: var(--tip-bg); color: var(--tip-fg); border: 1px solid var(--tip-line); font: 12px/1.45 var(--body); pointer-events: none; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
 #toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--tip-bg); color: var(--tip-fg); border: 1px solid var(--tip-line); padding: 8px 14px; border-radius: 8px; font-size: 13px; z-index: 20; }
-@media (max-width: 960px) { .body { grid-template-columns: minmax(0, 1fr); } .panel { position: static; max-height: none; } .canvas { max-height: 70vh; } }
-@media (max-width: 720px) {
-  #app { padding: 0 12px 64px; } h1 { font-size: 19px; } #map-search { width: 100%; } .stats { gap: 4px 12px; }
-  #map-bar { padding-top: 10px; } .canvas, .mwrap { max-height: none; }
+@media (max-width: 960px) {
+  .body, .body.open { grid-template-columns: minmax(0, 1fr); } .panel { position: static; max-height: none; } .panel.rail { display: none; }
+  .canvas.comfy { max-height: 70vh; } #map-groups { left: 0; } #map-legend { width: auto; left: 0; right: 0; }
 }
-@media (prefers-reduced-motion: reduce) { .node, .edge { transition: none; } }
+@media (max-width: 720px) {
+  #app { padding: 0 12px 64px; } h1 { font-size: 19px; } .stats { gap: 2px 12px; font-size: 13px; }
+  #map-head { padding-top: 10px; }
+  #map-bar { padding: 5px 0; gap: 4px 6px; }
+  .tabs { overflow-x: auto; max-width: 100%; scrollbar-width: none; } .tab { min-height: 30px; padding: 0 9px; font-size: 13px; }
+  #map-search { width: auto; flex: 1; min-width: 90px; min-height: 30px; }
+  .chip, .tog { min-height: 30px; padding: 0 9px; } .seg button { min-height: 28px; }
+  .mwrap { position: static; max-height: none; } .canvas, .mwrap { max-height: none; }
+  .mleg { position: static; }
+}
+@media (prefers-reduced-motion: reduce) { .node { transition: none; } }
 /* rev-diff.css:begin */
 /* Shared: the canonical copy is shared/rev-diff/rev-diff.css; scripts/sync-shared.py copies it into every page that
    carries the block. What changed since an earlier round: inserted words on a soft green wash with a thin underline,
@@ -436,26 +523,39 @@ var AidlcIds = (function () {
 /* RENDER-START — no DOM below this line until RENDER-END */
 var MapView = (function () {
   "use strict";
-  var W = 176, H = 54, CX = 244, RY = 68, PADX = 18, PADY = 40;
   var STATUS = { landed: "Landed", building: "Being built", planned: "Planned" };
+  var MARK = { landed: "✓", building: "●", planned: "○" };
   var KIND_ORDER = ["components", "units", "stories", "entities"];
   var KIND_NAME = { components: "Components", units: "Units", stories: "Stories", entities: "Entities" };
+  /* card width and the gutter beside it, widest first: the Fit view takes the widest that lets every layer show */
+  var SIZES = [[144, 40], [128, 34], [112, 30], [104, 26], [96, 22], [88, 20], [80, 18]];
+  var ROWCAP = 8;
 
   function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
   function byId(list) { var o = {}; (list || []).forEach(function (b) { o[b.id] = b; }); return o; }
   function isGraph(row) { return row.view !== "matrix"; }
   function groupIndex(row) { var o = {}; (row.groups || []).forEach(function (g, i) { o[g.key] = i % 6; }); return o; }
   function groupLabel(row, key) { var g = (row.groups || []).filter(function (x) { return x.key === key; })[0]; return g ? g.label : key; }
-  function sameList(a, b) { return JSON.stringify(a || []) === JSON.stringify(b || []); }
+  /* "Story" -> "Stories", "Entity" -> "Entities", "Unit" -> "Units"; one of anything stays as it is */
+  function plural(w) {
+    w = String(w || "");
+    if (/[^aeiou]y$/i.test(w)) return w.slice(0, -1) + "ies";
+    if (/(s|x|z|ch|sh)$/i.test(w)) return w + "es";
+    return w + "s";
+  }
+  function noun(w, n) { return n === 1 ? String(w || "") : plural(w); }
+  function tone(k) { return ((Math.max(2, +k || 2) - 2) % 4) + 2; }
+  function ucfirst(s) { s = String(s || ""); return s.charAt(0).toUpperCase() + s.slice(1); }
 
-  /* ---------- what changed since the previous revision ---------- */
+  /* ---------- what changed since the previous round ---------- */
   function snapOf(b) {
     return { label: b.label, title: b.title, summary: b.summary, group: b.group, status: b.status || "", points: b.points == null ? null : b.points,
       layer: b.layer, needs: (b.needs || []).map(function (n) { return n.id; }).sort() };
   }
   var FIELD_NAME = { summary: "What it is", title: "Title", group: "Group", status: "Status", points: "Points", layer: "", needs: "Needs", label: "Name" };
   function diff(row) {
-    var out = { has: !!row.previous, rev: row.previous ? row.previous.revision : null, state: {}, fields: {}, removed: [], counts: { new: 0, changed: 0, removed: 0, landed: 0 } };
+    var out = { has: !!row.previous, rev: row.previous ? row.previous.revision : null, state: {}, fields: {}, removed: [], touchedRows: {}, touchedCols: {}, dropped: {},
+      counts: { new: 0, changed: 0, removed: 0, landed: 0, links: 0, dropped: 0, newRows: 0, newCols: 0 } };
     var p = row.previous;
     if (!p) return out;
     if (isGraph(row)) {
@@ -471,16 +571,22 @@ var MapView = (function () {
       });
       Object.keys(before).forEach(function (id) { if (!now[id]) { out.state[id] = "gone"; out.counts.removed++; out.removed.push(Object.assign({ id: id }, before[id])); } });
     } else {
-      var rb = p.rows || {}, cb = p.cols || {}, cells = {};
+      var rb = p.rows || {}, cb = p.cols || {}, cells = {}, rowsNow = byId(row.rows), colsNow = byId(row.cols);
       (p.cells || []).forEach(function (c) { cells[c] = 1; });
-      (row.rows || []).forEach(function (r) { if (!rb[r.id]) { out.state["r:" + r.id] = "new"; out.counts.new++; } });
-      (row.cols || []).forEach(function (c) { if (!cb[c.id]) { out.state["c:" + c.id] = "new"; out.counts.new++; } });
-      Object.keys(rb).forEach(function (id) { if (!byId(row.rows)[id]) { out.removed.push({ id: id, title: rb[id].title }); out.counts.removed++; } });
-      Object.keys(cb).forEach(function (id) { if (!byId(row.cols)[id]) { out.removed.push({ id: id, title: cb[id].title }); out.counts.removed++; } });
-      Object.keys(row.cells || {}).forEach(function (r) { (row.cells[r] || []).forEach(function (c) { if (!cells[r + "|" + c]) { out.state["x:" + r + "|" + c] = "new"; out.counts.changed++; } }); });
+      (row.rows || []).forEach(function (r) { if (!rb[r.id]) { out.state["r:" + r.id] = "new"; out.touchedRows[r.id] = 1; out.counts.new++; out.counts.newRows++; } });
+      (row.cols || []).forEach(function (c) { if (!cb[c.id]) { out.state["c:" + c.id] = "new"; out.touchedCols[c.id] = 1; out.counts.new++; out.counts.newCols++; } });
+      Object.keys(rb).forEach(function (id) { if (!rowsNow[id]) { out.removed.push({ id: id, title: rb[id].title }); out.counts.removed++; } });
+      Object.keys(cb).forEach(function (id) { if (!colsNow[id]) { out.removed.push({ id: id, title: cb[id].title }); out.counts.removed++; } });
+      Object.keys(row.cells || {}).forEach(function (r) { (row.cells[r] || []).forEach(function (c) {
+        if (!cells[r + "|" + c]) { out.state["x:" + r + "|" + c] = "new"; out.counts.links++; out.counts.changed++; out.touchedRows[r] = 1; out.touchedCols[c] = 1; }
+      }); });
       Object.keys(cells).forEach(function (k) {
         var i = k.indexOf("|"), r = k.slice(0, i), c = k.slice(i + 1);
-        if (!((row.cells || {})[r] || []).filter(function (x) { return x === c; }).length) out.counts.removed++;
+        if (!((row.cells || {})[r] || []).filter(function (x) { return x === c; }).length) {
+          out.counts.dropped++; out.dropped[k] = 1;
+          if (rowsNow[r]) out.touchedRows[r] = 1;
+          if (colsNow[c]) out.touchedCols[c] = 1;
+        }
       });
     }
     return out;
@@ -488,22 +594,35 @@ var MapView = (function () {
   function changeLines(row, d, id) {
     var p = (row.previous || {}).blocks || {}, b = byId(row.blocks)[id], a = p[id], lines = [];
     if (!b) return lines;
-    if (d.state[id] === "new") return [{ field: "new", text: "New in revision " + row.revision + "." }];
+    if (d.state[id] === "new") return [{ field: "new", text: "New in round " + row.revision + "." }];
     (d.fields[id] || []).forEach(function (k) {
       var s = snapOf(b)[k], was = a[k];
       if (k === "needs") {
         var add = s.filter(function (x) { return was.indexOf(x) < 0; }), del = was.filter(function (x) { return s.indexOf(x) < 0; });
         if (add.length) lines.push({ field: k, text: "Now needs " + add.join(", ") + "." });
         if (del.length) lines.push({ field: k, text: "No longer needs " + del.join(", ") + "." });
-      } else if (k === "status" && s === "landed") lines.push({ field: k, text: "Landed since revision " + d.rev + ".", landed: true });
+      } else if (k === "status" && s === "landed") lines.push({ field: k, text: "Landed since round " + d.rev + ".", landed: true });
       else if (k === "layer") lines.push({ field: k, text: "Moved from " + (row.layerName || "layer") + " " + was + " to " + s + "." });
       else lines.push({ field: k, was: was == null || was === "" ? "nothing" : was, now: s == null || s === "" ? "nothing" : s, name: FIELD_NAME[k] || k });
     });
     return lines;
   }
 
+  /* ---------- ready: every need has landed and the block has not (the Unit map; a map without status has none) ---------- */
+  function readiness(row) {
+    var blocks = row.blocks || [], by = byId(blocks), out = { on: blocks.some(function (b) { return !!b.status; }), ready: {}, needs: {}, count: 0 };
+    blocks.forEach(function (b) {
+      var ns = (b.needs || []).filter(function (n) { return by[n.id]; }), landed = ns.filter(function (n) { return by[n.id].status === "landed"; }).length;
+      var open = ns.filter(function (n) { return by[n.id].status !== "landed"; }).map(function (n) { return n.id; });
+      out.needs[b.id] = { total: ns.length, landed: landed, open: open };
+      out.ready[b.id] = out.on && b.status !== "landed" && b.status !== "building" && landed === ns.length;
+      if (out.ready[b.id]) out.count++;
+    });
+    return out;
+  }
+
   /* ---------- layout: layers left to right, groups together, crossings reduced ---------- */
-  function layout(row) {
+  function order(row) {
     var blocks = row.blocks || [], by = byId(blocks), gi = {}, layers = [], pos = {};
     (row.groups || []).forEach(function (g, i) { gi[g.key] = i; });
     blocks.forEach(function (b) { var l = b.layer || 1; (layers[l] = layers[l] || []).push(b.id); });
@@ -512,6 +631,10 @@ var MapView = (function () {
     cols.forEach(function (c) { c.ids.sort(function (x, y) { return (gi[by[x].group] || 0) - (gi[by[y].group] || 0) || (x < y ? -1 : x > y ? 1 : 0); }); });
     function index() { cols.forEach(function (c) { c.ids.forEach(function (id, i) { pos[id] = i; }); }); }
     index();
+    function bary(id, rel) {
+      var list = (by[id][rel] || []).map(function (n) { return typeof n === "string" ? n : n.id; }).filter(function (n) { return pos[n] != null; });
+      return list.length ? list.reduce(function (s, n) { return s + pos[n]; }, 0) / list.length : pos[id];
+    }
     for (var pass = 0; pass < 3; pass++) {
       cols.forEach(function (c) {
         c.ids.sort(function (x, y) { return bary(x, "needs") - bary(y, "needs") || (gi[by[x].group] || 0) - (gi[by[y].group] || 0) || (x < y ? -1 : 1); });
@@ -522,17 +645,136 @@ var MapView = (function () {
         index();
       });
     }
-    function bary(id, rel) {
-      var list = (by[id][rel] || []).map(function (n) { return typeof n === "string" ? n : n.id; }).filter(function (n) { return pos[n] != null; });
-      return list.length ? list.reduce(function (s, n) { return s + pos[n]; }, 0) / list.length : pos[id];
-    }
-    var maxRows = cols.reduce(function (m, c) { return Math.max(m, c.ids.length); }, 1), p = {};
-    cols.forEach(function (c, x) { c.x = PADX + x * CX; c.ids.forEach(function (id, i) { p[id] = { x: c.x, y: PADY + i * RY }; }); });
-    return { cols: cols, pos: p, width: PADX * 2 + cols.length * CX - (CX - W), height: PADY + maxRows * RY + 12 };
+    return cols;
   }
-  function edgePath(a, b) {
-    var x1 = a.x + W, y1 = a.y + H / 2, x2 = b.x - 2, y2 = b.y + H / 2, dx = Math.max(36, (x2 - x1) / 2);
-    return "M" + x1 + "," + y1 + " C" + (x1 + dx) + "," + y1 + " " + (x2 - dx) + "," + y2 + " " + x2 + "," + y2;
+  function packBands(counts, k) {
+    var bands = [[]], used = 0;
+    counts.forEach(function (n, i) {
+      if (used && used + n > k) { bands.push([]); used = 0; }
+      bands[bands.length - 1].push(i); used += n;
+    });
+    return bands;
+  }
+  /* o.zoom "fit" (default): compact cards, every layer in view without sideways scrolling, a long layer wrapped into several columns and,
+     when even the smallest cards do not fit one row, the layers wrapped into bands; "comfy": full cards, one row, scrolls. */
+  function layout(row, o) {
+    o = o || {};
+    var comfy = o.zoom === "comfy", avail = o.avail || 1000, L0 = order(row), G, W, H, PITCH, HDR, PAD, BGAP;
+    if (comfy) { W = 176; H = 54; G = 68; PITCH = 68; HDR = 44; PAD = 18; BGAP = 0; } else { H = 26; PITCH = 40; HDR = 42; PAD = 14; BGAP = 34; }
+    var cap = comfy ? 1e9 : ROWCAP;
+    L0.forEach(function (l) {
+      var n = l.ids.length, k = Math.max(1, Math.ceil(n / cap)), rows = Math.ceil(n / k);
+      l.subs = []; for (var i = 0; i < k; i++) l.subs.push(l.ids.slice(i * rows, (i + 1) * rows));
+    });
+    var counts = L0.map(function (l) { return l.subs.length; }), bands;
+    if (comfy) bands = [L0.map(function (l, i) { return i; })];
+    else {
+      var chosen = null;
+      for (var b = 1; !chosen && b <= Math.max(1, L0.length); b++) {
+        for (var s = 0; s < SIZES.length && !chosen; s++) {
+          var k2 = Math.floor((avail - 2 * PAD + SIZES[s][1]) / (SIZES[s][0] + SIZES[s][1]));
+          if (k2 < 1) continue;
+          var pb = packBands(counts, k2);
+          if (pb.length <= b) chosen = { W: SIZES[s][0], G: SIZES[s][1], bands: pb };
+        }
+      }
+      if (!chosen) chosen = { W: SIZES[SIZES.length - 1][0], G: SIZES[SIZES.length - 1][1], bands: [L0.map(function (l, i) { return i; })] };
+      W = chosen.W; G = chosen.G; bands = chosen.bands;
+    }
+    var pos = {}, layers = [], bandsOut = [], top = 0, width = 0;
+    bands.forEach(function (idx, bi) {
+      var c = 0, rowsMax = 0;
+      idx.forEach(function (li) {
+        var l = L0[li], c0 = c;
+        l.subs.forEach(function (ids) {
+          ids.forEach(function (id, r) { pos[id] = { x: PAD + c * (W + G), y: top + HDR + r * PITCH, c: c, band: bi, row: r, layer: l.layer }; });
+          rowsMax = Math.max(rowsMax, ids.length); c++;
+        });
+        layers.push({ layer: l.layer, band: bi, c0: c0, c1: c - 1, x: PAD + c0 * (W + G), y: top, w: (c - c0) * (W + G) - G, n: l.ids.length });
+      });
+      var bottom = top + HDR + Math.max(0, rowsMax - 1) * PITCH + H;
+      bandsOut.push({ top: top, bottom: bottom, cols: c });
+      width = Math.max(width, PAD * 2 + c * (W + G) - G);
+      top = bottom + BGAP;
+    });
+    var height = bandsOut.length ? bandsOut[bandsOut.length - 1].bottom + 12 : 60;
+    return { comfy: comfy, W: W, H: H, G: G, PITCH: PITCH, HDR: HDR, PAD: PAD, BGAP: BGAP, pos: pos, layers: layers, bands: bandsOut, width: width, height: height };
+  }
+  var cache = { key: "", L: null };
+  function layoutOf(row, st) {
+    var key = [row.id, row.revision, row.digest, (row.blocks || []).length, st.zoom || "fit", st.avail || 1000].join("|");
+    if (cache.key !== key) cache = { key: key, L: layout(row, { zoom: st.zoom, avail: st.avail }) };
+    return cache.L;
+  }
+
+  /* ---------- edges: orthogonal, in the gutters between the columns and the gaps between the rows, never over a card ---------- */
+  function gutterX(L, c) { return L.PAD + c * (L.W + L.G) + L.W + L.G / 2; }
+  function rowGapY(L, band, k) { return L.bands[band].top + L.HDR + k * L.PITCH - (L.PITCH - L.H) / 2; }
+  function bandGapY(L, bi) { return L.bands[bi].bottom + L.BGAP / 2; }
+  function rounded(pts, r) {
+    var p = pts.filter(function (q, i) { return !i || q[0] !== pts[i - 1][0] || q[1] !== pts[i - 1][1]; });
+    var d = "M" + p[0][0] + "," + p[0][1];
+    for (var i = 1; i < p.length - 1; i++) {
+      var a = p[i - 1], c = p[i], n = p[i + 1];
+      var la = Math.hypot(c[0] - a[0], c[1] - a[1]), ln = Math.hypot(n[0] - c[0], n[1] - c[1]), rr = Math.min(r, la / 2, ln / 2);
+      d += " L" + (c[0] + (a[0] - c[0]) * rr / (la || 1)) + "," + (c[1] + (a[1] - c[1]) * rr / (la || 1)) +
+        " Q" + c[0] + "," + c[1] + " " + (c[0] + (n[0] - c[0]) * rr / (ln || 1)) + "," + (c[1] + (n[1] - c[1]) * rr / (ln || 1));
+    }
+    return d + " L" + p[p.length - 1][0] + "," + p[p.length - 1][1];
+  }
+  /* pairs: [{from, to, kind}] — from is the block that is needed, to the one that needs it, the arrow ends at `to` */
+  function routeEdges(L, pairs) {
+    var lanes = {}, chan = {};
+    function use(map, key, id) { (map[key] = map[key] || []).push(id); }
+    var geo = pairs.map(function (e, i) {
+      var a = L.pos[e.from], b = L.pos[e.to];
+      if (!a || !b) return null;
+      var enterLeft = b.c > a.c, xc = a.c, ec = enterLeft ? b.c - 1 : b.c, g = { a: a, b: b, xc: xc, ec: ec, enterLeft: enterLeft, i: i, key: null };
+      use(lanes, xc, i); if (ec !== xc) use(lanes, ec, i);
+      if (xc !== ec) {
+        if (a.band !== b.band) g.key = "b" + Math.min(a.band, b.band);
+        else { g.k = a.row < b.row ? a.row + 1 : a.row; g.key = "r" + a.band + ":" + g.k; }
+        use(chan, g.key, i);
+      }
+      return g;
+    });
+    function off(map, key, i, room) {
+      var list = map[key], n = list.length, step = Math.min(5, Math.max(1.5, (room - 8) / n));
+      return (list.indexOf(i) - (n - 1) / 2) * step;
+    }
+    return pairs.map(function (e, i) {
+      var g = geo[i];
+      if (!g) return null;
+      var a = g.a, b = g.b, y1 = a.y + L.H / 2, y2 = b.y + L.H / 2, x1 = a.x + L.W, x2 = g.enterLeft ? b.x : b.x + L.W;
+      var gxE = gutterX(L, g.xc) + off(lanes, g.xc, i, L.G), gxN = gutterX(L, g.ec) + off(lanes, g.ec, i, L.G), pts;
+      if (g.xc === g.ec) pts = [[x1, y1], [gxE, y1], [gxE, y2], [x2, y2]];
+      else {
+        var base = g.key.charAt(0) === "b" ? bandGapY(L, +g.key.slice(1)) : rowGapY(L, a.band, g.k);
+        var cy = base + off(chan, g.key, i, g.key.charAt(0) === "b" ? L.BGAP : L.PITCH - L.H);
+        pts = [[x1, y1], [gxE, y1], [gxE, cy], [gxN, cy], [gxN, y2], [x2, y2]];
+      }
+      return { from: e.from, to: e.to, kind: e.kind, d: rounded(pts, 5), left: g.enterLeft };
+    });
+  }
+  function edgePairs(row, id) {
+    var b = byId(row.blocks)[id], by = byId(row.blocks), out = [];
+    if (!b) return out;
+    (b.needs || []).forEach(function (n) { if (by[n.id]) out.push({ from: n.id, to: id, kind: "out", why: n.why }); });
+    (b.usedBy || []).forEach(function (u) {
+      if (!by[u]) return;
+      var why = ((by[u].needs || []).filter(function (n) { return n.id === id; })[0] || {}).why;
+      out.push({ from: id, to: u, kind: "in", why: why });
+    });
+    return out;
+  }
+  /* the svg paths of one block's edges; kind "pv" is the hover preview (nothing picked) */
+  function edgesHtml(row, st, id, preview) {
+    var L = layoutOf(row, st), by = byId(row.blocks), pairs = edgePairs(row, id).filter(function (e) { return !(st.off || {})[by[e.from].group] && !(st.off || {})[by[e.to].group]; });
+    return routeEdges(L, pairs).map(function (r, i) {
+      if (!r) return "";
+      var p = pairs[i], cls = preview ? "pv" : p.kind, mk = preview ? "pv" : p.kind;
+      return '<path class="edge on ' + cls + '" d="' + r.d + '" data-from="' + esc(p.from) + '" data-to="' + esc(p.to) + '" marker-end="url(#ah-' + mk + ')"><title>' + esc(p.to + " needs " + p.from + (p.why ? ": " + p.why : "")) + "</title></path>";
+    }).join("");
   }
 
   /* ---------- filters ---------- */
@@ -548,136 +790,222 @@ var MapView = (function () {
     return out;
   }
   function edgeCount(row) { return (row.blocks || []).reduce(function (n, b) { return n + (b.needs || []).length; }, 0); }
-
+  function dimmed(row, b, st, d, R) {
+    return !matches(row, b, st.q) || (st.changed && d.has && !d.state[b.id]) || (st.ready && R.on && !R.ready[b.id]);
+  }
   /* ---------- the graph ---------- */
-  function nodeHtml(row, b, st, pos, d, gi, con) {
-    var cls = ["node"], s = st.sel;
+  function nodeHtml(row, b, st, pos, d, gi, con, L, R) {
+    var cls = ["node"], s = st.sel, ch = d.state[b.id], comfy = L.comfy;
+    if (!comfy) cls.push("cmp");
     if (b.status === "landed") cls.push("landed"); else if (b.status === "building") cls.push("building");
+    var ready = !!R.ready[b.id];
+    if (ready) cls.push("ready");
     if (s) cls.push(s === b.id ? "sel" : con.needs[b.id] ? "dep" : con.users[b.id] ? "user" : "dim");
     if (!visible(row, b, st)) cls.push("off");
-    else if (!matches(row, b, st.q) || (st.changed && d.has && !d.state[b.id])) cls.push("dim");
-    var ch = d.state[b.id];
-    if (ch) cls.push("rv-" + ch);
-    var tag = ch === "new" ? '<span class="rv-tag new">NEW</span>' : ch === "chg" ? '<span class="rv-tag chg">' + ((d.fields[b.id] || []).indexOf("status") >= 0 && b.status === "landed" ? "LANDED" : "CHANGED") + "</span>" : "";
-    var sub = [];
-    if (b.label && b.label !== b.id) sub.push('<span>' + esc(b.label) + "</span>");
-    if (b.points != null) sub.push("<span>" + esc(b.points) + " pt</span>");
-    var mark = b.status === "landed" ? '<span class="mark tick" title="Landed" aria-hidden="true">✓</span>' : b.status === "building" ? '<span class="mark st" title="Being built" aria-hidden="true">●</span>' : "";
-    return '<div class="' + cls.join(" ") + '" role="button" tabindex="0" data-block="' + esc(b.id) + '" data-group="' + esc(b.group) + '" data-layer="' + esc(b.layer) + '"' +
-      (b.status ? ' data-status="' + esc(b.status) + '"' : "") + (ch ? ' data-change="' + ch + '"' : "") + ' aria-pressed="' + (s === b.id) + '" aria-label="' + esc(b.id + (b.label && b.label !== b.id ? " (" + b.label + ")" : "") + ", " + groupLabel(row, b.group) + (b.status ? ", " + (STATUS[b.status] || b.status) : "") + (ch === "new" ? ", new" : ch === "chg" ? ", changed" : "")) + '"' +
-      ' style="left:' + pos.x + "px;top:" + pos.y + "px;width:" + W + "px;height:" + H + "px;--c:var(--g" + (gi[b.group] || 0) + ')" title="' + esc(b.summary) + '">' +
-      tag + '<span class="n1">' + esc(b.id) + '</span><span class="n2">' + sub.join("") + mark + "</span></div>";
+    else if (dimmed(row, b, st, d, R)) cls.push("dim");
+    if (ch === "new") cls.push("is-new"); else if (ch === "chg") cls.push("is-chg");
+    var landedNow = ch === "chg" && (d.fields[b.id] || []).indexOf("status") >= 0 && b.status === "landed";
+    var rdy = ready && b.status !== "landed" ? '<span class="tag rdy rtag rl">Ready</span>' : "";
+    var tag = rdy + (ch === "new" ? '<span class="tag rnd rtag new">new</span>' : ch === "chg" ? '<span class="tag rnd rtag chg">' + (landedNow ? "landed" : "changed") + "</span>" : "");
+    var mark = b.status === "landed" ? '<span class="mark tick" aria-hidden="true">✓</span>' : b.status === "building" ? '<span class="mark st" aria-hidden="true">●</span>' :
+      "";
+    var inner;
+    if (comfy) {
+      var sub = [];
+      if (b.label && b.label !== b.id) sub.push("<span>" + esc(b.label) + "</span>");
+      if (b.points != null) sub.push("<span>" + esc(b.points) + " pt</span>");
+      inner = '<span class="n1-row"><span class="n1">' + esc(b.id) + "</span></span>" + '<span class="n2">' + sub.join("") + mark + "</span>";
+    } else inner = '<span class="n1">' + esc(b.id) + "</span>" + mark;
+    var st1 = b.status ? (STATUS[b.status] || b.status) : "";
+    return '<div class="' + cls.join(" ") + '" role="button" tabindex="' + (st.tab === b.id ? 0 : -1) + '" data-aidlc-noids data-block="' + esc(b.id) + '" data-group="' + esc(b.group) + '" data-layer="' + esc(b.layer) + '"' +
+      (b.status ? ' data-status="' + esc(b.status) + '"' : "") + (ready ? ' data-ready="1"' : "") + (ch ? ' data-change="' + ch + '"' : "") + ' aria-pressed="' + (s === b.id) + '" aria-label="' + esc(b.id + (b.label && b.label !== b.id ? " (" + b.label + ")" : "") + ", " + groupLabel(row, b.group) + (st1 ? ", " + st1 : "") + (ready ? ", ready to start" : "") + (ch === "new" ? ", new" : ch === "chg" ? ", changed" : "")) + '"' +
+      ' style="left:' + pos.x + "px;top:" + pos.y + "px;width:" + L.W + "px;height:" + L.H + "px;--c:var(--g" + (gi[b.group] || 0) + ')" title="' + esc(b.id + (b.label && b.label !== b.id ? " (" + b.label + ")" : "") + (b.summary ? " — " + b.summary : "") + (st1 ? " [" + st1 + (ready ? ", ready" : "") + "]" : ready ? " [ready]" : "")) + '">' +
+      tag + inner + "</div>";
   }
-  function graphHtml(row, st, d) {
-    var L = layout(row), gi = groupIndex(row), by = byId(row.blocks), con = st.sel ? connected(row, st.sel) : { needs: {}, users: {} }, edges = [], nodes = [], labels = [];
-    L.cols.forEach(function (c) {
-      var w = (row.waves || []).filter(function (x) { return x.n === c.layer; })[0];
-      labels.push('<div class="collabel" style="left:' + c.x + 'px" data-layer-label="' + c.layer + '">' + esc((row.layerName || "Layer") + " " + c.layer) + " " +
-        (w ? "<small>" + w.units.length + " · " + w.points + " pt" + (w.landed ? " · " + w.landed + " landed" : "") + "</small>" : "<small>" + c.ids.length + "</small>") + "</div>");
+  function markers() {
+    function m(k) { return '<marker id="ah-' + k + '" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="ah-' + k + '" d="M0,0 L8,4 L0,8 z"/></marker>'; }
+    return "<defs>" + m("out") + m("in") + m("pv") + "</defs>";
+  }
+  function graphHtml(row, st, d, R) {
+    var L = layoutOf(row, st), gi = groupIndex(row), con = st.sel ? connected(row, st.sel) : { needs: {}, users: {} }, nodes = [], labels = [];
+    L.layers.forEach(function (c) {
+      var w = (row.waves || []).filter(function (x) { return x.n === c.layer; })[0], name = (row.layerName || "Layer") + " " + c.layer;
+      var sum = w ? w.units.length + " · " + w.points + " pt" + (w.landed ? " · " + w.landed + " ✓" : "") : String(c.n);
+      var full = w ? w.units.length + " " + noun("Unit", w.units.length).toLowerCase() + " · " + w.points + " pt" + (w.landed ? " · " + w.landed + " landed" : "") : c.n + " blocks";
+      labels.push('<div class="collabel" style="left:' + c.x + "px;top:" + c.y + "px;width:" + c.w + 'px" data-layer-label="' + c.layer + '" title="' + esc(name + ": " + full) + '">' + esc(name) + " <small>" + esc(sum) + "</small>" +
+        (w && w.units.length ? '<span class="bar" aria-hidden="true"><b style="width:' + Math.round(100 * (w.landed || 0) / w.units.length) + '%"></b></span>' : "") + "</div>");
     });
-    (row.blocks || []).forEach(function (b) {
-      (b.needs || []).forEach(function (n) {
-        if (!by[n.id] || !L.pos[n.id]) return;
-        var on = st.sel && (b.id === st.sel || n.id === st.sel), kind = !st.sel ? "" : b.id === st.sel ? " out" : n.id === st.sel ? " in" : "";
-        if ((st.off || {})[b.group] || (st.off || {})[by[n.id].group]) return;
-        edges.push('<path class="edge' + (on ? " on" + kind : "") + '" d="' + edgePath(L.pos[n.id], L.pos[b.id]) + '" data-from="' + esc(n.id) + '" data-to="' + esc(b.id) + '"><title>' + esc(b.id + " needs " + n.id + (n.why ? ": " + n.why : "")) + "</title></path>");
-      });
-    });
-    (row.blocks || []).forEach(function (b) { nodes.push(nodeHtml(row, b, st, L.pos[b.id], d, gi, con)); });
-    return '<div class="card canvas' + (st.allEdges ? " all" : "") + '" id="map-canvas" aria-label="' + esc(row.title) + ' as a graph: ' + (row.blocks || []).length + ' blocks, ' + edgeCount(row) + ' dependencies, ' + L.cols.length + " columns" + '">' +
-      '<div class="plane" style="width:' + L.width + "px;height:" + L.height + 'px"><svg width="' + L.width + '" height="' + L.height + '" aria-hidden="true"><g>' + edges.join("") + "</g></svg>" + labels.join("") + nodes.join("") + "</div></div>";
+    var seen = !!st.tab && !!byId(row.blocks)[st.tab];
+    (row.blocks || []).forEach(function (b, i) { nodes.push(nodeHtml(row, b, st, L.pos[b.id], d, gi, con, L, R)); });
+    if (!seen && nodes.length) nodes[0] = nodes[0].replace('tabindex="-1"', 'tabindex="0"');
+    var edges = st.sel ? edgesHtml(row, st, st.sel, false) : "";
+    return '<div class="card canvas ' + (L.comfy ? "comfy" : "fit") + '" id="map-canvas" data-zoom-now="' + (L.comfy ? "comfy" : "fit") + '" aria-label="' + esc(row.title) + ' as a graph: ' + (row.blocks || []).length + ' blocks, ' + edgeCount(row) + ' dependencies, ' + L.layers.length + ' columns' + '">' +
+      '<div class="plane" style="width:' + L.width + "px;height:" + L.height + 'px"><svg width="' + L.width + '" height="' + L.height + '" aria-hidden="true">' + markers() + '<g class="eg">' + edges + '</g><g class="hv"></g></svg>' + labels.join("") + nodes.join("") + "</div></div>";
   }
 
   /* ---------- the list: the same blocks and the same panel, for a phone ---------- */
-  function listRowHtml(row, b, st, d, gi) {
-    var cls = ["lrow"], ch = d.state[b.id];
+  function listRowHtml(row, b, st, d, gi, R) {
+    var cls = ["lrow"], ch = d.state[b.id], ready = !!R.ready[b.id];
     if (b.status === "landed") cls.push("landed");
+    if (ready) cls.push("ready");
     if (st.sel === b.id) cls.push("sel");
     if (!visible(row, b, st)) cls.push("off");
-    else if (!matches(row, b, st.q) || (st.changed && d.has && !d.state[b.id])) cls.push("dim");
-    if (ch) cls.push("rv-" + ch);
+    else if (dimmed(row, b, st, d, R)) cls.push("dim");
+    if (ch === "new") cls.push("is-new");
     var h = '<button type="button" class="' + cls.join(" ") + '" data-block="' + esc(b.id) + '" data-group="' + esc(b.group) + '" aria-pressed="' + (st.sel === b.id) + '" aria-expanded="' + (st.sel === b.id) + '" style="--c:var(--g' + (gi[b.group] || 0) + ')">' +
       '<span class="l1"><b>' + esc(b.id) + "</b>" + (b.label && b.label !== b.id ? "<small>" + esc(b.label) + "</small>" : "") +
       (b.points != null ? "<small>" + esc(b.points) + " pt</small>" : "") + (b.status ? '<span class="pill ' + esc(b.status) + '">' + esc(STATUS[b.status] || b.status) + "</span>" : "") +
-      (ch === "new" ? '<span class="rv-tag new">NEW</span>' : ch === "chg" ? '<span class="rv-tag chg">CHANGED</span>' : "") + '</span><span class="l2">' + esc(b.summary) + "</span></button>";
+      (ready ? '<span class="tag rdy">Ready</span>' : "") +
+      (ch === "new" ? '<span class="tag rnd new">new</span>' : ch === "chg" ? '<span class="tag rnd chg">changed</span>' : "") + '</span><span class="l2">' + esc(b.summary) + "</span></button>";
     if (st.sel === b.id) h += '<div class="card panel inline-panel" id="map-panel-inline">' + panelInner(row, st, d) + "</div>";
     return h;
   }
-  function listHtml(row, st, d) {
+  function listHtml(row, st, d, R) {
     var gi = groupIndex(row), layers = {}, out = [];
     (row.blocks || []).forEach(function (b) { (layers[b.layer || 1] = layers[b.layer || 1] || []).push(b); });
     Object.keys(layers).map(Number).sort(function (a, b) { return a - b; }).forEach(function (l) {
       var w = (row.waves || []).filter(function (x) { return x.n === l; })[0];
-      out.push("<h2>" + esc((row.layerName || "Layer") + " " + l) + (w ? " · " + w.units.length + " Units · " + w.points + " pt" + (w.landed ? " · " + w.landed + " landed" : "") : "") + "</h2>");
-      layers[l].sort(function (a, b) { return (gi[a.group] || 0) - (gi[b.group] || 0) || (a.id < b.id ? -1 : 1); }).forEach(function (b) { out.push(listRowHtml(row, b, st, d, gi)); });
+      out.push("<h2>" + esc((row.layerName || "Layer") + " " + l) + (w ? ' <span class="n">· ' + w.units.length + " " + esc(noun("Unit", w.units.length)) + " · " + w.points + " pt" + (w.landed ? " · " + w.landed + " landed" : "") + "</span>" : "") + "</h2>");
+      layers[l].sort(function (a, b) { return (gi[a.group] || 0) - (gi[b.group] || 0) || (a.id < b.id ? -1 : 1); }).forEach(function (b) { out.push(listRowHtml(row, b, st, d, gi, R)); });
     });
     return '<div class="card list" id="map-canvas" data-map-view="list">' + out.join("") + "</div>";
   }
 
-  /* ---------- the panel: what a block needs, what waits for it, what changed ---------- */
-  function link(id, cls, why, row) {
-    var b = byId(row.blocks)[id];
-    return '<button type="button" class="lnk ' + cls + '" data-go="' + esc(id) + '" title="' + esc((b ? b.summary : "") + (why ? " — " + why : "")) + '">' + esc(id) + "</button>";
+  /* ---------- the panel: what a block needs, whether it has landed, what waits for it, what changed ---------- */
+  function sm(b) { return b && b.status ? '<i class="sm ' + esc(b.status) + '" aria-hidden="true">' + (MARK[b.status] || "○") + "</i>" : ""; }
+  function link(id, cls, why, row, showState) {
+    var b = byId(row.blocks)[id], st = b && b.status ? (STATUS[b.status] || b.status) : "";
+    return '<button type="button" class="lnk ' + cls + (b && b.status === "landed" ? " landed" : "") + '" data-go="' + esc(id) + '" title="' + esc(id + (st ? " (" + st.toLowerCase() + ")" : "") + (b && b.summary ? ": " + b.summary : "") + (why ? " — " + why : "")) + '">' + (showState ? sm(b) : "") + esc(id) + "</button>";
+  }
+  function verdictHtml(b, R) {
+    if (!R.on) return "";
+    var n = R.needs[b.id] || { total: 0, landed: 0, open: [] };
+    if (b.status === "landed") return '<p class="verdict landed" data-verdict="landed"><b>Landed.</b> It is in the code already.</p>';
+    if (b.status === "building") return '<p class="verdict" data-verdict="building"><b>Being built now.</b>' + (n.total ? " " + n.landed + " of " + n.total + " " + noun("need", n.total) + " landed." : "") + "</p>";
+    if (R.ready[b.id]) return '<p class="verdict ready" data-verdict="ready"><b>Ready to start.</b> ' + (n.total ? (n.total === 1 ? "Its one need has" : "All " + n.total + " needs have") + " landed." : "It needs nothing first.") + "</p>";
+    return '<p class="verdict wait" data-verdict="wait"><b>Not ready yet.</b> ' + n.landed + " of " + n.total + " " + noun("need", n.total) + " landed; waiting for " + n.open.map(esc).join(", ") + ".</p>";
   }
   function panelInner(row, st, d) {
     var b = byId(row.blocks)[st.sel];
     if (!b) return panelHome(row, d);
-    var gi = groupIndex(row), needs = b.needs || [], users = b.usedBy || [], by = byId(row.blocks), h = "";
+    var R = readiness(row), gi = groupIndex(row), needs = b.needs || [], users = b.usedBy || [], by = byId(row.blocks), h = "";
     h += '<h2>' + esc(b.id) + "</h2>";
     h += '<p><span class="pill" style="--c:var(--g' + (gi[b.group] || 0) + ')"><i></i>' + esc(groupLabel(row, b.group)) + "</span> " +
       (b.status ? '<span class="pill ' + esc(b.status) + '">' + esc(STATUS[b.status] || b.status) + "</span> " : "") +
+      (R.ready[b.id] ? '<span class="pill ready">Ready</span> ' : "") +
       (b.label && b.label !== b.id ? '<span class="pill">' + esc(b.label) + "</span> " : "") +
       '<span class="pill">' + esc((row.layerName || "Layer") + " " + b.layer) + "</span>" +
       (b.points != null ? ' <span class="pill" title="' + esc(b.pointsSource || "") + '">' + esc(b.points) + " pt</span>" : "") + "</p>";
     h += '<p class="sum">' + esc(b.summary) + "</p>";
     if (b.title && b.title !== b.id && b.title !== b.summary) h += '<p class="why">' + esc(b.title) + "</p>";
+    h += verdictHtml(b, R);
     var lines = changeLines(row, d, b.id);
     if (lines.length) {
-      h += "<h3>Since revision " + esc(d.rev) + "</h3>" + lines.map(function (l) {
-        return '<div class="chg ' + (l.field === "new" ? "new" : "") + '" data-change-field="' + esc(l.field) + '">' + (l.text ? esc(l.text) : "<b>" + esc(l.name) + "</b>: <del>" + esc(l.was) + "</del> <ins>" + esc(l.now) + "</ins>") + "</div>";
+      h += "<h3>Since round " + esc(d.rev) + "</h3>" + lines.map(function (l) {
+        return '<div class="cl ' + (l.field === "new" ? "new" : "") + '" data-change-field="' + esc(l.field) + '">' + (l.text ? esc(l.text) : "<b>" + esc(l.name) + "</b>: <del>" + esc(l.was) + "</del> <ins>" + esc(l.now) + "</ins>") + "</div>";
       }).join("");
     }
-    h += "<h3>Needs first (" + needs.length + ")</h3>" + (needs.length ? needs.map(function (n) {
-      return "<div>" + link(n.id, "out", n.why, row) + (n.why ? '<div class="why">' + esc(n.why) + "</div>" : "") + "</div>";
+    var nl = needs.filter(function (n) { return by[n.id] && by[n.id].status === "landed"; }).length;
+    h += "<h3>Needs first (" + needs.length + ")" + (R.on && needs.length ? ' <span class="n" data-needs-landed>· ' + nl + " of " + needs.length + " landed</span>" : "") + "</h3>" + (needs.length ? needs.map(function (n) {
+      return '<div class="need">' + link(n.id, "out", n.why, row, R.on) + (n.why ? '<div class="why">' + esc(n.why) + "</div>" : "") + "</div>";
     }).join("") : '<p class="empty">Nothing. It can start first.</p>');
     h += "<h3>Waiting for it (" + users.length + ")</h3>" + (users.length ? '<div class="links">' + users.map(function (u) {
       var why = ((by[u] || {}).needs || []).filter(function (n) { return n.id === b.id; }).map(function (n) { return n.why; })[0];
-      return link(u, "in", why, row);
+      return link(u, "in", why, row, R.on);
     }).join("") + "</div>" : '<p class="empty">None.</p>');
-    if ((b.stories || []).length) h += "<h3>Stories (" + b.stories.length + ")</h3><div class=\"links\">" + b.stories.map(function (s) { return '<span class="lnk">' + esc(s) + "</span>"; }).join("") + "</div>";
+    if ((b.stories || []).length) h += "<h3>" + esc(noun("Story", b.stories.length)) + " (" + b.stories.length + ")</h3><div class=\"links\">" + b.stories.map(function (s) { return '<span class="lnk">' + esc(s) + "</span>"; }).join("") + "</div>";
     if ((b.responsibilities || []).length) h += "<h3>Responsibilities</h3><ul>" + b.responsibilities.map(function (r) { return "<li>" + esc(r) + "</li>"; }).join("") + "</ul>";
-    if ((b.entities || []).length) h += "<h3>Entities</h3><p>" + b.entities.map(esc).join(", ") + "</p>";
+    if ((b.entities || []).length) h += "<h3>" + esc(noun("Entity", b.entities.length)) + "</h3><p>" + b.entities.map(esc).join(", ") + "</p>";
     if ((b.external || []).length) h += "<h3>Outside the system</h3><p>" + b.external.map(esc).join(", ") + "</p>";
     if (b.detail) h += '<details class="beh"><summary>Behaviour in full</summary><p>' + esc(b.detail) + "</p></details>";
     return h;
   }
   function panelHome(row, d) {
-    var h = "<h2>Pick a block</h2><p class=\"sum\">Press a block (or Enter on it) to see what it needs first and what waits for it. Only the picked block's edges are drawn; “Show every edge” draws them all.</p>";
-    if (d.has) {
-      h += "<h3>Since revision " + esc(d.rev) + "</h3><p>" + d.counts.new + " new · " + d.counts.changed + " changed" + (d.counts.landed ? " (" + d.counts.landed + " landed)" : "") + " · " + d.counts.removed + " removed.</p>";
-    }
-    h += "<h3>Reading the marks</h3><p><span class=\"rv-tag new\">NEW</span> <span class=\"rv-tag chg\">CHANGED</span> since the previous revision. <span class=\"pill landed\">✓ Landed</span> the work is merged.</p>";
-    var legend = (row.groups || []).map(function (g, i) { return '<span class="pill" style="--c:var(--g' + (i % 6) + ')"><i></i>' + esc(g.label) + "</span>"; }).join(" ");
-    return h + (legend ? "<h3>Groups</h3><p>" + legend + "</p>" : "");
+    return '<span class="rail-t">Pick a block to see what it needs and what waits for it</span>';
   }
 
-  /* ---------- the matrix (stories × Units, entities × components) ---------- */
+  /* ---------- the matrices (stories × Units, entities × components): a grouped list first, the matrix when it shows something ---------- */
+  function gapsOf(row) { return (row.rows || []).filter(function (r) { return !((row.cells || {})[r.id] || []).length; }); }
+  /* the matrix earns its place when there are gaps to see, or rows and columns that each hold several dots */
+  function matrixOffer(row) {
+    var cells = row.cells || {}, rowsMany = 0, colN = {}, colsMany = 0;
+    Object.keys(cells).forEach(function (r) { var c = cells[r] || []; if (c.length > 1) rowsMany++; c.forEach(function (x) { colN[x] = (colN[x] || 0) + 1; }); });
+    Object.keys(colN).forEach(function (c) { if (colN[c] > 1) colsMany++; });
+    return gapsOf(row).length > 0 || (rowsMany >= 3 && colsMany >= 3);
+  }
+  function rowMatches(row, r, q) {
+    if (!q) return true;
+    var cols = byId(row.cols), mine = (row.cells || {})[r.id] || [];
+    return [r.id, r.label, r.title].concat(mine.map(function (c) { return (cols[c] || {}).label || c; }), mine.map(function (c) { return (cols[c] || {}).title || ""; })).join("\n").toLowerCase().indexOf(q.toLowerCase()) >= 0;
+  }
+  function shownRows(row, st, d) {
+    var cells = row.cells || {};
+    return (row.rows || []).filter(function (r) {
+      if (st.gaps && (cells[r.id] || []).length) return false;
+      if (st.changed && d.has && !d.touchedRows[r.id]) return false;
+      return rowMatches(row, r, st.q);
+    });
+  }
+  function gapWords(row) { return row.kind === "stories" ? "No Unit builds it" : "No component owns it"; }
+  function chipHtml(row, c, d, rid) {
+    var col = c || {}, fresh = d.state["c:" + col.id] || (rid && d.state["x:" + rid + "|" + col.id]);
+    return '<button type="button" class="lnk out' + (col.status === "landed" ? " landed" : "") + (fresh ? " is-new" : "") + '" data-col="' + esc(col.id) + '" title="' + esc((col.title || col.label || col.id) + (col.status ? " (" + (STATUS[col.status] || col.status).toLowerCase() + ")" : "")) + '">' + sm(col) + esc(col.label || col.id) + "</button>";
+  }
+  function ghostCols(row, r, st, d) {
+    if (!st.changed || !d.has) return [];
+    return Object.keys(d.dropped).filter(function (k) { return k.slice(0, k.indexOf("|")) === r.id; }).map(function (k) { return k.slice(k.indexOf("|") + 1); });
+  }
+  function mlistRow(row, r, st, d, cols) {
+    var mine = (row.cells || {})[r.id] || [], gap = !mine.length, sel = st.sel === "r:" + r.id, fresh = d.state["r:" + r.id];
+    var cls = ["lrow", "mrow", gap ? "gap" : "", sel ? "sel" : "", fresh ? "is-new" : ""].filter(Boolean).join(" ");
+    var h = '<div class="' + cls + '" data-row-line="' + esc(r.id) + '"><button type="button" class="lhd" data-row="' + esc(r.id) + '" aria-pressed="' + sel + '" title="' + esc(r.title || r.id) + '"><b>' + esc(r.label || r.id) + "</b>" +
+      (r.title ? '<span class="t">' + esc(r.title) + "</span>" : "") + (gap ? '<span class="gapchip">' + gapWords(row) + "</span>" : "") + (fresh ? '<span class="tag rnd new">new</span>' : "") + "</button>" +
+      (mine.length || ghostCols(row, r, st, d).length ? '<div class="lchips">' + mine.map(function (c) { return chipHtml(row, cols[c] || { id: c }, d, r.id); }).join("") +
+        ghostCols(row, r, st, d).map(function (c) { return '<span class="lnk ghostlnk" data-dropped="' + esc(r.id + "|" + c) + '" title="No longer linked since round ' + esc(d.rev) + '">' + esc(c) + "</span>"; }).join("") + "</div>" : "") + "</div>";
+    if (sel) h += '<div class="card panel inline-panel" id="map-panel-inline">' + matrixPanel(row, st, d) + "</div>";
+    return h;
+  }
+  function mlistHtml(row, st, d) {
+    var rows = shownRows(row, st, d), cells = row.cells || {}, cols = byId(row.cols), groups = [], out = [];
+    var gaps = rows.filter(function (r) { return !(cells[r.id] || []).length; }), rest = rows.filter(function (r) { return (cells[r.id] || []).length; });
+    if (gaps.length) groups.push({ title: gapWords(row), n: gaps.length, rows: gaps });
+    var by = {};
+    rest.forEach(function (r) { var k = row.kind === "stories" ? r.id.replace(/\.\d+[a-z]?$/, "") : ""; (by[k] = by[k] || []).push(r); });
+    Object.keys(by).forEach(function (k) { groups.push({ title: k || ucfirst(plural(row.rowsTitle || "row")), n: by[k].length, rows: by[k] }); });
+    groups.forEach(function (g) {
+      out.push("<h2>" + esc(g.title) + ' <span class="n">· ' + g.n + " " + esc(noun(row.rowsTitle || "row", g.n).toLowerCase()) + "</span></h2>");
+      g.rows.forEach(function (r) { out.push(mlistRow(row, r, st, d, cols)); });
+    });
+    if (!rows.length) out.push('<p class="empty">' + (st.gaps ? "No gaps: every " + esc((row.rowsTitle || "row").toLowerCase()) + " has " + esc(noun(row.colsTitle || "column", 2).toLowerCase()) + "." : "Nothing matches.") + "</p>");
+    if (!gapsOf(row).length && !st.gaps) out.unshift('<p class="okline" data-nogaps><b class="cov">✓</b> No gaps: every ' + esc((row.rowsTitle || "row").toLowerCase()) + " is covered by at least one " + esc((row.colsTitle || "column").toLowerCase()) + ".</p>");
+    var colSel = (st.sel || "").indexOf("c:") === 0 ? '<div class="card panel inline-panel" id="map-panel-inline">' + matrixPanel(row, st, d) + "</div>" : "";
+    return '<div class="card list mlist" id="map-canvas" data-map-view="list">' + colSel + out.join("") + "</div>";
+  }
+  function matrixLegend(row, d) {
+    return '<div class="mleg" id="map-mleg"><span><b class="cov">●</b> the ' + esc((row.rowsTitle || "row").toLowerCase()) + " is covered by the " + esc((row.colsTitle || "column").toLowerCase()) + "</span>" +
+      '<span><i class="sw gap" style="border-color:var(--warn-fg)"></i> a row with no dot is a gap</span>' +
+      (d.has ? '<span><i class="sw new"></i> new link, row or column since round ' + esc(d.rev) + "</span>" : "") + '<span><b class="cov">✓</b> a column that has landed</span></div>';
+  }
   function matrixHtml(row, st, d) {
-    var cols = (row.cols || []).slice().sort(function (a, b) { return (a.layer || 0) - (b.layer || 0) || (a.id < b.id ? -1 : 1); }), cells = row.cells || {}, sel = st.sel || "";
+    var cells = row.cells || {}, sel = st.sel || "", rows = shownRows(row, st, d);
+    var cols = (row.cols || []).slice().sort(function (a, b) { return (a.layer || 0) - (b.layer || 0) || (a.id < b.id ? -1 : 1); }).filter(function (c) {
+      if (st.changed && d.has && !d.touchedCols[c.id]) return false;
+      return !st.gaps || true;
+    });
     var head = '<tr><th class="rh" scope="col">' + esc(row.rowsTitle) + " ↓ · " + esc(row.colsTitle) + " →</th>" + cols.map(function (c) {
-      return '<th class="ch' + (c.status === "landed" ? " landed" : "") + (sel === "c:" + c.id ? " colsel" : "") + (d.state["c:" + c.id] ? " rv-" + d.state["c:" + c.id] : "") + '" scope="col"><button type="button" data-col="' + esc(c.id) + '" aria-pressed="' + (sel === "c:" + c.id) + '" title="' + esc(c.title || c.id) + '">' + esc(c.label || c.id) + "</button></th>";
+      return '<th class="ch' + (c.status === "landed" ? " landed" : "") + (sel === "c:" + c.id ? " colsel" : "") + (d.state["c:" + c.id] ? " is-new" : "") + '" scope="col"><button type="button" data-col="' + esc(c.id) + '" aria-pressed="' + (sel === "c:" + c.id) + '" title="' + esc((c.title || c.id) + (c.status ? " (" + (STATUS[c.status] || c.status).toLowerCase() + ")" : "")) + '">' + (c.status === "landed" ? "✓ " : "") + esc(c.label || c.id) + "</button></th>";
     }).join("") + "</tr>";
-    var body = (row.rows || []).filter(function (r) { return !st.gaps || !(cells[r.id] || []).length; }).map(function (r) {
+    var body = rows.map(function (r) {
       var mine = cells[r.id] || [], gap = !mine.length;
-      return '<tr class="' + [gap ? "gap" : "", sel === "r:" + r.id ? "sel" : "", d.state["r:" + r.id] ? "rv-" + d.state["r:" + r.id] : ""].join(" ").trim() + '" data-row-line="' + esc(r.id) + '">' +
+      return '<tr class="' + [gap ? "gap" : "", sel === "r:" + r.id ? "sel" : "", d.state["r:" + r.id] ? "is-new" : ""].join(" ").trim() + '" data-row-line="' + esc(r.id) + '">' +
         '<th class="rh" scope="row"><button type="button" class="hd" data-row="' + esc(r.id) + '" aria-pressed="' + (sel === "r:" + r.id) + '"><b>' + esc(r.label || r.id) + "</b>" + (r.title ? "<span>" + esc(r.title) + "</span>" : "") +
-        (gap ? '<span class="gapchip">' + (row.kind === "stories" ? "No Unit builds it" : "No component owns it") + "</span>" : "") + "</button></th>" +
+        (gap ? '<span class="gapchip">' + gapWords(row) + "</span>" : "") + "</button></th>" +
         cols.map(function (c) {
-          var on = mine.indexOf(c.id) >= 0, fresh = d.state["x:" + r.id + "|" + c.id];
-          return '<td class="' + [on ? "on" : "", fresh ? "rv-new" : "", sel === "c:" + c.id ? "colsel" : ""].join(" ").trim() + '"' + (on ? ' data-cell="' + esc(r.id + "|" + c.id) + '" aria-label="' + esc(r.id + " is in " + c.id) + '"' : "") + ">" + (on ? "●" : "") + "</td>";
+          var on = mine.indexOf(c.id) >= 0, fresh = d.state["x:" + r.id + "|" + c.id], gone = !on && st.changed && d.dropped[r.id + "|" + c.id];
+          return '<td class="' + [on ? "on" : "", fresh ? "is-new" : "", gone ? "gone" : "", sel === "c:" + c.id ? "colsel" : ""].join(" ").trim() + '"' + (gone ? ' title="No longer linked since round ' + esc(d.rev) + '"' : "") + (on ? ' data-cell="' + esc(r.id + "|" + c.id) + '" aria-label="' + esc(r.id + " is in " + c.id) + '"' : "") + ">" + (on ? "●" : gone ? "×" : "") + "</td>";
         }).join("") + "</tr>";
     }).join("");
-    return '<div class="card mwrap" id="map-canvas" data-map-view="matrix"><table class="matrix" aria-label="' + esc(row.title) + '"><thead>' + head + "</thead><tbody>" + body + "</tbody></table></div>";
+    return '<div class="card mwrap" id="map-canvas" data-map-view="matrix">' + matrixLegend(row, d) + '<table class="matrix" aria-label="' + esc(row.title) + '"><thead>' + head + "</thead><tbody>" + body + "</tbody></table></div>";
   }
   function matrixPanel(row, st, d) {
     var sel = st.sel || "", cells = row.cells || {}, h = "";
@@ -686,8 +1014,7 @@ var MapView = (function () {
       if (!r) return matrixHome(row, d);
       var mine = cells[r.id] || [], by = byId(row.cols);
       h = "<h2>" + esc(r.label || r.id) + "</h2>" + (r.title ? '<p class="sum">' + esc(r.title) + "</p>" : "");
-      h += "<h3>" + esc(row.colsTitle) + "s that build it (" + mine.length + ")</h3>" + (mine.length ? '<div class="links">' + mine.map(function (c) {
-        return '<button type="button" class="lnk out" data-col="' + esc(c) + '" title="' + esc((by[c] || {}).title || "") + '">' + esc((by[c] || {}).label || c) + "</button>"; }).join("") + "</div>" :
+      h += "<h3>" + esc(plural(row.colsTitle)) + " that build it (" + mine.length + ")</h3>" + (mine.length ? '<div class="links">' + mine.map(function (c) { return chipHtml(row, by[c] || { id: c }, d); }).join("") + "</div>" :
         '<p class="empty">None. ' + (row.kind === "stories" ? "No Unit is planned to build this story." : "No component owns this entity.") + "</p>");
       return h;
     }
@@ -697,88 +1024,123 @@ var MapView = (function () {
       var rs = (row.rows || []).filter(function (x) { return (cells[x.id] || []).indexOf(c.id) >= 0; });
       h = "<h2>" + esc(c.label || c.id) + "</h2>" + (c.title && c.title !== c.label ? '<p class="sum">' + esc(c.title) + "</p>" : "") +
         (c.status ? '<p><span class="pill ' + esc(c.status) + '">' + esc(STATUS[c.status] || c.status) + "</span></p>" : "");
-      h += "<h3>" + esc(row.rowsTitle) + "s it covers (" + rs.length + ")</h3>" + (rs.length ? '<div class="links">' + rs.map(function (x) { return '<button type="button" class="lnk in" data-row="' + esc(x.id) + '" title="' + esc(x.title || "") + '">' + esc(x.label || x.id) + "</button>"; }).join("") + "</div>" : '<p class="empty">None.</p>');
+      h += "<h3>" + esc(plural(row.rowsTitle)) + " it covers (" + rs.length + ")</h3>" + (rs.length ? '<div class="links">' + rs.map(function (x) { return '<button type="button" class="lnk in" data-row="' + esc(x.id) + '" title="' + esc(x.title || "") + '">' + esc(x.label || x.id) + "</button>"; }).join("") + "</div>" : '<p class="empty">None.</p>');
       return h;
     }
     return matrixHome(row, d);
   }
   function matrixHome(row, d) {
-    var gaps = (row.rows || []).filter(function (r) { return !((row.cells || {})[r.id] || []).length; });
-    var h = "<h2>Pick a row or a column</h2><p class=\"sum\">A dot says the row is covered by the column. A row with no dot is a gap" + (gaps.length ? ": " + gaps.length + " here." : ": there are none.") + "</p>";
-    if (gaps.length) h += '<div class="links">' + gaps.slice(0, 40).map(function (g) { return '<button type="button" class="lnk" data-row="' + esc(g.id) + '">' + esc(g.label || g.id) + "</button>"; }).join("") + "</div>";
-    if (d.has) h += "<h3>Since revision " + esc(d.rev) + "</h3><p>" + d.counts.new + " new · " + d.counts.removed + " removed.</p>";
-    return h;
+    return '<span class="rail-t">Pick a ' + esc((row.rowsTitle || "row").toLowerCase()) + " or a " + esc((row.colsTitle || "column").toLowerCase()) + " to see how they connect</span>";
   }
 
   /* ---------- the page ---------- */
-  function statsHtml(row, d) {
+  function statsHtml(row, d, R) {
     var s = [];
     if (isGraph(row)) {
       var pts = (row.blocks || []).reduce(function (n, b) { return n + (b.points || 0); }, 0), landed = (row.blocks || []).filter(function (b) { return b.status === "landed"; }).length;
       s.push("<span><b>" + (row.blocks || []).length + "</b> blocks</span>", "<span><b>" + edgeCount(row) + "</b> dependencies</span>");
       if (pts) s.push("<span><b>" + pts + "</b> points</span>");
       if (row.kind === "units") s.push("<span><b>" + landed + "</b> of " + (row.blocks || []).length + " landed</span>");
-      s.push("<span><b>" + ((row.waves || []).length || new Set((row.blocks || []).map(function (b) { return b.layer; })).size) + "</b> " + esc((row.layerName || "layer").toLowerCase()) + "s</span>");
+      if (R.on) s.push('<span data-stat="ready"><b>' + R.count + "</b> ready</span>");
+      var n = (row.waves || []).length || new Set((row.blocks || []).map(function (b) { return b.layer; })).size;
+      s.push("<span><b>" + n + "</b> " + esc(noun(row.layerName || "layer", n).toLowerCase()) + "</span>");
     } else {
-      var gaps = (row.rows || []).filter(function (r) { return !((row.cells || {})[r.id] || []).length; }).length;
-      s.push("<span><b>" + (row.rows || []).length + "</b> " + esc(row.rowsTitle || "row").toLowerCase() + "s</span>", "<span><b>" + (row.cols || []).length + "</b> " + esc(row.colsTitle || "column").toLowerCase() + "s</span>", "<span><b>" + gaps + "</b> gaps</span>");
+      var rn = (row.rows || []).length, cn = (row.cols || []).length, gaps = gapsOf(row).length;
+      s.push("<span><b>" + rn + "</b> " + esc(noun(row.rowsTitle || "row", rn).toLowerCase()) + "</span>", "<span><b>" + cn + "</b> " + esc(noun(row.colsTitle || "column", cn).toLowerCase()) + "</span>",
+        '<span data-stat="gaps"><b>' + gaps + "</b> " + noun("gap", gaps) + "</span>");
     }
     return '<div class="stats" id="map-stats">' + s.join("") + "</div>";
   }
   function tabsHtml(rows, row) {
     var mine = rows.filter(function (r) { return r.intent === row.intent; }).sort(function (a, b) { return KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind); });
-    return '<nav class="tabs" aria-label="Maps of this intent">' + mine.map(function (r) {
-      return '<a class="tab" href="#' + esc(r.id) + '" data-kind-tab="' + esc(r.kind) + '"' + (r.id === row.id ? ' aria-current="page"' : "") + ">" + esc(KIND_NAME[r.kind] || r.kind) + " <small>r" + esc(r.revision) + "</small></a>";
+    return '<nav class="tabs" aria-label="Maps of this intent: pick which one to look at">' + mine.map(function (r) {
+      return '<a class="tab" href="#' + esc(r.id) + '" data-kind-tab="' + esc(r.kind) + '" title="' + esc(r.title + ", round " + r.revision) + '"' + (r.id === row.id ? ' aria-current="page"' : "") + ">" + esc(KIND_NAME[r.kind] || r.kind) + " <small>r" + esc(r.revision) + "</small></a>";
     }).join("") + "</nav>";
   }
-  function barHtml(rows, row, st, d, narrow) {
-    var graph = isGraph(row), chips = graph ? (row.groups || []).map(function (g, i) {
-      return '<button type="button" class="chip" data-group-chip="' + esc(g.key) + '" aria-pressed="' + !(st.off || {})[g.key] + '" style="--c:var(--g' + (i % 6) + ')"><i></i>' + esc(g.label) + "</button>";
+  function legendHtml(row, d, R) {
+    var graph = isGraph(row), h = '<div class="card pop" id="map-legend" role="region" aria-label="Legend" hidden>';
+    if (graph) {
+      h += "<h3>A block</h3><p>" + '<i class="sw landed"></i> <b>✓ landed</b>: quiet, filled. The work is merged.</p>' + (R.on ? '<p><i class="sw rdy"></i> <span class="tag rdy">Ready</span> every block it needs has landed and nobody has started it. A block under construction is not Ready.</p>' : "") +
+        '<p><b class="st" style="color:var(--warn-fg)">●</b> being built. A plain card is planned.</p><p>The coloured stripe on the left is its group.</p>' +
+        "<h3>What changed</h3><p>" + (d.has ? '<i class="sw new"></i> <span class="tag rnd">new</span> since round ' + esc(d.rev) + ' · <i class="sw chg"></i> <span class="tag rnd">changed</span> (a dashed edge). The colour is the one of the round, as on the gate pages.' : "Nothing changed yet: this is the first round.") + "</p>" +
+        "<h3>Edges</h3><p><i class=\"sw out\"></i> what the picked block needs first · <i class=\"sw in\"></i> what waits for it. The arrow ends at the block that needs the other. Hover a block to preview its edges.</p>";
+    } else {
+      h += "<h3>The list</h3><p>Each " + esc((row.rowsTitle || "row").toLowerCase()) + " with the " + esc(noun(row.colsTitle || "column", 2).toLowerCase()) + " it is covered by. A row with none is a gap and comes first.</p>" +
+        "<h3>The matrix</h3><p><b class=\"cov\">●</b> covered · a row with no dot is a gap · " + (d.has ? '<i class="sw new"></i> new since round ' + esc(d.rev) + " · " : "") + "<b class=\"cov\">✓</b> a column that has landed.</p>";
+    }
+    h += "<h3>Keys</h3><p><kbd>/</kbd> find · <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> move between blocks · <kbd>Enter</kbd> pick · <kbd>Esc</kbd> clear</p>";
+    return h + "</div>";
+  }
+  function barHtml(rows, row, st, d, narrow, R) {
+    var graph = isGraph(row), groups = row.groups || [], tools = [], view = st.view || (narrow ? "list" : "graph");
+    var chips = graph ? groups.map(function (g, i) {
+      return '<button type="button" class="chip" data-group-chip="' + esc(g.key) + '" aria-pressed="' + !(st.off || {})[g.key] + '" style="--c:var(--g' + (i % 6) + ')" title="' + esc("Show or hide the " + g.label + " blocks") + '"><i></i>' + esc(g.label) + "</button>";
     }).join("") : "";
-    var view = st.view || (narrow ? "list" : "graph");
-    var tools = '<div class="tools">' + (graph ? '<input id="map-search" type="search" placeholder="Find a block, story or entity" aria-label="Find a block" value="' + esc(st.q || "") + '">' : "") +
-      (chips ? '<div class="chips" role="group" aria-label="Groups">' + chips + "</div>" : "") +
-      (graph ? '<button type="button" class="tog" data-act="edges" aria-pressed="' + !!st.allEdges + '">Show every edge</button>' : '<button type="button" class="tog" data-act="gaps" aria-pressed="' + !!st.gaps + '">Only gaps</button>') +
-      (d.has ? '<button type="button" class="tog" data-act="changes" aria-pressed="' + !!st.changed + '">Only changes since r' + esc(d.rev) + "</button>" : "") +
-      (graph ? '<span class="seg" role="group" aria-label="View"><button type="button" data-view="graph" aria-pressed="' + (view === "graph") + '">Graph</button><button type="button" data-view="list" aria-pressed="' + (view === "list") + '">List</button></span>' : "") + "</div>";
-    return '<header id="map-bar"><div class="bar-top"><div class="grow"><div class="crumbs"><a href="#" data-nav="">AI-DLC maps</a> · ' + esc(row.intent) + "</div><h1>" + esc(row.title) + "</h1></div>" +
-      '<span class="hint">revision ' + esc(row.revision) + " · built " + esc(String(row.builtAt || "").replace("T", " ").replace(/:\d\d(\.\d+)?Z?$/, "")) + (row.sources && row.sources.length ? "" : "") + "</span></div>" +
-      tabsHtml(rows, row) + statsHtml(row, d) + tools + "</header>";
+    var inline = groups.length <= 3, shown = groups.filter(function (g) { return !(st.off || {})[g.key]; }).length;
+    tools.push(tabsHtml(rows, row));
+    tools.push('<input id="map-search" type="search" placeholder="' + (narrow ? "Find" : graph ? "Find a block (press /)" : "Find (press /)") + '" aria-label="' + (graph ? "Find a block, story or entity by id, name or words" : "Find a row or column by id, name or words") + '" title="Type to dim what does not match. Press / anywhere to jump here." value="' + esc(st.q || "") + '">');
+    if (graph && chips) tools.push(inline ? '<div class="chips" role="group" aria-label="Groups: press to hide or show">' + chips + "</div>" :
+      '<button type="button" class="tog" data-act="groups" aria-expanded="' + !!st.groupsOpen + '" title="Show or hide whole groups of blocks">Groups <span class="n">' + shown + "/" + groups.length + '</span></button>');
+    if (graph && R.on) tools.push('<button type="button" class="tog rdy" data-act="ready" aria-pressed="' + !!st.ready + '" title="Only the blocks you could start now: every block they need has landed, and they have not landed themselves. The rest are dimmed.">Ready now <span class="n">' + R.count + "</span></button>");
+    if (!graph) { var gn = gapsOf(row).length; tools.push('<button type="button" class="tog" data-act="gaps" aria-pressed="' + !!st.gaps + '"' + (gn ? "" : " disabled") + ' title="' + (gn ? "Only the " + esc(noun(row.rowsTitle || "row", 2).toLowerCase()) + " " + esc(gapWords(row).toLowerCase()) + " (" + gn + ")" : "No gaps: every " + esc((row.rowsTitle || "row").toLowerCase()) + " is covered") + '">Gaps only <span class="n">' + gn + "</span></button>"); }
+    if (d.has) tools.push('<button type="button" class="tog" data-act="changes" aria-pressed="' + !!st.changed + '" title="Only what is new or changed since round ' + esc(d.rev) + ". The rest is " + (graph ? "dimmed" : "left out") + '.">Only changes since r' + esc(d.rev) + "</button>");
+    tools.push('<span class="grow-sp"></span>');
+    if (graph && !narrow) {
+      tools.push('<span class="seg" role="group" aria-label="View: the map as a drawing or as a list"><button type="button" data-view="graph" aria-pressed="' + (view === "graph") + '" title="Draw the map">Graph</button><button type="button" data-view="list" aria-pressed="' + (view === "list") + '" title="The same blocks as a list, grouped by ' + esc((row.layerName || "layer").toLowerCase()) + '">List</button></span>');
+      if (view === "graph") tools.push('<span class="seg" role="group" aria-label="Size of the cards"><button type="button" data-zoom="fit" aria-pressed="' + ((st.zoom || "fit") === "fit") + '" title="Compact cards: the whole map in view">Fit</button><button type="button" data-zoom="comfy" aria-pressed="' + (st.zoom === "comfy") + '" title="Full cards, bigger: scroll to see all of it">Comfortable</button></span>');
+    }
+    if (!graph && !narrow && matrixOffer(row)) {
+      var mv = st.mview === "matrix" ? "matrix" : "list";
+      tools.push('<span class="seg" role="group" aria-label="View: a list or a matrix"><button type="button" data-mview="list" aria-pressed="' + (mv === "list") + '" title="Each ' + esc((row.rowsTitle || "row").toLowerCase()) + ' with what covers it">List</button><button type="button" data-mview="matrix" aria-pressed="' + (mv === "matrix") + '" title="Rows by columns, a dot where they meet">Matrix</button></span>');
+    }
+    tools.push('<button type="button" class="tog" data-act="legend" aria-expanded="' + !!st.legend + '" aria-controls="map-legend" title="What the marks, colours and keys mean">Legend</button>');
+    var gpop = graph && chips && !inline ? '<div class="card pop" id="map-groups" role="group" aria-label="Groups" ' + (st.groupsOpen ? "" : "hidden") + '><h3>Groups</h3><div class="chips">' + chips + "</div></div>" : "";
+    return '<div id="map-bar" role="toolbar" aria-label="Map tools">' + tools.join("") + gpop + legendHtml(row, d, R).replace("hidden>", st.legend ? ">" : "hidden>") + "</div>";
+  }
+  function headHtml(row, d, R) {
+    return '<header id="map-head"><div class="bar-top"><div class="grow"><div class="crumbs"><a href="#" data-nav="">AI-DLC maps</a> · ' + esc(row.intent) + "</div><h1>" + esc(row.title) + "</h1></div>" +
+      '<span class="hint">round ' + esc(row.revision) + " · built " + esc(String(row.builtAt || "").replace("T", " ").replace(/:\d\d(\.\d+)?Z?$/, "")) + "</span></div>" + statsHtml(row, d, R) + "</header>";
   }
   function revisionHtml(row, d) {
-    if (!d.has) return row.revision > 1 ? "" : "";
+    if (!d.has) return "";
     var c = d.counts, ghosts = d.removed.map(function (g) {
-      return '<span class="ghost" data-removed="' + esc(g.id) + '" title="' + esc((g.summary || g.title || "") + " (removed in revision " + row.revision + ")") + '">' + esc(g.id) + "</span>";
-    }).join("");
-    return '<section class="card rvbar" id="map-changes" aria-label="What changed in revision ' + esc(row.revision) + '"><b>Revision ' + esc(row.revision) + "</b> since revision " + esc(d.rev) +
-      ': <span class="rv-tag new">' + c.new + ' new</span> <span class="rv-tag chg">' + c.changed + " changed</span>" + (c.landed ? ' <span class="rv-tag landed">' + c.landed + " landed</span>" : "") +
-      ' <span class="rv-tag gone">' + c.removed + " removed</span>" + (ghosts ? '<div class="gone">' + ghosts + "</div>" : "") + "</section>";
+      return '<span class="ghost" data-removed="' + esc(g.id) + '" title="' + esc((g.summary || g.title || "") + " (removed in round " + row.revision + ")") + '">' + esc(g.id) + "</span>";
+    }).join(""), graph = isGraph(row), parts;
+    if (graph) parts = '<span class="tag rnd">' + c.new + ' new</span> <span class="tag rnd">' + c.changed + " changed</span>" + (c.landed ? ' <span class="tag ok">' + c.landed + " landed</span>" : "") + ' <span class="tag gone">' + c.removed + " removed</span>";
+    else parts = (c.newCols ? '<span class="tag rnd">' + c.newCols + " new " + esc(noun(row.colsTitle, c.newCols)) + "</span> " : "") + (c.newRows ? '<span class="tag rnd">' + c.newRows + " new " + esc(noun(row.rowsTitle, c.newRows)) + "</span> " : "") +
+      '<span class="tag rnd">' + c.links + " new " + noun("link", c.links) + '</span> <span class="tag gone">' + c.removed + " removed</span>" + ' <span class="why-n">' + c.dropped + " " + noun("link", c.dropped) + " no longer there</span>";
+    return '<section class="card rvbar" id="map-changes" aria-label="What changed in round ' + esc(row.revision) + '"><b>Round ' + esc(row.revision) + "</b> since round " + esc(d.rev) + ": " + parts + (ghosts ? '<div class="gone">' + ghosts + "</div>" : "") + "</section>";
   }
   function emptyHtml() {
     return '<div class="card msg" id="map-empty"><b>Nothing to show in this map.</b><p>The records hold no blocks for it.</p></div>';
   }
   function render(rows, row, st, narrow) {
-    var d = diff(row), graph = isGraph(row), view = st.view || (narrow ? "list" : "graph"), body;
-    if (graph && !(row.blocks || []).length || !graph && !(row.rows || []).length) return barHtml(rows, row, st, d, narrow) + emptyHtml();
-    if (graph) body = (view === "list" ? listHtml(row, st, d) : graphHtml(row, st, d));
-    else body = matrixHtml(row, st, d);
-    var panel = graph && view === "list" ? "" : '<aside class="card panel" id="map-panel" aria-live="polite">' + (graph ? panelInner(row, st, d) : matrixPanel(row, st, d)) + "</aside>";
-    return barHtml(rows, row, st, d, narrow) + revisionHtml(row, d) + '<div class="body" id="map-body"' + (panel ? "" : ' style="grid-template-columns:minmax(0,1fr)"') + ">" + body + panel + "</div>";
+    var d = diff(row), graph = isGraph(row), R = graph ? readiness(row) : { on: false, ready: {}, needs: {}, count: 0 }, body, open = !!st.sel;
+    var view = st.view || (narrow ? "list" : "graph"), mview = narrow || st.mview !== "matrix" || !matrixOffer(row) ? "list" : "matrix";
+    var rt = "rt" + tone(row.revision);
+    if (graph && !(row.blocks || []).length || !graph && !(row.rows || []).length) return '<div class="' + rt + '">' + headHtml(row, d, R) + barHtml(rows, row, st, d, narrow, R) + emptyHtml() + "</div>";
+    if (graph) body = narrow || view === "list" ? listHtml(row, st, d, R) : graphHtml(row, st, d, R);
+    else body = mview === "matrix" ? matrixHtml(row, st, d) : mlistHtml(row, st, d);
+    var inlineOnly = graph ? (narrow || view === "list") : mview === "list";
+    var panel = inlineOnly ? "" : '<aside class="card panel' + (open ? "" : " rail") + '" id="map-panel" aria-live="polite">' + (graph ? panelInner(row, st, d) : matrixPanel(row, st, d)) + "</aside>";
+    return '<div class="' + rt + '">' + headHtml(row, d, R) + barHtml(rows, row, st, d, narrow, R) + revisionHtml(row, d) +
+      '<div class="body' + (open && panel ? " open" : "") + '" id="map-body"' + (panel ? "" : ' style="grid-template-columns:minmax(0,1fr)"') + ">" + body + panel + "</div></div>";
   }
   function indexHtml(rows) {
     if (!rows.length) return '<div class="card msg"><b>No maps yet.</b><p>The agent adds a map here when it settles the components or the Units of an intent, and gives you its link.</p></div>';
     var by = {};
     rows.forEach(function (r) { (by[r.intent] = by[r.intent] || []).push(r); });
-    return '<header id="map-bar"><div class="crumbs">AI-DLC</div><h1>Maps</h1><p class="lede">How the pieces of each project connect: what a component or a Unit needs first and what waits for it.</p></header>' +
+    return '<header id="map-head"><div class="crumbs">AI-DLC</div><h1>Maps</h1><p class="lede">How the pieces of each project connect: what a component or a Unit needs first and what waits for it.</p></header>' +
       Object.keys(by).sort().reverse().map(function (k) {
         return '<section class="card idx"><h2>' + esc(k) + "</h2>" + by[k].sort(function (a, b) { return KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind); }).map(function (r) {
-          var n = isGraph(r) ? (r.blocks || []).length + " blocks" : (r.rows || []).length + " × " + (r.cols || []).length;
-          return '<a class="irow" href="#' + esc(r.id) + '" data-nav="' + esc(r.id) + '"><b>' + esc(r.title) + "</b><small>" + esc(n) + " · revision " + esc(r.revision) + " · " + esc(String(r.builtAt || "").slice(0, 16).replace("T", " ")) + "</small></a>";
+          var n = isGraph(r) ? (r.blocks || []).length + " blocks" : (r.rows || []).length + " " + noun(r.rowsTitle || "row", (r.rows || []).length).toLowerCase() + " by " + (r.cols || []).length + " " + noun(r.colsTitle || "column", (r.cols || []).length).toLowerCase();
+          return '<a class="irow" href="#' + esc(r.id) + '" data-nav="' + esc(r.id) + '"><b>' + esc(r.title) + "</b><small>" + esc(n) + " · round " + esc(r.revision) + " · " + esc(String(r.builtAt || "").slice(0, 16).replace("T", " ")) + "</small></a>";
         }).join("") + "</section>";
       }).join("");
   }
 
-  return { render: render, indexHtml: indexHtml, diff: diff, layout: layout, changeLines: changeLines, panelInner: panelInner, esc: esc, edgeCount: edgeCount, snapOf: snapOf };
+  return { render: render, indexHtml: indexHtml, diff: diff, layout: layout, layoutOf: layoutOf, edgesHtml: edgesHtml, routeEdges: routeEdges, readiness: readiness, matrixOffer: matrixOffer, plural: plural, noun: noun,
+    changeLines: changeLines, panelInner: panelInner, esc: esc, edgeCount: edgeCount, snapOf: snapOf };
 })();
 if (typeof module !== "undefined") module.exports = MapView;
 /* RENDER-END */
@@ -788,8 +1150,8 @@ if (typeof module !== "undefined") module.exports = MapView;
   "use strict";
   var app = document.getElementById("app"), toastEl = document.getElementById("toast"), tipEl = document.getElementById("tip");
   var db = null, rows = [], ids = {}, tipOn = null;
-  var st = { sel: "", q: "", off: {}, allEdges: false, changed: false, gaps: false, view: "" };
-  var current = "";
+  var st = { sel: "", q: "", off: {}, ready: false, changed: false, gaps: false, view: "", mview: "list", zoom: "fit", legend: false, groupsOpen: false, avail: 0, tab: "" };
+  var current = "", resizeT = 0;
 
   function toast(text) { toastEl.textContent = text; toastEl.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(function () { toastEl.hidden = true; }, 2600); }
   function narrow() { try { return !!(window.matchMedia && window.matchMedia("(max-width: 720px)").matches); } catch (e) { return false; } }
@@ -804,48 +1166,80 @@ if (typeof module !== "undefined") module.exports = MapView;
     var h = "#" + row.id + (st.sel ? "/" + st.sel : "");
     try { history.replaceState(null, "", location.pathname + location.search + h); } catch (e) { /* a preview without history */ }
   }
+  /* the width the drawing may use: the page's content, less the panel at its widest (a third, 280 to 400px) and the gaps.
+     The layout is made for that width whether or not something is picked, so picking a block never moves the cards. */
+  function availWidth() {
+    if (window.MAPS_AVAIL) return window.MAPS_AVAIL;  /* a test sets the width: jsdom has no layout */
+    try {
+      var cs = getComputedStyle(app), inner = app.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+      if (!inner || inner < 200) return 0;
+      var panel = window.innerWidth <= 960 ? 0 : Math.min(400, Math.max(280, Math.floor(inner / 3)));
+      return Math.floor(inner - (panel ? panel + 16 : 0) - 16);
+    } catch (e) { return 0; }
+  }
+  function barHeight() {
+    var bar = document.getElementById("map-bar");
+    if (bar) document.documentElement.style.setProperty("--bar-h", bar.offsetHeight + "px");
+  }
 
   function paint(keepFocus) {
     var row = rowNow();
     if (!row) { current = ""; app.innerHTML = rows.length || parse().id === "" ? MapView.indexHtml(rows) : '<div class="card msg"><b>Waiting for this map</b><p>Nothing is stored under this id yet. The agent writes the map just before it sends you the link.</p><p><a href="#" data-nav="">All maps</a></p></div>'; return; }
     ids = row.ids || {};
-    var focus = keepFocus && document.activeElement && app.contains(document.activeElement) ? document.activeElement.getAttribute("data-block") || document.activeElement.getAttribute("data-col") || document.activeElement.getAttribute("data-row") : null;
+    var act = document.activeElement, focus = keepFocus && act && app.contains(act) ? act.getAttribute("data-block") || act.getAttribute("data-col") || act.getAttribute("data-row") : null;
     var q = document.getElementById("map-search"), qFocus = q && document.activeElement === q;
     var y = window.scrollY, canvas = document.getElementById("map-canvas"), sx = canvas ? canvas.scrollLeft : 0, sy = canvas ? canvas.scrollTop : 0;
+    st.avail = availWidth();
     app.innerHTML = MapView.render(rows, row, st, narrow());
     document.title = row.title + " · " + row.intent;
+    barHeight();
     var c2 = document.getElementById("map-canvas");
     if (c2 && keepFocus) { c2.scrollLeft = sx; c2.scrollTop = sy; }
     window.scrollTo(0, y);
     if (qFocus) { var q2 = document.getElementById("map-search"); if (q2) { q2.focus(); q2.setSelectionRange(q2.value.length, q2.value.length); } }
-    else if (focus) { var n = app.querySelector('[data-block="' + CSS.escape(focus) + '"],[data-col="' + CSS.escape(focus) + '"],[data-row="' + CSS.escape(focus) + '"]'); if (n) n.focus(); }
+    else if (focus) { var n = app.querySelector('[data-block="' + CSS.escape(focus) + '"],[data-col="' + CSS.escape(focus) + '"],[data-row="' + CSS.escape(focus) + '"]'); if (n) n.focus({ preventScroll: true }); }
     current = row.id;
   }
   function select(id) {
     var row = rowNow();
     st.sel = st.sel === id ? "" : id;
+    st.tab = id;
     if (row) setHash(row);
     paint(true);
     var n = st.sel ? app.querySelector('[data-block="' + CSS.escape(st.sel) + '"]') : null;
     if (n && n.scrollIntoView) n.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
+  function setPop(name, on) {
+    var el = document.getElementById(name === "legend" ? "map-legend" : "map-groups"), btn = app.querySelector('[data-act="' + name + '"]');
+    if (name === "legend") st.legend = on; else st.groupsOpen = on;
+    if (el) el.hidden = !on;
+    if (btn) btn.setAttribute("aria-expanded", String(on));
+  }
 
   app.addEventListener("click", function (e) {
     if (e.target.closest("a.aidlc-id")) return;
+    if ((st.legend || st.groupsOpen) && !e.target.closest(".pop, [data-act=legend], [data-act=groups]")) { setPop("legend", false); setPop("groups", false); }
     var nav = e.target.closest("[data-nav]");
     if (nav) { e.preventDefault(); st.sel = ""; location.hash = nav.dataset.nav; return; }
     var tab = e.target.closest("[data-kind-tab]");
-    if (tab) { st.sel = ""; return; }
+    if (tab) { st.sel = ""; st.q = ""; st.gaps = false; st.changed = false; return; }
     var go = e.target.closest("[data-go]");
-    if (go) { e.preventDefault(); var row0 = rowNow(); st.sel = go.dataset.go; if (row0) setHash(row0); paint(true); var t = app.querySelector('[data-block="' + CSS.escape(st.sel) + '"]'); if (t) { t.focus(); if (t.scrollIntoView) t.scrollIntoView({ block: "nearest", inline: "nearest" }); } return; }
+    if (go) { e.preventDefault(); var row0 = rowNow(); st.sel = go.dataset.go; st.tab = st.sel; if (row0) setHash(row0); paint(true); var t = app.querySelector('[data-block="' + CSS.escape(st.sel) + '"]'); if (t) { t.focus({ preventScroll: true }); if (t.scrollIntoView) t.scrollIntoView({ block: "nearest", inline: "nearest" }); } return; }
     var chip = e.target.closest("[data-group-chip]");
-    if (chip) { var k = chip.dataset.groupChip; st.off[k] = !st.off[k]; store("maps.off", JSON.stringify(st.off)); paint(true); return; }
+    if (chip) { var k = chip.dataset.groupChip; st.off[k] = !st.off[k]; store("maps.off", JSON.stringify(st.off)); paint(true); if (st.groupsOpen) setPop("groups", true); return; }
     var act = e.target.closest("[data-act]");
     if (act) {
       var a = act.dataset.act;
-      if (a === "edges") st.allEdges = !st.allEdges; else if (a === "changes") st.changed = !st.changed; else if (a === "gaps") st.gaps = !st.gaps;
+      if (a === "legend") { setPop("legend", !st.legend); setPop("groups", false); return; }
+      if (a === "groups") { setPop("groups", !st.groupsOpen); setPop("legend", false); return; }
+      if (act.disabled) return;
+      if (a === "ready") st.ready = !st.ready; else if (a === "changes") st.changed = !st.changed; else if (a === "gaps") st.gaps = !st.gaps;
       paint(true); return;
     }
+    var zoom = e.target.closest("[data-zoom]");
+    if (zoom) { st.zoom = zoom.dataset.zoom; store("maps.zoom", st.zoom); paint(false); return; }
+    var mview = e.target.closest("[data-mview]");
+    if (mview) { st.mview = mview.dataset.mview; st.sel = ""; store("maps.mview", st.mview); var r2 = rowNow(); if (r2) setHash(r2); paint(false); return; }
     var view = e.target.closest("[data-view]");
     if (view && view.tagName === "BUTTON") { st.view = view.dataset.view; store("maps.view", st.view); paint(false); return; }
     var col = e.target.closest("[data-col]"), rw = e.target.closest("[data-row]");
@@ -853,24 +1247,48 @@ if (typeof module !== "undefined") module.exports = MapView;
     var node = e.target.closest("[data-block]");
     if (node) select(node.dataset.block);
   });
-  app.addEventListener("input", function (e) { if (e.target.id === "map-search") { st.q = e.target.value.trim(); paint(true); } });
-  app.addEventListener("mouseover", function (e) { hover(e.target.closest(".node"), true); });
-  app.addEventListener("mouseout", function (e) { hover(e.target.closest(".node"), false); });
-  app.addEventListener("focusin", function (e) { hover(e.target.closest(".node"), true); });
-  app.addEventListener("focusout", function (e) { hover(e.target.closest(".node"), false); });
-  function hover(node, on) {
-    if (!node || st.sel) return;
-    var id = node.dataset.block;
-    app.querySelectorAll(".edge").forEach(function (p) { if (p.dataset.from === id || p.dataset.to === id) p.classList.toggle("on", on); });
+  app.addEventListener("input", function (e) {
+    if (e.target.id !== "map-search") return;
+    st.q = e.target.value.trim();
+    /* a search and a pick would fight over what is lit: typing starts a search, so the pick is let go */
+    if (st.q && st.sel) { st.sel = ""; var r = rowNow(); if (r) setHash(r); }
+    paint(true);
+  });
+
+  /* nothing picked: pointing at a block, or focusing it, previews its edges */
+  function preview(node, on) {
+    if (st.sel) return;
+    var g = app.querySelector("#map-canvas .hv");
+    if (!g) return;
+    var row = rowNow();
+    g.innerHTML = on && node && row ? MapView.edgesHtml(row, st, node.dataset.block, true) : "";
   }
+  app.addEventListener("mouseover", function (e) { var n = e.target.closest(".node"); if (n) preview(n, true); });
+  app.addEventListener("mouseout", function (e) { var n = e.target.closest(".node"); if (n) preview(n, false); });
+  app.addEventListener("focusin", function (e) {
+    var n = e.target.closest(".node");
+    if (!n) return;
+    preview(n, true);
+    /* one tab stop for the whole graph: the block that last had focus */
+    st.tab = n.dataset.block;
+    app.querySelectorAll('.node[tabindex="0"]').forEach(function (x) { if (x !== n) x.setAttribute("tabindex", "-1"); });
+    n.setAttribute("tabindex", "0");
+  });
+  app.addEventListener("focusout", function (e) { var n = e.target.closest(".node"); if (n) preview(n, false); });
 
   /* the keyboard: arrows walk the graph, Enter picks, Escape clears, / finds */
   document.addEventListener("keydown", function (e) {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     var typing = e.target.closest && e.target.closest("input, textarea, select");
-    if (e.key === "Escape") { if (tipOn) hideTip(); if (typing) { e.target.blur(); return; } if (st.sel) { st.sel = ""; var r = rowNow(); if (r) setHash(r); paint(true); } return; }
+    if (e.key === "Escape") {
+      if (tipOn) hideTip();
+      if (st.legend || st.groupsOpen) { setPop("legend", false); setPop("groups", false); return; }
+      if (typing) { e.target.blur(); return; }
+      if (st.sel) { st.sel = ""; var r = rowNow(); if (r) setHash(r); paint(true); }
+      return;
+    }
     if (typing) return;
-    if (e.key === "/" ) { var q = document.getElementById("map-search"); if (q) { e.preventDefault(); q.focus(); } return; }
+    if (e.key === "/") { var q = document.getElementById("map-search"); if (q) { e.preventDefault(); q.focus(); } return; }
     var node = e.target.closest && e.target.closest(".node");
     if (!node) return;
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(node.dataset.block); return; }
@@ -903,16 +1321,19 @@ if (typeof module !== "undefined") module.exports = MapView;
   window.addEventListener("scroll", function () { if (tipOn && document.activeElement !== tipOn) hideTip(); }, { passive: true });
   AidlcIds.observe(app, function () { return ids; }, { toast: toast });
 
-  function route() { st.sel = parse().block; paint(false); }
+  function route() { st.sel = parse().block; if (st.sel) st.tab = st.sel; paint(false); }
   window.addEventListener("hashchange", route);
-  window.addEventListener("resize", function () { if (!st.view && current) paint(true); });
+  window.addEventListener("resize", function () {
+    clearTimeout(resizeT);
+    resizeT = setTimeout(function () { if (current && (availWidth() !== st.avail || true)) paint(true); }, 120);
+  });
 
   (async function boot() {
     var use = window.claude && typeof window.claude.use === "function" ? window.claude.use : null;
     db = use ? await use("db") : null;
     if (!db) { app.innerHTML = '<div class="card msg"><b>Sign in to claude.ai to use this page.</b><p>The maps are stored with the artifact, and only a signed-in viewer can read them.</p></div>'; return; }
     try { await use("user"); } catch (e) { /* no per-viewer marks are kept anyway */ }
-    st.view = load("maps.view");
+    st.view = load("maps.view"); st.zoom = load("maps.zoom") === "comfy" ? "comfy" : "fit"; st.mview = load("maps.mview") === "matrix" ? "matrix" : "list";
     try { st.off = JSON.parse(load("maps.off") || "{}") || {}; } catch (e) { st.off = {}; }
     db.collection("maps").limit(200).onSnapshot(function (snap) {
       rows = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); }).filter(function (r) { return r.schema === "aidlc-map/1"; });

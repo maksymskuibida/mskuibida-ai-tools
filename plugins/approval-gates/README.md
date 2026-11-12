@@ -314,13 +314,15 @@ Add `?theme=dark` to a page's address for the dark theme. A write stays in memor
 ## Project maps (1.32.0)
 
 A fourth private artifact, **AI-DLC maps** (`maps.html`, `db` and `user` capabilities, icon `map`), holds one map per intent
-and kind. Pick a block and the side panel says what it needs first and what waits for it; only that block's edges are drawn
-(Show every edge draws them all). The four maps, each there because a table does not show what it shows:
+and kind. Pick a block and the side panel says what it needs first and what waits for it, and whether each of those has landed; only
+that block's edges are drawn, routed around the cards (point at a block to preview its edges). On the Unit map a block whose needs
+have all landed and that has not landed itself is marked **Ready**, and a Ready now chip shows only those. The graph opens in Fit
+(compact cards, every wave in view); Comfortable is the full card. The four maps, each there because a table does not show what it shows:
 
 - **Components**: the design's components as a layered graph, in groups, with their responsibilities and the outside systems and entities they touch.
 - **Units**: the Units as waves, with points, stories and what has landed (a tick). Readable at 50+ blocks: wave columns, group chips, search, keyboard arrows between blocks.
-- **Stories**: stories by Units. A story no Unit builds is a row with no dot, flagged.
-- **Entities**: entities by components (only when the components name entities), an entity nobody owns is a gap.
+- **Stories**: each story with its Units, grouped, gaps first (a story no Unit builds); a Gaps only chip with the count; the stories-by-Units matrix as the other view when it shows something.
+- **Entities**: each entity with its components (only when the components name entities), an entity nobody owns is a gap; the same list and matrix.
 
 Each row carries a revision. From the second revision on, the page marks every block that is **new**, **changed** (what moved: the
 sentence, the group, the points, what it needs, its wave, its status; a Unit that landed says so) or **removed** since the
