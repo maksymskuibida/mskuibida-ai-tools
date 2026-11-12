@@ -38,7 +38,7 @@ class TestPlanLink(Case):
     def test_the_hint_names_the_link_and_the_one_response(self):
         text = self.context(self.publish_plan())
         self.assertIn(f"`{URL}#{PLAN}`", text)
-        self.assertIn("text block in a message of its own", text)
+        self.assertIn("NOT seen the link", text)
         self.assertIn("SAME response", text)
         self.assertIn("never end the turn on the link alone", text)
         self.assertNotIn("unit-end page", text)
@@ -72,7 +72,7 @@ class TestPlanLink(Case):
         self.publish_plan()
         code, _out, err = self.ask_plan()
         self.assertEqual(code, 2)
-        self.assertIn(f"**Read:** {URL}#{PLAN}", err)
+        self.assertIn(f"`Plan: {URL}#{PLAN}`", err)
         self.said("thinking about it", block="thinking")
         self.assertEqual(self.ask_plan()[0], 2)
         self.said(f"Test plan: **Read:** {URL}#{PLAN}")

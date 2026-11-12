@@ -272,7 +272,7 @@ that leaves a Reject card out of `--reject-finding`. The page's `findingPicks` a
 
 After `aidlc engine orchestrate report --result awaiting-approval` (or `revised`), it runs
 `gate_bundle.py`, writes the rows with one `ArtifactData` batch, sends you `<artifact url>#<gate id>` in a
-message of its own, and then asks the Approval question. After Request Changes it reads `gates/<id>` and quotes your notes in
+text before the question, and then asks the Approval question. After Request Changes it reads `gates/<id>` and quotes your notes in
 the `--reason` of the rejected report. It never writes your notes, and never updates a row.
 
 ## Visuals (1.33.0)
@@ -351,7 +351,7 @@ Units is not held to a map. The gate pages link their maps in the header (`maps`
 - The same question until a message of the agent in the session's transcript carries the page's link
   `<artifact url>#<gate id>`: you get the link before the question, every time. Only visible text counts: thinking, tool calls and results, text after the question, "see the linked artifact" with no URL and a markdown link to another address do not. It holds after a session restart too (1.19.0): the guard finds the page again from any session's record and from the transcript, and its refusal gives three numbered steps with the exact link.
 - A turn that ends on the link, with the gate question never asked (a `Stop` hook blocks the stop once per published page and asks for the question; send the link and the question in one response).
-- The same question with the page's link in its text: the link goes in a message of its own, so the dialog stays readable.
+- The same question with the page's link in its text: the link goes in the text before the question, so the dialog stays readable.
 - `aidlc engine orchestrate report … --result approved|rejected|accepted` before that row exists.
 - A write to `gates/<id>` that carries `notes` (or a decision field: the page records none).
 - The Approval question, and the write of the gate's row, at a gate that needs a project map (above) when the map is missing or was built from older records (1.32.0).

@@ -387,8 +387,8 @@ def page_steps(rnd):
             f"Run `{cmd} --why first --summary-file <your scratchpad folder>/summary.md --findings {rnd['file']} --out "
             "<your scratchpad folder>/gate`.",
             "Send the `writes` array of its writes.json with one ArtifactData batch to the \"AI-DLC approval gates\" artifact.",
-            "In ONE response, write the page's link `<artifact url>#<gate id>` as the first line of a text message, then "
-            "call AskUserQuestion with the engine's question."]
+            "In ONE response, include the page's link `<artifact url>#<gate id>` anywhere in the text you write before the "
+            "question, then call AskUserQuestion with the engine's question."]
 
 
 def check_gate_write(rnd, doc_id, data, matches):
