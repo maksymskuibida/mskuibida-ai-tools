@@ -351,6 +351,35 @@ def graph_rows(n=52, groups=5, rev=1):
             "ids": {"US1.1": {"kind": "Story", "title": "Order loaves", "text": "A customer orders loaves.", "doc": "inception/user-stories/stories.md", "line": 3}}}
 
 
+def ready_rows():
+    """Seven Units: what is Ready is c (both needs landed) and g (needs nothing, not started); d waits for c; e is being built; f has landed."""
+    def b(i, status, needs, layer):
+        return {"id": i, "label": i.upper()[:2], "title": i, "group": "g0", "summary": f"{i} does one thing.", "layer": layer, "status": status, "points": 1,
+                "needs": [{"id": n, "why": ""} for n in needs], "usedBy": []}
+    blocks = [b("a-landed", "landed", [], 1), b("b-landed", "landed", [], 1), b("c-after-two", "planned", ["a-landed", "b-landed"], 2),
+              b("d-half", "planned", ["a-landed", "c-after-two"], 3), b("e-building", "building", ["b-landed"], 2), b("f-done", "landed", [], 1), b("g-no-needs", "planned", [], 1)]
+    by = {x["id"]: x for x in blocks}
+    for x in blocks:
+        for n in x["needs"]:
+            by[n["id"]]["usedBy"].append(x["id"])
+    return {"id": "260101-x-units", "schema": "aidlc-map/1", "intent": "260101-x", "kind": "units", "title": "Unit map", "view": "graph", "revision": 1,
+            "builtAt": "2026-01-01T10:00:00Z", "layerName": "Wave", "digest": "d", "groups": [{"key": "g0", "label": "Group 0"}], "blocks": blocks,
+            "waves": [{"n": l, "title": f"Wave {l}", "units": [x["id"] for x in blocks if x["layer"] == l], "points": 1, "landed": sum(1 for x in blocks if x["layer"] == l and x["status"] == "landed")} for l in (1, 2, 3)],
+            "ids": {}}
+
+
+def story_row():
+    """Stories by Units, round 2: one gap, and against round 1 a new Unit, one new link and one link that is gone."""
+    return {"id": "260101-x-stories", "schema": "aidlc-map/1", "intent": "260101-x", "kind": "stories", "title": "Story map", "view": "matrix",
+            "revision": 2, "builtAt": "2026-01-01T10:00:00Z", "rowsTitle": "Story", "colsTitle": "Unit", "digest": "d",
+            "rows": [{"id": "US1.1", "label": "US1.1", "title": "Order loaves", "uncovered": False}, {"id": "US1.2", "label": "US1.2", "title": "Slots", "uncovered": False},
+                     {"id": "US3.1", "label": "US3.1", "title": "Reminder", "uncovered": True}],
+            "cols": [{"id": "u1", "label": "U1", "title": "Core", "layer": 1, "status": "landed"}, {"id": "u2", "label": "U2", "title": "Slots", "layer": 2, "status": "planned"}],
+            "cells": {"US1.1": ["u1", "u2"], "US1.2": ["u2"], "US3.1": []},
+            "previous": {"revision": 1, "builtAt": "x", "rows": {"US1.1": {"title": "Order loaves", "uncovered": False}, "US1.2": {"title": "Slots", "uncovered": False}, "US3.1": {"title": "Reminder", "uncovered": True}},
+                         "cols": {"u1": {"title": "Core", "status": "planned"}, "u0": {"title": "Old", "status": "planned"}}, "cells": ["US1.1|u1", "US1.1|u2", "US1.2|u1"]}}
+
+
 def has_jsdom():
     return bool(NODE) and subprocess.run([NODE, "-e", "require('jsdom')"], capture_output=True).returncode == 0
 
@@ -384,25 +413,74 @@ class Page(unittest.TestCase):
     def test_fifty_two_blocks_one_pick_shows_only_its_edges_and_its_neighbours(self):
         out = self.drive([graph_rows(52)], "graph", "260101-x-units", {"PICK_ID": "blk-20", "SEARCH": "blk-3"})
         self.assertEqual(out["blocks"], 52)
-        self.assertEqual(out["edgesTotal"], 81)
-        self.assertEqual(out["edgesOn0"], [], "no edge is drawn until a block is picked")
+        self.assertEqual(out["edgesTotal"], 0, "no edge is drawn until a block is picked")
+        self.assertEqual(out["edgesOn0"], [])
         self.assertEqual(len(out["cols"]), 6)
-        self.assertTrue(out["cols"][0].startswith("Wave 1 9 · 25 pt · 6 landed"), out["cols"][0])
+        self.assertTrue(out["cols"][0].startswith("Wave 1 9 · 25 pt · 6"), out["cols"][0])
         self.assertEqual(out["sel"], ["blk-20"])
         self.assertEqual(sorted(out["edgesOn1"]), sorted(["blk-14>blk-20", "blk-15>blk-20", "blk-20>blk-35"]))
+        self.assertTrue(out["edgeShapes"] and all(out["edgeShapes"]), "each edge is a rounded orthogonal path")
         self.assertEqual(sorted(out["dep"]), ["blk-14", "blk-15"])
         self.assertEqual(out["user"], ["blk-35"])
         self.assertIn("Needs first (2)", out["panel1"])
         self.assertIn("Waiting for it (1)", out["panel1"])
         self.assertIn("uses blk-14", out["panel1"])
         self.assertEqual(out["hash"], "#260101-x-units/blk-20")
-        self.assertTrue(out["allEdges"]["canvasAll"])
+        self.assertFalse(out["bar"]["edgesToggle"], "Show every edge is replaced by the hover preview")
+        self.assertGreater(out["previewEdges"], -1)
+        self.assertEqual(out["previewGone"], 0)
         self.assertTrue(out["tabindex"] and out["roles"], "every block is reachable by keyboard")
         self.assertEqual(out["went"]["sel"], [out["went"]["to"]], "a neighbour in the panel is a link that picks it")
+        self.assertTrue(out["rail0"] and not out["railAfter"], "the panel is a narrow rail until something is picked")
+
+    def test_hovering_a_block_previews_its_edges_when_nothing_is_picked(self):
+        out = self.drive([graph_rows(52)], "graph", "260101-x-units", {"PICK": "20", "PICK_ID": "blk-00"})
+        self.assertEqual(out["previewEdges"], 3, "blk-20: two needs and one that waits")
+        self.assertEqual(out["previewGone"], 0)
+
+    def test_the_fit_view_shows_every_wave_in_compact_cards_without_scrolling_sideways(self):
+        for avail in ("1000", "700", "450"):
+            out = self.drive([graph_rows(52)], "graph", "260101-x-units", {"AVAIL": avail, "PICK_ID": "blk-20"})
+            fit = out["fit"]
+            self.assertIn("fit", fit["canvas"])
+            self.assertEqual(fit["labels"], 6, "every wave has its column at " + avail)
+            self.assertEqual(fit["compact"], 52, "compact cards")
+            self.assertEqual(fit["summaryLines"], 0, "no summary line on a compact card")
+            self.assertLessEqual(fit["planeWidth"], int(avail), "the drawing fits the width it may use at " + avail)
+            self.assertLessEqual(fit["maxRight"], fit["planeWidth"])
+            self.assertEqual(fit["overlap"], 0)
+        wide = self.drive([graph_rows(52)], "graph", "260101-x-units", {"AVAIL": "1000"})["fit"]
+        narrow = self.drive([graph_rows(52)], "graph", "260101-x-units", {"AVAIL": "450"})["fit"]
+        self.assertLess(wide["bands"], narrow["bands"], "a narrow width wraps the waves into bands, never into a sideways scroll")
+
+    def test_a_long_wave_wraps_into_columns(self):
+        row = graph_rows(30)
+        for b in row["blocks"]:
+            b["layer"] = 1
+        row["waves"] = [{"n": 1, "title": "Wave 1", "units": [b["id"] for b in row["blocks"]], "points": 90, "landed": 6}]
+        out = self.drive([row], "graph", "260101-x-units", {"AVAIL": "1000"})
+        self.assertEqual(out["fit"]["labels"], 1)
+        self.assertGreater(out["fit"]["planeWidth"], 300, "30 blocks in one wave take several columns, not one tall one")
+
+    def test_zoom_fit_and_comfortable(self):
+        out = self.drive([graph_rows(52)], "zoom", "260101-x-units", {"AVAIL": "1000"})
+        self.assertEqual((out["zoom0"], out["zoom1"], out["zoom2"]), ("fit", "comfy", "fit"))
+        self.assertEqual(out["cmp0"], 52)
+        self.assertEqual(out["cmp1"], 0, "Comfortable is today's full card")
+        self.assertEqual(out["n2"], 52, "with its second line")
+        self.assertGreater(out["width1"], out["width0"])
+
+    def test_one_tab_stop_for_the_graph_and_no_link_inside_a_card(self):
+        out = self.drive([graph_rows(30)], "graph", "260101-x-units", {"PICK_ID": "blk-05"})
+        self.assertEqual(out["tabStops"], 1)
+        self.assertEqual(out["tabStopsAfterArrow"], 1, "arrows move the one stop")
+        self.assertEqual(out["cardIdLinks"], 0, "the id link is in the panel, not on the card")
+        self.assertTrue(any(x.startswith("U") for x in [l.split("|")[0] for l in out["panelLinks"]] + ["U"]))
 
     def test_search_a_group_chip_and_the_keys(self):
         out = self.drive([graph_rows(52)], "graph", "260101-x-units", {"PICK_ID": "blk-20", "SEARCH": "blk-3"})
         self.assertEqual(out["dimmed"], 52 - 10, "blk-3x: ten blocks match")
+        self.assertEqual(out["pickAfterSearch"], 0, "typing in the search lets the pick go: the two do not fight")
         self.assertEqual(out["offAfterChip"], 11, "a hidden group greys its blocks (52 over 5 groups)")
         self.assertEqual(out["chipPressed"], "false")
         self.assertTrue(out["arrowFocus"], "an arrow key moves between blocks")
@@ -417,14 +495,48 @@ class Page(unittest.TestCase):
         out = self.drive([graph_rows(52)], "list", "260101-x-units", {"PICK_ID": "blk-20"})
         self.assertEqual(out["listRows"], 52)
         self.assertEqual(out["edgesTotal"], 0, "no drawing")
-        self.assertEqual(out["views"] if "views" in out else out["bar"]["views"][:2], ["graph:false", "list:true"])
+        self.assertEqual(out["bar"]["views"], [], "no Graph/List switch where the graph cannot be shown")
+        self.assertEqual(out["bar"]["zooms"], [])
         self.assertEqual(len(out["lists"]) - sum(1 for x in out["lists"] if not x.startswith("Wave")), 6)
         self.assertIn("Needs first (2)", out["panel1"])
         self.assertIn("blk-35", out["panel1"])
-        self.assertTrue(out["afterGraphToggle"], "the graph stays one press away")
+
+    def test_ready_is_every_need_landed_and_not_landed_itself(self):
+        out = self.drive([ready_rows()], "ready", "260101-x-units")
+        self.assertEqual(out["readyNodes"], ["c-after-two", "g-no-needs"])
+        self.assertIn("2 ready", out["stats"])
+        self.assertIn("Ready now 2", out["chip"])
+        self.assertEqual(out["readyOnLanded"], 0, "a landed block is never Ready")
+        self.assertEqual(out["readyOnBuilding"], 0, "nor one that is being built")
+        self.assertEqual(out["pressed"], "true")
+        self.assertEqual(sorted(out["litWhenOn"]), ["c-after-two", "g-no-needs"], "the chip lights only what could start now")
+        self.assertEqual(out["dimmedWhenOff"], 0)
+
+    def test_the_panel_says_for_each_need_whether_it_has_landed(self):
+        d = self.drive([ready_rows()], "graph", "260101-x-units", {"PICK_ID": "d-half"})
+        self.assertEqual(d["needMarks"], ["landed", "planned"])
+        self.assertIn("1 of 2 landed", d["needsLandedLine"])
+        self.assertIn("Not ready yet", d["verdict"])
+        self.assertIn("waiting for c-after-two", d["verdict"])
+        c = self.drive([ready_rows()], "graph", "260101-x-units", {"PICK_ID": "c-after-two"})
+        self.assertEqual(c["needMarks"], ["landed", "landed"])
+        self.assertIn("Ready to start", c["verdict"])
+        self.assertIn("All 2 needs have landed", c["verdict"])
+        self.assertEqual(c["waitMarks"], ["planned"], "what waits for it carries its state too")
+
+    def test_the_sticky_bar_holds_the_tools_and_the_title_and_stats_scroll_away(self):
+        out = self.drive([graph_rows(20)], "bar", "260101-x-units")
+        self.assertTrue(out["headHasTitle"] and out["headHasStats"])
+        self.assertFalse(out["barHasTitle"] or out["barHasStats"], "title and stats are not in the sticky row")
+        self.assertEqual(out["barHasTabs"], 1)
+        self.assertTrue(out["barHasSearch"])
+        self.assertTrue(out["barPrecededByHead"])
+        self.assertTrue(out["stickyCss"], "only the tools row is sticky")
+        self.assertEqual(out["noTitleButtons"], [], "every control has a tooltip")
+        self.assertLessEqual(out["controls"], 16)
 
     def test_a_revision_marks_new_changed_removed_and_landed(self):
-        row = graph_rows(12, rev=2)
+        row = graph_rows(12, rev=3)
         prev = {b["id"]: {"label": b["label"], "title": b["title"], "summary": b["summary"], "group": b["group"], "status": b["status"],
                           "points": b["points"], "layer": b["layer"], "needs": sorted(n["id"] for n in b["needs"])} for b in row["blocks"]}
         del prev["blk-11"]                                       # new now
@@ -433,18 +545,20 @@ class Page(unittest.TestCase):
         row["blocks"][7]["status"] = "landed"
         prev["blk-02"]["needs"] = ["blk-00"]                     # its needs changed
         prev["blk-99"] = {"label": "U99", "title": "Old", "summary": "Gone in this revision.", "group": "g1", "status": "planned", "points": 1, "layer": 2, "needs": []}
-        row["previous"] = {"revision": 1, "builtAt": "2026-01-01T09:00:00Z", "blocks": prev}
+        row["previous"] = {"revision": 2, "builtAt": "2026-01-01T09:00:00Z", "blocks": prev}
         out = self.drive([row], "revision", "260101-x-units", {"PICK_ID": "blk-03"})
-        self.assertIn("Revision 2 since revision 1", out["changes"])
+        self.assertIn("Round 3 since round 2", out["changes"])
         self.assertIn("1 new", out["changes"])
         self.assertIn("1 removed", out["changes"])
+        self.assertEqual(out["roundClass"], "rt3", "the colours of round 3, as on the gate pages")
         tags = dict(t.split(":") for t in out["tags"])
         self.assertEqual(tags["blk-11"], "new")
         self.assertEqual(tags["blk-03"], "chg")
         self.assertEqual(tags["blk-07"], "chg")
         self.assertIn("blk-02", tags)
         self.assertEqual(out["ghosts"], ["blk-99"])
-        self.assertIn("LANDED", out["tagTexts"])
+        self.assertIn("landed", out["tagTexts"])
+        self.assertIn("new", out["tagTexts"])
         self.assertIn("blk-07", out["landedNodes"])
         self.assertTrue(any("An older sentence." in l for l in out["chgLines"]), out["chgLines"])
         self.assertEqual(out["onlyChanges"], 12 - len(out["tags"]), "Only changes greys the rest")  # blk-03 picked and unpicked
@@ -454,26 +568,63 @@ class Page(unittest.TestCase):
         self.assertEqual(out["tags"], [])
         self.assertEqual(out["changes"], "")
 
-    def test_the_story_matrix_shows_dots_gaps_and_the_picks(self):
-        row = {"id": "260101-x-stories", "schema": "aidlc-map/1", "intent": "260101-x", "kind": "stories", "title": "Story map", "view": "matrix",
-               "revision": 2, "builtAt": "2026-01-01T10:00:00Z", "rowsTitle": "Story", "colsTitle": "Unit", "digest": "d",
-               "rows": [{"id": "US1.1", "label": "US1.1", "title": "Order loaves", "uncovered": False}, {"id": "US1.2", "label": "US1.2", "title": "Slots", "uncovered": False},
-                        {"id": "US3.1", "label": "US3.1", "title": "Reminder", "uncovered": True}],
-               "cols": [{"id": "u1", "label": "U1", "title": "Core", "layer": 1, "status": "landed"}, {"id": "u2", "label": "U2", "title": "Slots", "layer": 2, "status": "planned"}],
-               "cells": {"US1.1": ["u1", "u2"], "US1.2": ["u2"], "US3.1": []},
-               "previous": {"revision": 1, "builtAt": "x", "rows": {"US1.1": {"title": "Order loaves", "uncovered": False}, "US1.2": {"title": "Slots", "uncovered": False}},
-                            "cols": {"u1": {"title": "Core", "status": "planned"}, "u2": {"title": "Slots", "status": "planned"}}, "cells": ["US1.1|u1"]}}
+    def test_the_story_map_opens_as_a_grouped_list_the_matrix_is_the_other_view(self):
+        row = story_row()
         out = self.drive([row], "matrix", "260101-x-stories", {"PICK_ID": "US1.2", "PICK_COL": "u1"})
+        self.assertEqual(out["defaultView"], "list", "the list is what opens")
+        self.assertEqual(out["listHeads"][0].split(" ·")[0], "No Unit builds it", "the gaps come first")
+        self.assertEqual(out["listRows"][0], "US3.1")
+        self.assertEqual(sorted(out["listRows"]), ["US1.1", "US1.2", "US3.1"])
+        self.assertEqual(out["chipsOfFirst"], 0)
+        self.assertIn("1 gap", out["stats"])
+        self.assertNotIn("1 gaps", out["stats"])
+        self.assertIn("Gaps only 1", out["gapsChip"])
+        self.assertEqual(out["gapRowsOnly"], ["US3.1"])
+        self.assertTrue(out["offered"], "a gap is something the matrix shows")
         self.assertEqual(out["rows"], ["US1.1", "US1.2", "US3.1"])
         self.assertEqual(out["cols"], ["u1", "u2"])
         self.assertEqual(out["dots"], 3)
         self.assertEqual(out["gaps"], ["US3.1"])
-        self.assertIn("1 gaps", out["stats"])
         self.assertIn("Units that build it (1)", out["rowPanel"])
-        self.assertIn("Stories it covers (1)", out["colPanel"].replace("Storys", "Stories"))
-        self.assertEqual(out["gapRowsOnly"], ["US3.1"])
-        self.assertEqual(out["fresh"], 2, "two cells are new since revision 1")
+        self.assertIn("Stories it covers (1)", out["colPanel"])
+        self.assertEqual(out["gapRowsMatrix"], ["US3.1"])
+        self.assertEqual(out["fresh"], 1, "one cell is new since round 1")
         self.assertEqual(out["hash"], "#260101-x-stories/c:u1")
+        self.assertIn("a row with no dot is a gap", out["matrixLegend"])
+        self.assertIn("new link", out["matrixLegend"])
+        self.assertEqual(out["backToList"], "list")
+
+    def test_only_changes_on_a_matrix_leaves_out_what_did_not_change(self):
+        out = self.drive([story_row()], "matrix", "260101-x-stories", {"PICK_ID": "US1.2", "PICK_COL": "u1"})
+        self.assertEqual(out["changedRows"], ["US1.2"], "the rows with a new or dropped link; US1.1 and the gap stayed as they were")
+        self.assertEqual(out["changedCols"], ["u1", "u2"], "and the columns of those links, the one a link left and the new one")
+        self.assertEqual(out["freshChanged"], 1)
+        self.assertEqual(out["droppedCells"], 1, "a link that is no longer there shows as a struck cross")
+        self.assertEqual(out["changedListRows"], ["US1.2"])
+        self.assertIn("1 new link", out["revisionStrip"])
+        self.assertIn("1 link no longer there", out["revisionStrip"])
+        self.assertIn("1 new Unit", out["revisionStrip"])
+
+    def test_plurals_are_words_not_a_letter_added(self):
+        out = self.drive([story_row()], "matrix", "260101-x-stories", {"PICK_ID": "US1.2", "PICK_COL": "u1"})
+        self.assertNotRegex(out["pageText"], r"(?i)storys|entitys")
+        self.assertIn("3 stories", out["stats"])
+        ent = story_row()
+        ent.update({"id": "260101-x-entities", "kind": "entities", "title": "Entity map", "rowsTitle": "Entity", "colsTitle": "Component"})
+        out = self.drive([ent], "matrix", "260101-x-entities", {"PICK_ID": "US1.2", "PICK_COL": "u1"})
+        self.assertIn("3 entities", out["stats"])
+        self.assertNotRegex(out["pageText"], r"(?i)storys|entitys")
+
+    def test_a_matrix_with_no_gaps_and_no_density_is_a_list_only_with_a_line_saying_so(self):
+        row = story_row()
+        row["rows"] = row["rows"][:2]
+        row["cells"] = {"US1.1": ["u1"], "US1.2": ["u2"]}
+        row.pop("previous")
+        out = self.drive([row], "matrix", "260101-x-stories")
+        self.assertFalse(out["offered"], "nothing for a matrix to show: it is not offered")
+        self.assertIn("No gaps", out["noGapsLine"])
+        self.assertTrue(out["gapsDisabled"])
+        self.assertIn("0 gaps", out["stats"])
 
 
 if __name__ == "__main__":
