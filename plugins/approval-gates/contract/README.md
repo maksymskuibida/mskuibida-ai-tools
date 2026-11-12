@@ -249,6 +249,26 @@ own), by default the newest; nothing about the comparison is stored. The diff is
 (`scripts/sync-shared.py` copies it into both pages): the base round's documents are drawn off screen by the same views,
 sections are matched by title, elements by id then title, items by id, and words by a Myers diff.
 
+## The diagrams of a per-stage gate row (1.33.0)
+
+The per-stage `gates/<id>` row may carry `diagrams` (`scripts/diagrams.py`, written by `gate_bundle.py`; nothing for the agent to
+fill): `[{id, doc, kind, title, alt, ...}]`, a second view of a document's structure for the page to draw.
+
+| kind | holds | derived from |
+|---|---|---|
+| `trace` | `cols[] {key, label}`, `nodes[] {id, col, label?, ok?}`, `edges[] [from, to]`, `more?` | traceability.json coverage, a table's Source / Implements / Refs / Covers column, a YAML entry's `implements` / `refs`, ids written next to a numbered step (at least 3 ids, 2 links, 2 columns) |
+| `layers` | `layers[] {name, items[] {id, label, note?}}`, `edges[]`, `map: components\|units` | a `components:` block with groups (2 or more), or a `units:` block (build layers) |
+| `sequence` | `actors[]`, `messages[] {from, to, text}` | a table with from / to columns, or numbered steps `A -> B: text` |
+| `states` | `states[]`, `transitions[] {from, to, text}` | a from / to table whose columns say state, event or trigger |
+| `steps` | `steps[] {n, text}` | a numbered list (4 or more) under a heading about a flow or process |
+| `flow` | `dir`, `nodes[] {id, label, shape, group?}`, `edges[] {from, to, text?, style?}` | a ```mermaid flowchart |
+| `list` | `heading`, `items[] {text, note?}` | any other ```mermaid diagram, shown as a list |
+
+A diagram from a ```mermaid block carries `fence` (its number in the document) and `h` (the page's hash of the block's source), so the
+page draws it where the block stands. `id` is stable between rounds: the page compares a diagram with the one of the round it is
+compared with and marks what is new. A diagram has no read key. The unit-end bundle may carry `verification: {auto}`, the number of
+points the code summary's Verified Here (or Verified By Tests, Tests Run, Automated) section lists: the verification funnel starts there.
+
 ## The test plan (unit-end page only)
 
 Not part of the bundle: the developer can test the not-verified points before approving. The plan, its page and the

@@ -311,6 +311,15 @@ no test plan.
    Write the row, send the link in a message of its own, and ask the unit-end gate question again (Approve / Request
    Changes / Test first).
 
+## Diagrams and visuals (1.33.0)
+
+Nothing to do: `gate_bundle.py draft` derives the diagrams of the stage's records (`scripts/diagrams.py`: a trace ribbon, layers,
+sequences, states, flows, every mermaid block) and writes them into the gate row as `diagrams`; the page draws them next to the text,
+and a unit-end bundle's `verification.auto` comes from the code summary's Verified Here section. What you control is the records: a
+traceability table with Source / Implements columns, a `components:` block with groups, a from / to table for state changes, a
+numbered workflow, a mermaid flowchart. A record without that structure stays text. To see how a page looks, run
+`python3 <plugin>/dev/preview.py` (synthetic data, no account).
+
 ## 8. Project maps (1.32.0)
 
 A map shows how the pieces of the project connect: pick a block, see what it needs first and what waits for it. The maps are a

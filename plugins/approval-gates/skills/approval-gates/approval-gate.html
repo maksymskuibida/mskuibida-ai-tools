@@ -63,6 +63,12 @@
       folded under "As written" and shown only as written. A row without `evaluation` (before 1.24.0) is drawn as
       "At a glance" (tiles, coverage per kind, one lane per kind). Read marks per item are "item:<key>" and
       "finding:<id>" in the reads document; the evaluation's mark is "evaluation".
+    gates/<id>.diagrams = [{id, doc, kind, title, alt, ...}]   gate_bundle.py (scripts/diagrams.py): the structure of a record, derived the
+      same way every time and stored for the page to draw (shared/gate-viz): trace (requirement, rule, story, Unit, step, test),
+      layers (components by layer, Units by build order), sequence, states, steps, flow, list. A record with one gets a Text /
+      Diagram switch on its block (the choice is remembered in the viewer's browser); a ```mermaid block is drawn where it stands,
+      found by the hash `h` of its source, and a kind outside what is drawn is a list, never its source. A diagram is a second view:
+      it has no read key of its own, a mark in it jumps to the real row, and what is new since the round compared with is marked.
     gates/<id>.findingPicks[<finding id>] = {pick: "fix"|"accept"|"reject", note?, at}   when the row carries `findings`
       (gate_bundle.py --findings: {stage, open, blocking, items[] {id, title, plain?, action, actionBy, where?, severity,
       blocking, proposed, why, refs}, carried[]}): the developer's sort of each review finding Claude could not fix for
@@ -82,6 +88,401 @@
 -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script>
+/* gate-viz.js:begin */
+/* The visuals of the AI-DLC gate pages: second views of data a page already has, drawn as inline SVG or HTML, every colour a
+   token of the page. Shared: the canonical copy is shared/gate-viz/gate-viz.js in mskuibida-ai-tools, copied into every page
+   that draws them by scripts/sync-shared.py. Edit it there.
+
+   Every function returns an HTML string (no DOM needed, so a test can run it under Node); GateViz.bind(root, fn) adds the
+   hover highlight. A mark that stands for something on the page carries data-vz-go="<id>" (an id, a row key) and the page
+   decides where it goes; a mark that stands for a filter carries data-vz-set="<name>:<value>". Each figure has an
+   aria-label and a visually hidden list of what it shows: the text it stands for stays one click away on the page.
+
+     GateViz.diagram(d, opts)    a record's diagram from the gate row's `diagrams` (trace, layers, sequence, states, steps, flow,
+                                 list); opts.prev is the same diagram of the round compared with, opts.maps the row's maps
+     GateViz.heat(m)             targets: Units across, groups down, a cell coloured by its worst verdict
+     GateViz.funnel(f)           the verification points: one stacked bar
+     GateViz.timeline(rounds)    v1 .. vN with what each round changed, added and removed
+     GateViz.lanes(steps)        plan steps grouped by layer, in order
+     GateViz.dots(groups)        one dot per criterion, coloured by verdict
+     GateViz.outline(items)      a file's headings as a side list and a collapsible strip */
+var GateViz = (function () {
+  "use strict";
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function clip(s, n) { s = String(s == null ? "" : s).replace(/\s+/g, " ").trim(); return s.length > n ? s.slice(0, n - 1).trimEnd() + "…" : s; }
+  function plural(n, one, many) { return n + " " + (n === 1 ? one : (many || one + "s")); }
+  function tw(s, px) { return String(s).length * (px || 6.6); }  /* text width, close enough for the sizes drawn */
+  function figure(kind, d, inner, extra) {
+    var alt = d.alt || d.title || "Diagram";
+    return '<figure class="vz vz-' + kind + '" data-aidlc-noids role="group" aria-label="' + esc(alt) + '" data-vz="' + esc(d.id || kind) + '">' +
+      (d.title && !extra.noTitle ? '<figcaption class="vz-title">' + esc(d.title) + (extra.hint ? '<span class="hint">' + esc(extra.hint) + "</span>" : "") + "</figcaption>" : "") +
+      '<div class="vz-scroll" tabindex="0" role="region" aria-label="' + esc((d.title || "Diagram") + ", scrolls sideways") + '">' + inner + "</div>" +
+      (extra.after || "") + '<ul class="vz-sr">' + (extra.alt || []).map(function (t) { return "<li>" + esc(t) + "</li>"; }).join("") + "</ul></figure>";
+  }
+
+  /* ---------- what a diagram holds, as keys: a mark new since the round compared with, a mark gone ---------- */
+  function keysOf(d) {
+    var out = [];
+    if (!d) return out;
+    if (d.kind === "trace") (d.nodes || []).forEach(function (n) { out.push([n.id, n.id]); });
+    else if (d.kind === "layers") (d.layers || []).forEach(function (l) { l.items.forEach(function (i) { out.push([i.id, i.label || i.id]); }); });
+    else if (d.kind === "flow") { (d.nodes || []).forEach(function (n) { out.push(["n:" + n.id, n.label]); }); (d.edges || []).forEach(function (e) { out.push(["e:" + e.from + ">" + e.to + ":" + (e.text || ""), e.from + " → " + e.to]); }); }
+    else if (d.kind === "states") { (d.states || []).forEach(function (s) { out.push(["s:" + s, s]); }); (d.transitions || []).forEach(function (t) { out.push(["t:" + t.from + ">" + t.to + ":" + t.text, t.from + " → " + t.to]); }); }
+    else if (d.kind === "sequence") (d.messages || []).forEach(function (m) { out.push(["m:" + m.from + ">" + m.to + ":" + m.text, m.from + " → " + m.to + (m.text ? ": " + m.text : "")]); });
+    else if (d.kind === "steps") (d.steps || []).forEach(function (s) { out.push(["p:" + s.text, s.text]); });
+    else if (d.kind === "list") (d.items || []).forEach(function (i) { out.push(["l:" + i.text, i.text]); });
+    return out;
+  }
+  function compare(d, prev) {
+    if (!prev) return { isNew: function () { return false; }, gone: [] };
+    var old = {}, now = {};
+    keysOf(prev).forEach(function (k) { old[k[0]] = k[1]; });
+    keysOf(d).forEach(function (k) { now[k[0]] = 1; });
+    return { isNew: function (k) { return !old.hasOwnProperty(k); }, gone: Object.keys(old).filter(function (k) { return !now[k]; }).map(function (k) { return old[k]; }) };
+  }
+  function goneNote(c) {
+    return c.gone.length ? '<p class="vz-gone"><span class="rv-tag gone">removed</span> ' + c.gone.slice(0, 8).map(esc).join(", ") + (c.gone.length > 8 ? " and " + (c.gone.length - 8) + " more" : "") + "</p>" : "";
+  }
+
+  /* ---------- a graph laid out left to right or top down (flow and state diagrams) ---------- */
+  function layout(nodes, edges, dir) {
+    var ids = nodes.map(function (n) { return n.id; }), idx = {};
+    ids.forEach(function (id, i) { idx[id] = i; });
+    var out = {}, back = {}, state = {};
+    ids.forEach(function (id) { out[id] = []; });
+    edges.forEach(function (e) { if (idx.hasOwnProperty(e.from) && idx.hasOwnProperty(e.to)) out[e.from].push(e); });
+    function dfs(id) {
+      state[id] = 1;
+      out[id].forEach(function (e) { if (state[e.to] === 1) back[e.from + ">" + e.to + ":" + (e.text || "")] = true; else if (!state[e.to]) dfs(e.to); });
+      state[id] = 2;
+    }
+    ids.forEach(function (id) { if (!state[id]) dfs(id); });
+    var rank = {};
+    function rk(id) {
+      if (rank.hasOwnProperty(id)) return rank[id];
+      rank[id] = 0;
+      var best = 0;
+      edges.forEach(function (e) { if (e.to === id && idx.hasOwnProperty(e.from) && !back[e.from + ">" + e.to + ":" + (e.text || "")] && e.from !== id) best = Math.max(best, rk(e.from) + 1); });
+      return (rank[id] = best);
+    }
+    ids.forEach(rk);
+    var layers = [];
+    ids.forEach(function (id) { (layers[rank[id]] = layers[rank[id]] || []).push(id); });
+    layers = layers.filter(Boolean);
+    var pos = {};
+    layers.forEach(function (l) { l.forEach(function (id, i) { pos[id] = i; }); });
+    for (var pass = 0; pass < 3; pass++) {
+      layers.forEach(function (l, li) {
+        if (!li) return;
+        var bary = {};
+        l.forEach(function (id) {
+          var ps = edges.filter(function (e) { return e.to === id && rank[e.from] === li - 1; }).map(function (e) { return pos[e.from]; });
+          bary[id] = ps.length ? ps.reduce(function (a, b) { return a + b; }, 0) / ps.length : pos[id];
+        });
+        l.sort(function (a, b) { return bary[a] - bary[b]; });
+        l.forEach(function (id, i) { pos[id] = i; });
+      });
+    }
+    var horizontal = dir === "LR" || dir === "RL", size = {};
+    nodes.forEach(function (n) { size[n.id] = { w: Math.max(72, Math.min(190, tw(n.label, 6.8) + 26)), h: n.shape === "diamond" ? 44 : 34 }; });
+    var gapN = horizontal ? 18 : 22, at = {}, cursor = 0, span = 0, extent = [], gapAfter = [];
+    layers.forEach(function (l, li) {  /* room for the longest label of an arrow leaving this rank, when ranks sit side by side */
+      var w = 0;
+      edges.forEach(function (e) { if (e.text && rank[e.from] === li && rank[e.to] > li) w = Math.max(w, tw(clip(e.text, 24), 6)); });
+      gapAfter.push(horizontal ? Math.max(64, Math.min(190, w + 32)) : 46);
+    });
+    layers.forEach(function (l) {
+      var along = 0;
+      l.forEach(function (id) { along += (horizontal ? size[id].h : size[id].w) + gapN; });
+      extent.push(along - gapN); span = Math.max(span, along - gapN);
+    });
+    layers.forEach(function (l, li) {
+      var thick = Math.max.apply(null, l.map(function (id) { return horizontal ? size[id].w : size[id].h; })), p = (span - extent[li]) / 2;
+      l.forEach(function (id) {
+        var s = size[id];
+        at[id] = horizontal ? { x: cursor + (thick - s.w) / 2, y: p, w: s.w, h: s.h } : { x: p, y: cursor + (thick - s.h) / 2, w: s.w, h: s.h };
+        p += (horizontal ? s.h : s.w) + gapN;
+      });
+      cursor += thick + gapAfter[li];
+    });
+    var last = gapAfter[gapAfter.length - 1] || 0;
+    return { at: at, back: back, w: (horizontal ? cursor - last : span) + 16, h: (horizontal ? span : cursor - last) + 16, horizontal: horizontal };
+  }
+  function nodeShape(n, p) {
+    var x = p.x + 8, y = p.y + 8, w = p.w, h = p.h;
+    if (n.shape === "diamond") return '<polygon points="' + [(x + w / 2) + "," + y, (x + w) + "," + (y + h / 2), (x + w / 2) + "," + (y + h), x + "," + (y + h / 2)].join(" ") + '"/>';
+    if (n.shape === "circle" || n.shape === "stadium" || n.shape === "round") return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + (n.shape === "round" ? 10 : h / 2) + '"/>';
+    if (n.shape === "cyl") return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="6"/><path d="M' + x + " " + (y + 8) + " q" + (w / 2) + " 7 " + w + ' 0" fill="none"/>';
+    return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="5"/>';
+  }
+  function edgePath(a, b, L, loop) {
+    var ax, ay, bx, by;
+    if (L.horizontal) {
+      var fwd = a.x <= b.x;
+      ax = a.x + (fwd ? a.w : 0) + 8; ay = a.y + a.h / 2 + 8; bx = b.x + (fwd ? 0 : b.w) + 8; by = b.y + b.h / 2 + 8;
+      var m = (ax + bx) / 2;
+      return { d: loop ? "M" + ax + " " + ay + " C" + (ax + 30) + " " + (ay - 46) + " " + (bx - 30) + " " + (by - 46) + " " + bx + " " + by : "M" + ax + " " + ay + " C" + m + " " + ay + " " + m + " " + by + " " + bx + " " + by, lx: (ax + bx) / 2, ly: (ay + by) / 2 + (loop ? -34 : 0) };
+    }
+    var down = a.y <= b.y;
+    ax = a.x + a.w / 2 + 8; ay = a.y + (down ? a.h : 0) + 8; bx = b.x + b.w / 2 + 8; by = b.y + (down ? 0 : b.h) + 8;
+    var my = (ay + by) / 2;
+    return { d: loop ? "M" + ax + " " + ay + " C" + (ax + 60) + " " + (ay + 30) + " " + (bx + 60) + " " + (by - 30) + " " + bx + " " + by : "M" + ax + " " + ay + " C" + ax + " " + my + " " + bx + " " + my + " " + bx + " " + by, lx: (ax + bx) / 2 + (loop ? 46 : 0), ly: (ay + by) / 2 };
+  }
+  /* one marker per drawing, with an id of its own: a marker defined in a hidden (closed) drawing is not drawn for one that shows */
+  var markers = 0;
+  function mark() { var id = "vzm" + (++markers); return { id: id, defs: '<defs><marker id="' + id + '" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="vz-head"/></marker></defs>' }; }
+  function graph(d, c, goKey) {
+    var nodes = d.kind === "states" ? d.states.map(function (s) { return { id: s, label: s, shape: s === "start" || s === "end" ? "stadium" : "round" }; }) : d.nodes;
+    var edges = d.kind === "states" ? d.transitions.map(function (t) { return { from: t.from, to: t.to, text: t.text }; }) : d.edges;
+    var L = layout(nodes, edges, d.kind === "states" ? "LR" : (d.dir || "TD")), byId = {};
+    nodes.forEach(function (n) { byId[n.id] = n; });
+    var groups = {};
+    nodes.forEach(function (n) { if (n.group) (groups[n.group] = groups[n.group] || []).push(n.id); });
+    var mk = mark();
+    var svg = '<svg class="vz-svg" xmlns="http://www.w3.org/2000/svg" width="' + Math.ceil(L.w) + '" height="' + Math.ceil(L.h) + '" viewBox="0 0 ' + Math.ceil(L.w) + " " + Math.ceil(L.h) + '" role="img" aria-label="' + esc(d.alt || "") + '">' + mk.defs;
+    Object.keys(groups).forEach(function (g) {
+      var bx = groups[g].map(function (id) { return L.at[id]; }), x0 = Math.min.apply(null, bx.map(function (b) { return b.x; })) + 8 - 10, y0 = Math.min.apply(null, bx.map(function (b) { return b.y; })) + 8 - 20;
+      var x1 = Math.max.apply(null, bx.map(function (b) { return b.x + b.w; })) + 8 + 10, y1 = Math.max.apply(null, bx.map(function (b) { return b.y + b.h; })) + 8 + 10;
+      svg += '<g class="vz-group"><rect x="' + x0 + '" y="' + y0 + '" width="' + (x1 - x0) + '" height="' + (y1 - y0) + '" rx="8"/><text x="' + (x0 + 8) + '" y="' + (y0 + 13) + '">' + esc(clip(g, 40)) + "</text></g>";
+    });
+    edges.forEach(function (e) {
+      var a = L.at[e.from], b = L.at[e.to]; if (!a || !b) return;
+      var loop = !!L.back[e.from + ">" + e.to + ":" + (e.text || "")] || e.from === e.to, p = edgePath(a, b, L, loop);
+      svg += '<g class="vz-edge' + (e.style ? " " + e.style : "") + '" data-from="' + esc(e.from) + '" data-to="' + esc(e.to) + '"><path d="' + p.d + '" marker-end="url(#' + mk.id + ')"/>' +
+        (e.text ? '<text x="' + p.lx + '" y="' + p.ly + '" text-anchor="middle">' + esc(clip(e.text, 24)) + "</text>" : "") + "</g>";
+    });
+    nodes.forEach(function (n) {
+      var p = L.at[n.id], key = d.kind === "states" ? "s:" + n.id : "n:" + n.id, isNew = c.isNew(key);
+      svg += '<g class="vz-node' + (isNew ? " vz-new" : "") + '" tabindex="0" role="button" data-id="' + esc(n.id) + '" data-vz-go="' + esc(goKey(n)) + '" aria-label="' + esc(n.label + (isNew ? " (new in this round)" : "")) + '">' +
+        "<title>" + esc(n.label) + "</title>" + nodeShape(n, p) + '<text x="' + (p.x + 8 + p.w / 2) + '" y="' + (p.y + 8 + p.h / 2 + 4) + '" text-anchor="middle">' + esc(clip(n.label, 26)) + "</text></g>";
+    });
+    return svg + "</svg>";
+  }
+
+  /* ---------- a trace ribbon: columns left to right, a curve for every link ---------- */
+  function trace(d, c) {
+    var cols = d.cols || [], per = {}, W = 150, H = 38, GX = 70, GY = 12, top = 30;
+    (d.nodes || []).forEach(function (n) { (per[n.col] = per[n.col] || []).push(n); });
+    cols.forEach(function (k, ci) {  /* fewer crossings: a box sits near the boxes it is linked to in the column before */
+      if (!ci) return;
+      var at = {}; (per[cols[ci - 1].key] || []).forEach(function (n, i) { at[n.id] = i; });
+      var mean = function (n) { var xs = (d.edges || []).map(function (e) { return e[1] === n.id && at.hasOwnProperty(e[0]) ? at[e[0]] : e[0] === n.id && at.hasOwnProperty(e[1]) ? at[e[1]] : null; }).filter(function (x) { return x !== null; }); return xs.length ? xs.reduce(function (a, b) { return a + b; }, 0) / xs.length : 1e9; };
+      (per[k.key] || []).sort(function (a, b) { return mean(a) - mean(b); });
+    });
+    var rows = Math.max.apply(null, cols.map(function (k) { return (per[k.key] || []).length; }).concat([1]));
+    var at = {}, width = cols.length * W + (cols.length - 1) * GX + 16, height = top + rows * (H + GY) + 8;
+    cols.forEach(function (k, ci) { (per[k.key] || []).forEach(function (n, ri) { at[n.id] = { x: 8 + ci * (W + GX), y: top + ri * (H + GY) }; }); });
+    var mk = mark();
+    var svg = '<svg class="vz-svg" xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + " " + height + '" role="img" aria-label="' + esc(d.alt || "") + '">' + mk.defs;
+    cols.forEach(function (k, ci) { svg += '<text class="vz-colh" x="' + (8 + ci * (W + GX)) + '" y="16">' + esc(k.label) + "</text>"; });
+    (d.edges || []).forEach(function (e) {
+      var a = at[e[0]], b = at[e[1]]; if (!a || !b) return;
+      var ax = a.x + W, ay = a.y + H / 2, bx = b.x, by = b.y + H / 2, m = (ax + bx) / 2;
+      svg += '<g class="vz-edge" data-from="' + esc(e[0]) + '" data-to="' + esc(e[1]) + '"><path d="M' + ax + " " + ay + " C" + m + " " + ay + " " + m + " " + by + " " + bx + " " + by + '" marker-end="url(#' + mk.id + ')"/></g>';
+    });
+    (d.nodes || []).forEach(function (n) {
+      var p = at[n.id], isNew = c.isNew(n.id), label = n.label ? n.id + " " + n.label : n.id;
+      svg += '<g class="vz-node' + (n.ok === false ? " bad" : "") + (isNew ? " vz-new" : "") + '" tabindex="0" role="link" data-id="' + esc(n.id) + '" data-vz-go="' + esc(n.id) + '" aria-label="' + esc(label + (n.ok === false ? ", not covered" : "") + (isNew ? ", new in this round" : "")) + '">' +
+        "<title>" + esc(label) + '</title><rect x="' + p.x + '" y="' + p.y + '" width="' + W + '" height="' + H + '" rx="6"/><text class="vz-id" x="' + (p.x + 9) + '" y="' + (p.y + 15) + '">' + esc(n.id) + "</text>" +
+        (n.label ? '<text class="vz-sub" x="' + (p.x + 9) + '" y="' + (p.y + 29) + '">' + esc(clip(n.label, 22)) + "</text>" : "") + "</g>";
+    });
+    return svg + "</svg>";
+  }
+
+  /* ---------- layers: a band per layer, the components in it, what they depend on one hover away ---------- */
+  function layers(d, c, opts) {
+    var uses = {};
+    (d.edges || []).forEach(function (e) { (uses[e[0]] = uses[e[0]] || []).push(e[1]); });
+    var html = '<div class="vz-layers">' + d.layers.map(function (l, i) {
+      return '<div class="vz-layer"><div class="vz-lname">' + esc(l.name) + '<span class="n">' + l.items.length + "</span></div><div class=\"vz-items\">" + l.items.map(function (it) {
+        var u = uses[it.id] || [], isNew = c.isNew(it.id);
+        return '<button type="button" class="vz-item' + (isNew ? " vz-new" : "") + '" data-id="' + esc(it.id) + '" data-uses="' + esc(u.join("|")) + '" data-vz-go="' + esc(it.id) + '" aria-label="' + esc(it.label + (u.length ? ", depends on " + u.join(", ") : ", depends on nothing here") + (isNew ? ", new in this round" : "")) + '">' +
+          "<b>" + esc(clip(it.label, 30)) + "</b>" + (it.note ? "<small>" + esc(clip(it.note, 70)) + "</small>" : "") + (u.length ? '<span class="uses">uses ' + u.length + "</span>" : "") + "</button>";
+      }).join("") + "</div></div>" + (i < d.layers.length - 1 ? '<div class="vz-down" aria-hidden="true">depends on ↓</div>' : "");
+    }).join("") + "</div>";
+    return html;
+  }
+
+  /* ---------- a sequence: lifelines, numbered messages top to bottom ---------- */
+  function sequence(d, c) {
+    var A = d.actors || [], longest = Math.max.apply(null, d.messages.map(function (m) { return tw("00. " + clip(m.text, 40), 6.2); }).concat([120]));
+    var gap = Math.min(320, Math.max(150, longest + 24)), left = 20, top = 44, row = 40, width = left * 2 + (A.length - 1) * gap + 70, height = top + (d.messages.length + 1) * row, x = {}, mk = mark();
+    A.forEach(function (a, i) { x[a] = left + 36 + i * gap; });
+    var svg = '<svg class="vz-svg" xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + " " + height + '" role="img" aria-label="' + esc(d.alt || "") + '">' + mk.defs;
+    A.forEach(function (a) {
+      svg += '<g class="vz-actor"><line x1="' + x[a] + '" y1="34" x2="' + x[a] + '" y2="' + (height - 6) + '"/><rect x="' + (x[a] - 56) + '" y="6" width="112" height="26" rx="6"/><text x="' + x[a] + '" y="23" text-anchor="middle">' + esc(clip(a, 16)) + "<title>" + esc(a) + "</title></text></g>";
+    });
+    d.messages.forEach(function (m, i) {
+      var y = top + 14 + i * row, a = x[m.from], b = x[m.to], isNew = c.isNew("m:" + m.from + ">" + m.to + ":" + m.text);
+      var self = a === b, label = (i + 1) + ". " + clip(m.text, 40);
+      svg += '<g class="vz-msg' + (isNew ? " vz-new" : "") + '" tabindex="0" role="button" data-vz-text="' + esc(m.text || m.from) + '" aria-label="' + esc("Step " + (i + 1) + ": " + m.from + " to " + m.to + (m.text ? ", " + m.text : "") + (isNew ? ", new in this round" : "")) + '">' +
+        "<title>" + esc(m.from + " → " + m.to + (m.text ? ": " + m.text : "")) + "</title>" +
+        (self ? '<path d="M' + a + " " + y + " h28 v14 h-26" + '" marker-end="url(#' + mk.id + ')"/><text x="' + (a + 34) + '" y="' + (y + 4) + '">' + esc(label) + "</text>"
+          : '<line x1="' + a + '" y1="' + y + '" x2="' + b + '" y2="' + y + '" marker-end="url(#' + mk.id + ')"/><text x="' + ((a + b) / 2) + '" y="' + (y - 6) + '" text-anchor="middle">' + esc(label) + "</text>") + "</g>";
+    });
+    return svg + "</svg>";
+  }
+
+  /* ---------- steps: the numbered list as a chain ---------- */
+  function steps(d, c) {
+    return '<ol class="vz-steps">' + d.steps.map(function (s) {
+      var isNew = c.isNew("p:" + s.text);
+      return '<li class="' + (isNew ? "vz-new" : "") + '"><button type="button" data-vz-text="' + esc(s.text) + '"><span class="no">' + s.n + "</span><span>" + esc(s.text) + "</span></button></li>";
+    }).join("") + "</ol>";
+  }
+  function listOf(d, c) {
+    return '<div class="vz-listbox"><p class="hint">' + esc(d.heading || "Diagram") + ", as a list</p><ul>" + d.items.map(function (i) {
+      return '<li class="' + (c.isNew("l:" + i.text) ? "vz-new" : "") + '">' + esc(i.text) + (i.note ? ' <span class="hint">' + esc(i.note) + "</span>" : "") + "</li>";
+    }).join("") + "</ul></div>";
+  }
+
+  function altOf(d) {
+    var out = [];
+    if (d.kind === "trace") (d.edges || []).forEach(function (e) { out.push(e[0] + " leads to " + e[1]); });
+    else if (d.kind === "layers") d.layers.forEach(function (l) { out.push("Layer " + l.name + ": " + l.items.map(function (i) { return i.label; }).join(", ")); });
+    else if (d.kind === "flow") (d.edges || []).forEach(function (e) { out.push(e.from + " to " + e.to + (e.text ? " (" + e.text + ")" : "")); });
+    else if (d.kind === "states") (d.transitions || []).forEach(function (t) { out.push(t.from + " to " + t.to + (t.text ? " on " + t.text : "")); });
+    else if (d.kind === "sequence") (d.messages || []).forEach(function (m, i) { out.push((i + 1) + ". " + m.from + " to " + m.to + (m.text ? ": " + m.text : "")); });
+    else if (d.kind === "steps") (d.steps || []).forEach(function (s) { out.push(s.n + ". " + s.text); });
+    else if (d.kind === "list") (d.items || []).forEach(function (i) { out.push(i.text); });
+    return out.slice(0, 80);
+  }
+
+  function diagram(d, opts) {
+    opts = opts || {};
+    var c = compare(d, opts.prev), inner = "", extra = { alt: altOf(d), after: goneNote(c) }, hint = "";
+    if (d.kind === "trace") { inner = trace(d, c); hint = "press a box to go to it"; if (d.more) extra.after += '<p class="hint">' + plural(d.more, "more id") + " not drawn; they are in the text.</p>"; }
+    else if (d.kind === "layers") {
+      inner = layers(d, c, opts); hint = "hover a box to see what it depends on";
+      var m = (opts.maps || []).filter(function (x) { return x && x.kind === d.map && /^https:\/\//.test(String(x.url || "")); })[0];
+      if (m) extra.after += '<p class="vz-maplink"><a href="' + esc(m.url) + '" target="_blank" rel="noopener" data-map-link="' + esc(m.kind) + '">Open the full ' + esc(m.title || d.map + " map") + "</a></p>";
+    } else if (d.kind === "sequence") { inner = sequence(d, c); hint = "press a message to find it in the text"; }
+    else if (d.kind === "steps") { inner = steps(d, c); hint = "press a step to find it in the text"; }
+    else if (d.kind === "flow" || d.kind === "states") { inner = graph(d, c, function (n) { return ""; }); hint = "press a box to find it in the text"; }
+    else if (d.kind === "list") { inner = listOf(d, c); extra.noTitle = false; }
+    else return "";
+    extra.hint = hint;
+    if (d.kind === "steps" || d.kind === "list" || d.kind === "layers") return figure(d.kind, d, inner, extra).replace(/ class="vz-scroll" tabindex="0" role="region" aria-label="[^"]*"/, ' class="vz-flat"');
+    return figure(d.kind, d, inner, extra);
+  }
+
+  /* ---------- the target heat grid ---------- */
+  var HEAT = { "Not Met": "notmet", Unverified: "unverified", Met: "met", "N/A": "na" };
+  function heat(m) {
+    var cols = m.cols || [], rows = m.rows || [], cells = m.cells || {}, on = m.active || "";
+    var total = 0; Object.keys(cells).forEach(function (k) { total += cells[k].n; });
+    var head = '<tr><th scope="col"><span class="sr">Group</span></th>' + cols.map(function (c) { return '<th scope="col"><button type="button" class="vz-hcol" data-vz-set="heat:col:' + esc(c) + '" aria-pressed="' + (on === "col:" + c) + '">' + esc(c) + "</button></th>"; }).join("") + "</tr>";
+    var body = rows.map(function (r) {
+      return '<tr><th scope="row"><button type="button" class="vz-hrow" data-vz-set="heat:row:' + esc(r) + '" aria-pressed="' + (on === "row:" + r) + '">' + esc(r) + "</button></th>" + cols.map(function (c) {
+        var x = cells[r + "\u0001" + c];
+        if (!x) return '<td class="empty"><span aria-hidden="true">·</span><span class="sr">none</span></td>';
+        var key = r + "\u0001" + c, tip = x.n + " target" + (x.n === 1 ? "" : "s") + " in " + c + " / " + r + ", worst: " + x.worst;
+        return '<td><button type="button" class="vz-cell ' + HEAT[x.worst] + '" data-vz-set="heat:cell:' + esc(key) + '" aria-pressed="' + (on === "cell:" + key) + '" aria-label="' + esc(tip) + '" data-tip="' + esc(tip) + '">' + x.n + "</button></td>";
+      }).join("") + "</tr>";
+    }).join("");
+    var legend = '<p class="vz-legend">' + ["Not Met", "Unverified", "Met", "N/A"].map(function (v) { return '<span><i class="' + HEAT[v] + '"></i>' + v + "</span>"; }).join("") + '<span class="hint">a cell is coloured by its worst target; press one to filter the list</span></p>';
+    return '<figure class="vz vz-heat" data-aidlc-noids role="group" aria-label="' + esc("Target heat grid: " + total + " targets, " + cols.length + " Units, " + rows.length + " groups") + '"><figcaption class="vz-title">Where the targets stand' +
+      (on ? ' <button type="button" class="vz-clear" data-vz-set="heat:">Show all</button>' : "") + '</figcaption><div class="vz-scroll" tabindex="0" role="region" aria-label="Target heat grid, scrolls sideways"><table class="vz-table"><caption class="sr">Targets by Unit and group; each cell is the number of targets, coloured by the worst verdict</caption>' + head + body + "</table></div>" + legend + "</figure>";
+  }
+
+  /* ---------- the verification funnel ---------- */
+  var FUN = [["auto", "Covered by automated tests", "auto"], ["verified", "Verified by you", "verified"], ["unverified", "Not verified", "unverified"], ["failed", "Failed, left as known", "failed"]];
+  function funnel(f) {
+    var total = f.total || 0, on = f.active || "";
+    if (!total) return "";
+    var segs = FUN.map(function (s) { return { k: s[0], label: s[1], n: f[s[0]] || 0 }; });
+    var bar = segs.filter(function (s) { return s.n; }).map(function (s) {
+      var pct = Math.max(2, s.n / total * 100);
+      var inner = "<b>" + s.n + "</b><span>" + esc(s.label) + "</span>", lab = esc(s.label + ": " + plural(s.n, "point") + " of " + total), tip = esc(s.label + ": " + s.n + " of " + total);
+      /* the points the code's own tests cover are not rows of the list below, so that part is not a filter */
+      if (s.k === "auto") return '<span class="vz-seg auto" style="flex:' + pct.toFixed(2) + ' 1 0" role="img" aria-label="' + lab + '" data-tip="' + tip + '">' + inner + "</span>";
+      return '<button type="button" class="vz-seg ' + s.k + '" style="flex:' + pct.toFixed(2) + ' 1 0" data-vz-set="verif:' + s.k + '" aria-pressed="' + (on === s.k) + '" aria-label="' + lab + '" data-tip="' + tip + '">' + inner + "</button>";
+    }).join("");
+    var line = segs.map(function (s) { return s.label + " " + s.n; }).join(", ");
+    return '<figure class="vz vz-funnel" data-aidlc-noids role="group" aria-label="' + esc("Verification funnel: " + total + " points; " + line) + '"><figcaption class="vz-title">Where the ' + plural(total, "point") + ' stand<span class="hint">press a part to filter the points below</span></figcaption><div class="vz-bar">' + bar + "</div>" +
+      (on ? '<button type="button" class="vz-clear" data-vz-set="verif:">Show all points</button>' : "") + '<ul class="vz-sr">' + segs.map(function (s) { return "<li>" + esc(s.label + ": " + s.n) + "</li>"; }).join("") + "</ul></figure>";
+  }
+
+  /* ---------- the round timeline: it replaces the legend chips; each round is still one pressable chip (data-rvonly) ---------- */
+  function timeline(rounds, only) {
+    if (!rounds || !rounds.length) return "";
+    var max = Math.max.apply(null, rounds.map(function (r) { return r.changed + r.added + r.removed; }).concat([1]));
+    return '<ol class="vz-tl rv-legend" role="group" aria-label="Changes by version">' + rounds.map(function (r) {
+      var n = r.changed + r.added + r.removed, h = n ? Math.max(14, Math.round(n / max * 100)) : 0;
+      var words = r.words ? '<span class="w">' + r.words + (r.words === 1 ? " word" : " words") + "</span>" : "";
+      var label = "Version " + r.k + (r.base ? ", the first round" : ": " + plural(r.changed, "change") + ", " + r.added + " added, " + r.removed + " removed");
+      if (r.base) return '<li><span class="vz-round base rv-t' + r.tone + '" data-tip="The first round: everything in it was written then"><i aria-hidden="true"></i><b>v' + r.k + '</b><span class="w">first round</span></span></li>';
+      return '<li><button type="button" class="vz-round rv-chip rv-t' + r.tone + '" data-rvonly="' + r.k + '" aria-pressed="' + (only === r.k) + '" aria-label="' + esc(label + (only === r.k ? ", shown alone" : "")) + '" data-tip="' + esc(label) + '"><i aria-hidden="true"></i><b>v' + r.k + "</b>" +
+        ('<span class="vz-spark" aria-hidden="true"><s style="height:' + h + '%"></s></span><span class="vz-nums"><span class="c" title="changed">~' + r.changed + '</span><span class="a" title="added">+' + r.added + '</span><span class="g" title="removed">−' + r.removed + "</span></span>") + words + "</button></li>";
+    }).join("") + "</ol>";
+  }
+
+  /* ---------- plan steps as lanes ---------- */
+  function lanes(L) {
+    var lanesL = L.lanes || [];
+    if (lanesL.length < 2) return "";
+    var total = lanesL.reduce(function (a, l) { return a + l.steps.length; }, 0);
+    return '<figure class="vz vz-lanes" data-aidlc-noids role="group" aria-label="' + esc("Plan steps by layer: " + total + " steps in " + lanesL.length + " layers, in build order") + '"><figcaption class="vz-title">Steps by layer<span class="hint">press a step to go to its row</span></figcaption><div class="vz-lanes-in">' + lanesL.map(function (l) {
+      return '<div class="vz-lane"><div class="vz-lname">' + esc(l.name) + '<span class="n">' + l.steps.length + '</span></div><ol class="vz-lsteps">' + l.steps.map(function (s) {
+        return '<li><button type="button" class="vz-lstep" data-vz-go="' + esc(s.key) + '" aria-label="' + esc("Step " + s.n + ": " + s.title + (s.implements && s.implements.length ? ", implements " + s.implements.join(", ") : "")) + '"><span class="no">' + esc(s.n) + "</span><span class=\"t\">" + esc(clip(s.title, 60)) + "</span>" +
+          (s.implements && s.implements.length ? '<span class="im">' + s.implements.slice(0, 4).map(esc).join(" · ") + (s.implements.length > 4 ? " +" + (s.implements.length - 4) : "") + "</span>" : "") + "</button></li>";
+      }).join("") + "</ol></div>";
+    }).join("") + '</div><ul class="vz-sr">' + lanesL.map(function (l) { return "<li>" + esc(l.name + ": " + l.steps.map(function (s) { return "step " + s.n + " " + s.title; }).join("; ")) + "</li>"; }).join("") + "</ul></figure>";
+  }
+
+  /* ---------- criteria at a glance ---------- */
+  function dots(groups) {
+    var all = groups.reduce(function (a, g) { return a + g.items.length; }, 0);
+    if (!all) return "";
+    var tally = {}; groups.forEach(function (g) { g.items.forEach(function (c) { tally[c.v] = (tally[c.v] || 0) + 1; }); });
+    var line = ["holds", "fails", "n/a", "unjudged"].filter(function (k) { return tally[k]; }).map(function (k) { return tally[k] + " " + ({ holds: "hold", fails: "fail", "n/a": "not relevant", unjudged: "not judged" })[k]; }).join(", ");
+    return '<div class="vz vz-dots" data-aidlc-noids role="group" aria-label="' + esc("Criteria at a glance: " + all + " criteria; " + line) + '">' + groups.map(function (g) {
+      return '<span class="vz-dg"><span class="gn">' + esc(g.name) + "</span>" + g.items.map(function (c) {
+        return '<button type="button" class="vz-dot ' + String(c.v).replace("/", "") + '" data-vz-go="' + esc(c.key) + '" aria-label="' + esc(c.title + ": " + c.label) + '" data-tip="' + esc(c.title + " — " + c.label) + '"></button>';
+      }).join("") + "</span>";
+    }).join("") + '<span class="vz-dl hint">' + esc(line) + "</span></div>";
+  }
+
+  /* ---------- a file's outline: a sticky list beside it on wide screens, a collapsible strip on narrow ones ---------- */
+  function outline(items) {
+    if (!items || items.length < 5) return "";
+    var li = items.map(function (i) { return '<li class="l' + (i.level || 2) + '"><button type="button" data-vz-jump="' + esc(i.id) + '">' + esc(clip(i.title, 60)) + "</button></li>"; }).join("");
+    return '<nav class="fo-side" data-rv-skip aria-label="Headings of this file"><p class="fo-h">In this file</p><ol>' + li + '</ol></nav><details class="fo-strip" data-rv-skip><summary>In this file<span class="n">' + items.length + ' headings</span></summary><ol>' + li + "</ol></details>";
+  }
+
+  /* hover or focus a box: it and what it is linked to stand out, the rest steps back */
+  function bind(root) {
+    if (!root || root.__vz) return; root.__vz = true;
+    function on(e) {
+      var n = e.target.closest && e.target.closest(".vz-node, .vz-item"); if (!n) return;
+      var fig = n.closest(".vz"), id = n.getAttribute("data-id"), rel = {}; rel[id] = 1;
+      [].forEach.call(fig.querySelectorAll(".vz-edge"), function (g) {
+        var hit = g.getAttribute("data-from") === id || g.getAttribute("data-to") === id; g.classList.toggle("on", hit);
+        if (hit) { rel[g.getAttribute("data-from")] = 1; rel[g.getAttribute("data-to")] = 1; }
+      });
+      (n.getAttribute("data-uses") || "").split("|").forEach(function (u) { if (u) rel[u] = 1; });
+      fig.classList.add("vz-focus");
+      [].forEach.call(fig.querySelectorAll(".vz-node, .vz-item"), function (x) { x.classList.toggle("rel", !!rel[x.getAttribute("data-id")]); });
+    }
+    function off(e) {
+      var fig = e.target.closest && e.target.closest(".vz"); if (!fig) return;
+      if (e.relatedTarget && fig.contains(e.relatedTarget)) return;
+      fig.classList.remove("vz-focus");
+      [].forEach.call(fig.querySelectorAll(".on, .rel"), function (x) { x.classList.remove("on", "rel"); });
+    }
+    root.addEventListener("mouseover", on); root.addEventListener("focusin", on);
+    root.addEventListener("mouseout", off); root.addEventListener("focusout", off);
+    root.addEventListener("keydown", function (e) {
+      var n = e.target.closest && e.target.closest(".vz-node[data-vz-go], .vz-msg"); if (n && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); n.dispatchEvent(new MouseEvent("click", { bubbles: true })); }
+    });
+  }
+
+  return { diagram: diagram, heat: heat, funnel: funnel, timeline: timeline, lanes: lanes, dots: dots, outline: outline, bind: bind, keysOf: keysOf, esc: esc };
+})();
+if (typeof module !== "undefined" && module.exports) module.exports = GateViz;
+/* gate-viz.js:end */
+</script>
 <script>
 /* aidlc-ids.js:begin */
 /* The ids an AI-DLC page shows (US1.1, AC1.1.2, FR1.4, NFR3, BR1.2, Q4, U31, C2, ADR-009, R-01, ...), each a link with
@@ -685,7 +1086,7 @@ var RevDiff = (function () {
   function toggleOnly(root, btn, current) {
     var k = +btn.getAttribute("data-rvonly"); k = k === current ? 0 : k;
     only(root, k);
-    [].slice.call(btn.parentElement.querySelectorAll("[data-rvonly]")).forEach(function (b) { b.setAttribute("aria-pressed", String(+b.getAttribute("data-rvonly") === k)); });
+    [].slice.call((btn.closest(".rv-legend") || btn.parentElement).querySelectorAll("[data-rvonly]")).forEach(function (b) { b.setAttribute("aria-pressed", String(+b.getAttribute("data-rvonly") === k)); });
     return k;
   }
 
@@ -721,7 +1122,6 @@ if (typeof module !== "undefined" && module.exports) module.exports = RevDiff;
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
 <style>
 /* Layout: one family with the unit approvals page (unit-gate.html): its tokens, a header card with the gate's facts,
@@ -941,13 +1341,19 @@ details[open] > summary > .caret, details[open] > summary .caret { transform: ro
 .md h1, .md h2, .md h3, .md h4, .md h5 { font-weight: 600; line-height: 1.3; margin: 1.3em 0 .45em; text-wrap: balance; }
 .md h1 { font-size: 18px; } .md h2 { font-size: 16px; } .md h3 { font-size: 14.5px; } .md h4, .md h5 { font-size: 14px; }
 .md p, .md ul, .md ol, .md blockquote, .md pre { margin: 0 0 .8em; }
-.md p, .md li { max-width: 86ch; }
+.md p, .md li, .md blockquote, .vw > p, .secbody > p { max-width: 76ch; }
 .md ul, .md ol { padding-left: 20px; }
 .md li + li { margin-top: .15em; }
 .md blockquote { border-left: 3px solid var(--control); padding: 1px 0 1px 12px; color: var(--fg-2); }
 .md hr { border: 0; border-top: 1px solid var(--line); margin: 1.2em 0; }
 .md pre, .jsonbox pre, .src { font: 400 12.5px/1.45 var(--mono); background: var(--raised); border: 1px solid var(--line-soft); border-radius: 8px; padding: 10px 12px; overflow-x: auto; margin: 0 0 .8em; white-space: pre; }
 .md pre code { background: none; padding: 0; font-size: inherit; }
+.md td, .md th, .md li, .md p, .vw td { overflow-wrap: anywhere; }
+.tablewrap.scrolls td:first-child, .tablewrap.scrolls th:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); box-shadow: 1px 0 0 var(--line); }
+.tablewrap.scrolls th:first-child { background: var(--raised); }
+.md td { max-width: 46ch; }
+.md pre, .jsonbox pre, .src, .md code { max-width: 100%; }
+.md pre { overflow-x: auto; }
 .tablewrap { overflow-x: auto; margin: 0 0 .8em; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
 .md table, table.grid { border-collapse: collapse; width: 100%; font-size: 13px; }
 .md th, .md td, table.grid th, table.grid td { text-align: left; vertical-align: top; padding: 6px 10px; border-bottom: 1px solid var(--line-soft); }
@@ -1486,6 +1892,149 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
 [data-rv="clean"] :is(.rv-addblk, .rv-new, .rv-chg) { box-shadow: none; }
 [data-rv="clean"] .rv-same > summary { opacity: 1; }
 /* rev-diff.css:end */
+/* gate-viz.css:begin */
+/* The gate pages' visuals (gate-viz.js): tokens only, light and dark through them. Shared: edit shared/gate-viz/gate-viz.css. */
+.vz { margin: 0 0 14px; min-width: 0; max-width: 100%; }
+.vz-title { font-size: 12px; font-weight: 600; color: var(--fg-2); margin: 0 0 6px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.vz-title .hint { font-weight: 400; font-size: 12px; }
+.vz-sr, .vz .sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; list-style: none; }
+.vz-scroll { overflow: auto; max-width: 100%; max-height: 70vh; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 6px; }
+.vz-flat { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 10px 12px; }
+.vz-svg { display: block; max-width: none; font: 500 12px var(--body); }
+.vz-svg text { fill: var(--fg); }
+.vz-head { fill: var(--muted); }
+.vz-colh { fill: var(--muted) !important; font-size: 11px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
+.vz-node { cursor: pointer; outline: none; }
+.vz-node rect, .vz-node polygon, .vz-node path { fill: var(--surface); stroke: var(--control); stroke-width: 1.2; }
+.vz-node .vz-id { font: 600 11.5px var(--mono); fill: var(--accent-strong); }
+.vz-node .vz-sub { font-size: 11px; fill: var(--muted); }
+.vz-node.bad rect { stroke: var(--crit-fg); fill: var(--crit-bg); }
+.vz-node:hover rect, .vz-node:hover polygon, .vz-node:focus-visible rect, .vz-node:focus-visible polygon { stroke: var(--accent); stroke-width: 2; }
+.vz-edge path { fill: none; stroke: var(--control); stroke-width: 1.4; }
+.vz-edge.dashed path { stroke-dasharray: 5 4; }
+.vz-edge.thick path { stroke-width: 2.6; }
+.vz-edge text { font-size: 11px; fill: var(--muted); paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
+.vz-group rect { fill: var(--raised); stroke: var(--line); stroke-dasharray: 3 3; }
+.vz-group text { font-size: 11px; font-weight: 600; fill: var(--muted); }
+.vz-focus .vz-edge:not(.on) { opacity: .25; }
+.vz-focus .vz-node:not(.rel), .vz-focus .vz-item:not(.rel) { opacity: .45; }
+.vz-edge.on path { stroke: var(--accent); stroke-width: 2; }
+.vz-new rect, .vz-new polygon, .vz-new.vz-item { stroke: var(--r2-fg) !important; box-shadow: 0 0 0 2px var(--r2-bg); }
+.vz-new rect, .vz-new polygon { fill: var(--r2-tint) !important; }
+.vz-actor line { stroke: var(--control); stroke-dasharray: 3 4; }
+.vz-actor rect { fill: var(--raised); stroke: var(--control); }
+.vz-actor text { font-weight: 600; text-anchor: middle; }
+.vz-msg { cursor: pointer; outline: none; }
+.vz-msg line, .vz-msg path { stroke: var(--fg-2); stroke-width: 1.4; fill: none; }
+.vz-msg text { font-size: 11.5px; }
+.vz-msg:hover line, .vz-msg:focus-visible line, .vz-msg:hover path { stroke: var(--accent); stroke-width: 2; }
+.vz-msg.vz-new line, .vz-msg.vz-new path { stroke: var(--r2-fg); }
+.vz-gone { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+/* layers */
+.vz-layers { display: grid; gap: 4px; }
+.vz-layer { display: grid; grid-template-columns: minmax(92px, 130px) minmax(0, 1fr); gap: 8px; align-items: start; background: var(--raised); border: 1px solid var(--line-soft); border-radius: 8px; padding: 8px; }
+.vz-lname { font-size: 12px; font-weight: 600; color: var(--fg-2); text-transform: capitalize; padding-top: 4px; }
+.vz-lanes .vz-lname { text-transform: none; }
+.vz-lname .n { margin-left: 6px; color: var(--muted); font: 500 11px var(--mono); }
+.vz-items { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.vz-item { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; min-height: 36px; padding: 5px 10px; background: var(--surface); border: 1px solid var(--control); border-radius: 6px; max-width: 230px; }
+.vz-item b { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.vz-item small { color: var(--muted); font-size: 11.5px; line-height: 1.3; }
+.vz-item .uses { font: 500 10.5px var(--mono); color: var(--accent); }
+.vz-item.rel, .vz-item:focus-visible { border-color: var(--accent); background: var(--accent-tint); }
+.vz-down { text-align: center; font-size: 11px; color: var(--muted); line-height: 1; }
+.vz-maplink { margin: 6px 0 0; font-size: 13px; }
+/* steps and list */
+.vz-steps { list-style: none; margin: 0; padding: 0; counter-reset: s; position: relative; }
+.vz-steps li { position: relative; padding-left: 36px; min-height: 34px; }
+.vz-steps li::before { content: ""; position: absolute; left: 13px; top: 24px; bottom: -4px; width: 2px; background: var(--line); }
+.vz-steps li:last-child::before { display: none; }
+.vz-steps button { display: flex; gap: 8px; align-items: flex-start; text-align: left; border: 0; background: none; padding: 3px 6px; min-height: 28px; border-radius: 6px; overflow-wrap: anywhere; font-weight: 400; }
+.vz-steps button:hover { background: var(--hover); }
+.vz-steps .no { position: absolute; left: 0; top: 2px; width: 26px; height: 26px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-strong); font: 600 12px/26px var(--body); text-align: center; }
+.vz-steps .vz-new .no { background: var(--r2-bg); color: var(--r2-fg); }
+.vz-listbox ul { margin: 6px 0 0; padding-left: 18px; max-width: 76ch; }
+.vz-listbox li.vz-new { background: var(--r2-tint); }
+/* heat grid */
+.vz-table { border-collapse: separate; border-spacing: 3px; font-size: 12px; }
+.vz-table th { font-weight: 500; text-align: left; color: var(--muted); padding: 0 2px; white-space: nowrap; }
+.vz-table thead th { text-align: center; }
+.vz-hcol, .vz-hrow { border: 0; background: none; padding: 2px 6px; min-height: 28px; font-size: 12px; color: var(--fg-2); border-radius: 6px; }
+.vz-hrow { text-align: left; max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
+.vz-hcol[aria-pressed="true"], .vz-hrow[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-strong); }
+.vz-cell { min-width: 44px; min-height: 34px; padding: 0; border-radius: 6px; border: 1px solid transparent; font: 600 13px var(--body); }
+.vz-cell.notmet, .vz-legend .notmet { background: var(--crit-bg); color: var(--crit-fg); }
+.vz-cell.unverified, .vz-legend .unverified { background: var(--warn-bg); color: var(--warn-fg); }
+.vz-cell.met, .vz-legend .met { background: var(--ok-bg); color: var(--ok-fg); }
+.vz-cell.na, .vz-legend .na { background: var(--low-bg); color: var(--low-fg); }
+.vz-cell[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+.vz-table td.empty { text-align: center; color: var(--line); }
+.vz-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; margin: 8px 0 0; font-size: 12px; color: var(--fg-2); }
+.vz-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.vz-legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; border: 1px solid var(--line); }
+.vz-clear { font-size: 12px; min-height: 24px; padding: 0 8px; }
+/* funnel */
+.vz-bar { display: flex; gap: 3px; min-height: 54px; }
+.vz-seg { display: flex; flex-direction: column; justify-content: center; align-items: flex-start; min-width: 54px; padding: 6px 10px; border: 1px solid transparent; border-radius: 6px; text-align: left; overflow: hidden; }
+.vz-seg b { font-size: 16px; line-height: 1.1; }
+.vz-seg span { font-size: 11.5px; font-weight: 500; line-height: 1.25; }
+.vz-seg.auto { background: var(--accent-soft); color: var(--accent-strong); }
+.vz-seg.verified { background: var(--ok-bg); color: var(--ok-fg); }
+.vz-seg.unverified { background: var(--warn-bg); color: var(--warn-fg); }
+.vz-seg.failed { background: var(--crit-bg); color: var(--crit-fg); }
+.vz-seg[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+.vz-funnel .vz-clear { margin-top: 8px; }
+/* timeline: the round chips, with what each round did */
+.vz-tl { list-style: none; margin: 0; padding: 0; display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: stretch; }
+.vz-tl li { display: flex; }
+.vz-round { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 3px 10px; border-radius: 8px; }
+.vz-round b { font-weight: 600; }
+.vz-spark { width: 5px; height: 22px; display: inline-flex; align-items: flex-end; background: var(--line-soft); border-radius: 3px; overflow: hidden; }
+.vz-spark s { display: block; width: 100%; background: currentColor; text-decoration: none; opacity: .75; }
+.vz-nums { display: inline-flex; gap: 6px; font: 600 11.5px var(--mono); }
+.vz-nums .g { opacity: .85; }
+.vz-round .w { font-size: 11px; font-weight: 400; opacity: .8; }
+.vz-round[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* lanes */
+.vz-lanes-in { display: grid; gap: 6px; }
+.vz-lane { display: grid; grid-template-columns: minmax(84px, 120px) minmax(0, 1fr); gap: 8px; background: var(--raised); border: 1px solid var(--line-soft); border-radius: 8px; padding: 8px; }
+.vz-lsteps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.vz-lstep { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 5px 10px; min-height: 36px; max-width: 250px; background: var(--surface); border: 1px solid var(--control); border-radius: 6px; font-weight: 400; }
+.vz-lstep .no { font: 600 11px var(--mono); color: var(--accent-strong); }
+.vz-lstep .t { font-size: 12.5px; font-weight: 500; line-height: 1.3; }
+.vz-lstep .im { font: 500 10.5px var(--mono); color: var(--muted); }
+/* criteria dots */
+.vz-dots { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin: 0 0 10px; }
+.vz-dg { display: inline-flex; align-items: center; gap: 3px; padding-right: 10px; border-right: 1px solid var(--line); }
+.vz-dg:last-of-type { border-right: 0; }
+.vz-dg .gn { font-size: 11px; color: var(--muted); margin-right: 5px; }
+.vz-dot { width: 18px; height: 18px; min-height: 0; padding: 0; border-radius: 50%; border: 2px solid var(--control); background: var(--surface); }
+.vz-dot.holds { background: var(--ok-fg); border-color: var(--ok-fg); }
+.vz-dot.fails { background: var(--crit-fg); border-color: var(--crit-fg); }
+.vz-dot.na { background: var(--low-bg); border-color: var(--control); }
+.vz-dot.unjudged { background: var(--surface); border-style: dashed; }
+.vz-dot:hover { box-shadow: 0 0 0 3px var(--accent-soft); }
+.vz-dl { font-size: 12px; }
+/* a file's outline */
+.fo-side { display: none; }
+.fo-strip { margin: 0 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); }
+.fo-strip summary { cursor: pointer; padding: 6px 10px; font-size: 12.5px; font-weight: 500; min-height: 34px; display: flex; align-items: center; gap: 8px; }
+.fo-strip .n { color: var(--muted); font: 400 11.5px var(--mono); }
+.fo-strip ol, .fo-side ol { list-style: none; margin: 0; padding: 0 6px 8px; }
+.fo-strip ol { max-height: 40vh; overflow: auto; }
+.fo-strip button, .fo-side button { border: 0; background: none; width: 100%; text-align: left; padding: 3px 8px; min-height: 28px; font-size: 12.5px; font-weight: 400; color: var(--fg-2); border-radius: 5px; }
+.fo-strip button:hover, .fo-side button:hover { background: var(--hover); color: var(--accent-strong); }
+.fo-side .l3 button, .fo-strip .l3 button { padding-left: 20px; color: var(--muted); }
+.fo-h { margin: 0 0 4px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.hasfo > * { grid-column: 1; min-width: 0; }
+@media (min-width: 1380px) {
+  .hasfo { display: grid; grid-template-columns: minmax(0, 1fr) 190px; column-gap: 18px; }
+  .hasfo > .fo-side { display: block; grid-column: 2; grid-row: 1 / span 99; align-self: start; position: sticky; top: calc(var(--bar-h, 112px) + 12px); max-height: calc(100vh - var(--bar-h, 112px) - 28px); overflow: auto; font-size: 12.5px; }
+  .hasfo > .fo-strip { display: none; }
+}
+@media (max-width: 560px) { .vz-layer, .vz-lane { grid-template-columns: minmax(0, 1fr); } .vz-lname { padding-top: 0; } .vz-item { max-width: 100%; } .vz-lstep { max-width: 100%; } }
+@media (prefers-reduced-motion: no-preference) { .vz-node rect, .vz-edge path, .vz-item { transition: stroke .12s, opacity .12s, background .12s; } }
+/* gate-viz.css:end */
 </style>
 
 <main class="wrap">
@@ -1539,7 +2088,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
 
   let db = null, uid = null, tipOn = null;
   const fresh = () => ({ unsub: [], gate: null, docs: new Map(), docsLoaded: false, notes: {}, dirty: new Set(), noteStat: {}, unsaved: false, saving: false, failed: false,
-    noteTimer: null, painted: "", openNotes: new Set(), railSig: "", mode: {}, picks: {}, fpicks: {}, iopen: new Set(), bt: { v: new Set(), u: new Set(), q: "", rows: new Set(), fold: false }, refs: new Map(), ids: {}, railOpen: {},
+    noteTimer: null, painted: "", openNotes: new Set(), railSig: "", mode: {}, picks: {}, fpicks: {}, iopen: new Set(), bt: { v: new Set(), u: new Set(), q: "", rows: new Set(), fold: false, grp: "", heat: "" }, refs: new Map(), ids: {}, railOpen: {},
     reads: {}, readKey: "", hashes: {}, groups: {}, filter: "all", needsKeep: new Set(), nsNow: new Set(), nav: {}, prev: null, prevDocs: null, changed: {},
     rounds: [], roundsLoaded: false, baseDocs: {}, prevList: [], itemDelta: null, rv: { groups: [] }, rvSeq: 0, rvAt: -1, rvOnly: 0, rvLegend: "", chainReady: false, rvTrees: new Map() });
   const view = Object.assign({ id: "", diagrams: 0 }, fresh());
@@ -1582,26 +2131,24 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     root.querySelectorAll("table").forEach((t) => { if (t.parentElement.classList.contains("tablewrap")) return; const w = document.createElement("div"); w.className = "tablewrap"; t.replaceWith(w); w.appendChild(t); });
     root.querySelectorAll("pre > code.language-mermaid").forEach((code) => { code.parentElement.replaceWith(diagramBox(code.textContent)); });
   }
-  function diagramBox(source) {
+  /* A diagram is drawn when it is made, from what the row stored (scripts/diagrams.py): a ```mermaid block in a record by the
+     hash of its source, a view's own graph from the data it holds. One that was not stored is never shown as source by default. */
+  const normSrc = (t) => String(t || "").replace(/\s+/g, " ").trim();
+  const storedFor = (source) => { const h = hash(normSrc(source)); return ((view.gate && view.gate.diagrams) || []).find((x) => x.h && x.h === h); };
+  function diagramBox(source, obj) {
     const box = document.createElement("div"); box.className = "diagram"; box.dataset.src = source; box.dataset.aidlcNoids = "";
-    const src = document.createElement("pre"); src.className = "src"; src.textContent = source; box.appendChild(src);
+    const found = obj || storedFor(source);
+    if (found) box.innerHTML = GateViz.diagram(found, { maps: (view.gate && view.gate.maps) || [] });
+    else {
+      box.innerHTML = '<p class="note">This diagram was not prepared when the page was published, so it is not drawn.</p><details class="srcfold"><summary>Show its source</summary><pre class="src"></pre></details>';
+      box.querySelector("pre").textContent = source;
+    }
     return box;
   }
-  /* A diagram is drawn when its section is open; the source stays when it cannot be drawn. */
-  function drawDiagrams(root) {
-    root.querySelectorAll(".diagram:not([data-drawn])").forEach((box) => {
-      if (!isOpen(box)) return;
-      box.dataset.drawn = "1";
-      const source = box.dataset.src;
-      if (typeof mermaid === "undefined") { box.insertAdjacentHTML("afterbegin", '<p class="note">The diagram library did not load, so the source is shown.</p>'); return; }
-      const id = "mmd" + (++view.diagrams);
-      try {
-        mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: isDark() ? "dark" : "neutral", fontFamily: "IBM Plex Sans, system-ui, sans-serif" });
-        Promise.resolve(mermaid.render(id, source)).then((out) => { box.innerHTML = out.svg; })
-          .catch(() => { document.getElementById("d" + id)?.remove(); box.insertAdjacentHTML("afterbegin", '<p class="note">This diagram could not be drawn, so its source is shown.</p>'); });
-      } catch { box.insertAdjacentHTML("afterbegin", '<p class="note">This diagram could not be drawn, so its source is shown.</p>'); }
-    });
-  }
+  /* a table that scrolls inside its own frame keeps its first column in view */
+  function stickyTables() { el.col.querySelectorAll(".tablewrap").forEach((w) => w.classList.toggle("scrolls", w.scrollWidth > w.clientWidth + 2)); }
+  let stickyTimer = null; window.addEventListener("resize", () => { clearTimeout(stickyTimer); stickyTimer = setTimeout(stickyTables, 150); });
+  function drawDiagrams() { /* nothing waits to be drawn: diagramBox draws when it makes the box */ }
   function isOpen(node) { let d = node.closest("details"); while (d) { if (!d.open) return false; d = d.parentElement && d.parentElement.closest("details"); } return true; }
 
   /* ---------- the list of gates ---------- */
@@ -1794,7 +2341,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     if (head) { head.insertBefore(span, head.querySelector(":scope > .end") || null); return; }
     n.insertBefore(span, n.firstChild);
   }
-  const RV_SKIP = ".edotc, .edot, .cnt, .rdot, .idot, .vtools, .notebox, .seg, .rv-tags, .notedot, h3 > .n, .count, .ctally, .lg";
+  const RV_SKIP = ".vz, .diagram, .fo-side, .fo-strip, .edotc, .edot, .cnt, .rdot, .idot, .vtools, .notebox, .seg, .rv-tags, .notedot, h3 > .n, .count, .ctally, .lg";
   const RV_KEYED = "details.sec, [data-ekey], [data-rvkey]";
   const ekeyId = (n) => n.dataset.ekey ? n.dataset.ekey.split(":").slice(2).join(":") : (n.dataset.rvkey || "");
   const rvKeyOf = (n) => (n.dataset.ekey || n.dataset.rvkey) ? "e:" + ekeyId(n) : n.matches("details.sec") ? "s:" + plainTitle(n.dataset.title).toLowerCase() : null;
@@ -1849,6 +2396,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     if (ch === "new") { block.classList.add("rv-new"); rvGroup(d.key, title, rvId(block), "new", { ins: RevDiff.countWords(d.text) }); return; }
     const old = view.prevList.find((x) => x.key === d.key); if (!old) return;
     const grp = rvGroup(d.key, title, rvId(block), "changed", null);
+    if (modeOf(d) === "diagram") { grp.ins = RevDiff.countWords(d.text); return; }  /* the diagram marks its new boxes; the text view marks every word */
     const listed = (n) => n.matches("details.sec") || !(n.parentElement && n.parentElement.closest("details.sec"));
     let c;
     try { c = RevDiff.diffKeyed(body, rvBuild(old, i), rvKeyedOpts(grp, body, listed)); } catch (e) { console.warn("diff failed", d.key, e); c = { ins: 0, del: 0 }; }
@@ -1977,6 +2525,34 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const run = (target, its, start, make) => { if (target) add(RevDiff.attributeTree(target, its.slice(start, last).map((x, j) => x ? make(x, start + j) : null), nos.slice(start), { skip: RV_SKIP + ", .fsugg, .flab" })); };
     return { rs, nos, last, counts, first, edge, run };
   }
+  /* What each round did, for the round timeline: the things of a round (a section of a document, an item, a finding, a target, a
+     criterion, the summary, the brief, the evaluation) against the round before it. Added, removed, or changed when it says
+     something else. */
+  function thingsOf(g, docs) {
+    const out = new Map(), put = (k, sig) => out.set(k, hash(JSON.stringify(sig)));
+    (docs || []).forEach((d) => {
+      if (d.pending || d.partial) return;
+      const parts = String(d.text || "").split(/^(?=##\s)/m);
+      if (parts.length > 1) parts.forEach((p, i) => put("doc:" + d.key + "#" + (i ? plainTitle(p.split("\n")[0]) : "lead"), p)); else put("doc:" + d.key, d.text);
+    });
+    ((g.digest || {}).items || []).forEach((i) => put("item:" + i.id, [i.title, i.body || "", i.summary || "", i.label || ""]));
+    ((g.findings || {}).items || []).forEach((f) => put("finding:" + f.id, fSig(f)));
+    (((g.buildTest || {}).targets) || []).forEach((t) => put(tkey(t), tHash(t)));
+    (g.criteria || []).forEach((c) => put("crit:" + c.key, [c.verdict, c.note || "", c.title]));
+    if (g.summary) put("summary", g.summary); if (g.brief) put("review", g.brief); if (g.evaluation) put("evaluation", g.evaluation);
+    return out;
+  }
+  function roundStats(ch) {
+    const { rs, nos, last, counts } = ch, rows = rs.map((r) => ({ g: r.g, docs: view.baseDocs[r.id] || [] })).concat([{ g: view.gate, docs: docList() }]);
+    const sets = rows.map((r) => thingsOf(r.g, r.docs)), out = [{ k: nos[0], tone: RevDiff.tone(nos[0]), base: true, changed: 0, added: 0, removed: 0 }];
+    for (let i = 1; i <= last; i++) {
+      const a = sets[i - 1], b = sets[i]; let changed = 0, added = 0, removed = 0;
+      b.forEach((v, k) => { if (!a.has(k)) added++; else if (a.get(k) !== v) changed++; });
+      a.forEach((v, k) => { if (!b.has(k)) removed++; });
+      out.push({ k: nos[i], tone: RevDiff.tone(nos[i]), changed, added, removed, words: counts[nos[i]] || 0 });
+    }
+    return out;
+  }
   /* Clean: a finding or target first written in a later round carries that round's edge; its words, the colour of the round that last wrote them */
   function rvAttributeRecs(ch, sp) {
     const maps = ch.rs.map((r) => new Map(sp.list(r.g).map((x) => [sp.idOf(x), x])));
@@ -1993,7 +2569,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     RevDiff.unmark(el.col);
     docList().forEach((d, i) => {
       if (d.pending || d.partial) return;
-      const body = $("db-" + d.key); if (!body) return;
+      const body = $("db-" + d.key); if (!body || modeOf(d) === "diagram") return;
       const its = rs.map((r) => (view.baseDocs[r.id] || []).find((x) => x.key === d.key) || null).concat([d]), start = first(its);
       edge($("d-" + d.key), start);
       run(body, its, start, (od, ri) => {
@@ -2023,7 +2599,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     });
     recSpecs().forEach((sp) => rvAttributeRecs(ch, sp));
     { const bb = $("briefbody"); if (bb && view.gate.brief) { const its = rs.map((r) => r.g.brief || null).concat([view.gate.brief]); run(bb, its, first(its), (t) => briefNode(t)); } }
-    view.rvLegend = RevDiff.legend(nos.slice(1), counts, view.rvOnly);
+    view.rvLegend = GateViz.timeline(roundStats(ch), view.rvOnly);
     const slot = $("rvlegend"); if (slot) slot.innerHTML = view.rvLegend;
     RevDiff.only(el.col, view.rvOnly);
   }
@@ -2130,6 +2706,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     rowHandles(el.col);
     rvApply();
     drawDiagrams(el.col);
+    stickyTables();
     view.railSig = ""; paintChrome(docs);
   }
   const rdot = (key) => `<button type="button" class="rdot" data-read="${esc(key)}" aria-label="Mark as read" data-tip="Mark as read"><i aria-hidden="true"></i></button>`;
@@ -2339,7 +2916,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const kind = KIND[d.kind] ? `<span class="pill quiet" data-tip="${esc(KIND_TIP[d.kind])}">${KIND[d.kind]}</span>` : "";
     const showNote = view.openNotes.has(d.key) || note;
     return `<details class="block doc${ch ? " rev" + t.slice(1) : ""}" id="d-${esc(d.key)}" data-block="${esc(d.key)}"${mx ? " data-matrixdoc" : ""}${closed ? "" : " open"}>
-      <summary>${CARET}<h2>${esc(d.title || d.key)}</h2>${revTag(d.key)}${kind}${why ? `<span class="why ${why[0]}" data-why="${why[0]}" data-tip="${esc(why[2])}">${esc(why[1])}</span>` : ""}${mx ? '<span class="hint mxsum">its targets table is shown above as the target matrix</span>' : ""}${file}<span class="end">${size}${note ? '<i class="notedot" data-tip="You left a note on this document"></i>' : ""}<span class="seg" id="seg-${esc(d.key)}" role="group" aria-label="Show the document as" hidden><button type="button" data-mode="view" data-key="${esc(d.key)}" data-tip="A view made for this kind of document">View</button><button type="button" data-mode="text" data-key="${esc(d.key)}" data-tip="The document as written">Text</button></span><button type="button" class="notebtn" data-key="${esc(d.key)}" aria-controls="nb-${esc(d.key)}" aria-pressed="${showNote ? "true" : "false"}">${note ? "Your note" : "Add a note"}</button>${aw ? "" : rdot(d.key)}</span></summary>
+      <summary>${CARET}<h2>${esc(d.title || d.key)}</h2>${revTag(d.key)}${kind}${why ? `<span class="why ${why[0]}" data-why="${why[0]}" data-tip="${esc(why[2])}">${esc(why[1])}</span>` : ""}${mx ? '<span class="hint mxsum">its targets table is shown above as the target matrix</span>' : ""}${file}<span class="end">${size}${note ? '<i class="notedot" data-tip="You left a note on this document"></i>' : ""}<span class="seg" id="seg-${esc(d.key)}" role="group" aria-label="Show the document as" hidden><button type="button" data-mode="view" data-key="${esc(d.key)}" data-tip="A view made for this kind of document">View</button><button type="button" data-mode="text" data-key="${esc(d.key)}" data-tip="The document as written">Text</button><button type="button" data-mode="diagram" data-key="${esc(d.key)}" data-tip="The structure of this document drawn as a diagram" hidden>Diagram</button></span><button type="button" class="notebtn" data-key="${esc(d.key)}" aria-controls="nb-${esc(d.key)}" aria-pressed="${showNote ? "true" : "false"}">${note ? "Your note" : "Add a note"}</button>${aw ? "" : rdot(d.key)}</span></summary>
       <div class="body">${mx ? '<p class="mxnote">The targets table of this file is shown above as the <a href="#" data-mxgo="1">target matrix</a>. This is the file as written.</p>' : ""}<div class="notebox" id="nb-${esc(d.key)}"${showNote ? "" : " hidden"}><label for="nt-${esc(d.key)}"><b>Note to Claude</b><span>on this document; it goes with your answer in chat</span><span class="stat" id="ns-${esc(d.key)}" aria-live="polite"></span></label><textarea id="nt-${esc(d.key)}" rows="2" placeholder="Something to change, check or keep in mind"></textarea></div><div id="db-${esc(d.key)}"></div></div>
     </details>`;
   }
@@ -2352,20 +2929,83 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     if (d.pending) { body.innerHTML = '<p class="hint" style="margin-top:10px">This document is still being written.</p>'; return; }
     if (d.partial) body.insertAdjacentHTML("beforeend", '<p class="hint" style="margin-top:10px">Part of this document is still being written.</p>');
     const vf = d.covered && ev() ? null : viewFor(d);  /* a covered file is shown as written, nothing else */
-    const mode = view.mode[d.key] || "view";
+    const dgs = diagramsOf(d), mode = modeOf(d);
+    const seg = $("seg-" + d.key);
+    if (vf || dgs.length) {
+      seg.hidden = false;
+      seg.querySelector('[data-mode="view"]').hidden = !vf;
+      seg.querySelector('[data-mode="diagram"]').hidden = !dgs.length;
+    }
+    if (mode === "diagram") { setSeg(d.key, "diagram"); body.appendChild(diagramsView(d, dgs)); return; }
     if (vf && mode === "view") {
       let built = null;
       try { built = vf.render(d, i); } catch (e) { built = null; console.warn("view failed", d.key, e); }
       if (built) {
         markElements(built, d);
-        $("seg-" + d.key).hidden = false; setSeg(d.key, "view");
+        setSeg(d.key, "view");
         body.appendChild(built);
-        body.querySelectorAll("details.sec").forEach((s) => s.addEventListener("toggle", () => { if (s.open) drawDiagrams(s); }));
+        fileOutline(body, d);
         return;
       }
     }
-    if (vf && mode === "text") { $("seg-" + d.key).hidden = false; setSeg(d.key, "text"); }
+    if (vf || dgs.length) setSeg(d.key, "text");
     fillText(body, d, i);
+    fileOutline(body, d);
+  }
+  /* A long file gets its headings as a list: a sticky one beside it on wide screens, a collapsible strip on narrow ones. */
+  function fileOutline(body, d) {
+    if (!body || d.pending) return;
+    body.querySelectorAll(":scope > .fo-strip, :scope > .fo-side").forEach((n) => n.remove()); body.classList.remove("hasfo");
+    if (body.querySelector(":scope > .vzview")) return;
+    const flat = !body.querySelector("details.sec"), items = []; let n = 0;
+    [...body.querySelectorAll(flat ? "h2, h3" : "details.sec, details.sec > .secbody > h3")].forEach((h) => {
+      if (h.closest(".diagram, .rv-removed, .rv-gone, .vz, table, .notebox")) return;
+      if (h.matches("details.sec")) { if (h.parentElement.closest("details.sec")) return; items.push({ id: h.id, title: h.dataset.title || h.querySelector("summary").textContent, level: 2 }); return; }
+      if (!h.id) h.id = `h-${d.key}-${++n}`;
+      items.push({ id: h.id, title: h.textContent, level: h.tagName === "H3" || !flat ? 3 : 2 });
+    });
+    const shown = items.filter((i) => i.id && plainTitle(i.title)).slice(0, 60);
+    const html = GateViz.outline(shown); if (!html) return;
+    body.classList.add("hasfo"); body.insertAdjacentHTML("afterbegin", html);
+  }
+  /* The diagrams the row stored for a document (a ```mermaid block is drawn where it stands, so it is not one of these), and
+     which of the document's views is showing; the choice of Diagram is remembered per viewer. */
+  const diagramsOf = (d) => ((view.gate && view.gate.diagrams) || []).filter((x) => x.doc === keyOf(d) && x.fence === undefined);
+  const VZ_KEY = (k) => "approval-gates:viz:" + k;
+  function savedMode(k) { try { return localStorage.getItem(VZ_KEY(k)) === "diagram" ? "diagram" : ""; } catch { return ""; } }
+  function saveMode(k, m) { try { if (m === "diagram") localStorage.setItem(VZ_KEY(k), "diagram"); else localStorage.removeItem(VZ_KEY(k)); } catch { /* kept for this visit */ } }
+  function modeOf(d) {
+    const dgs = diagramsOf(d), vf = d.covered && ev() ? null : viewFor(d);
+    let m = view.mode[d.key] || (dgs.length && savedMode(d.key)) || "view";
+    if (m === "diagram" && !dgs.length) m = "view";
+    if (m === "view" && !vf) m = "text";
+    return m;
+  }
+  function diagramsView(d, dgs) {
+    const root = document.createElement("div"); root.className = "vw vzview"; root.dataset.vzdoc = d.key;
+    const before = (view.prev && view.prev.g.diagrams) || [];
+    root.innerHTML = dgs.map((x) => GateViz.diagram(x, { prev: before.find((p) => p.id === x.id), maps: (view.gate && view.gate.maps) || [] })).join("") +
+      '<p class="hint vznote">A second view of this document. The text is one press away' + (view.prev ? "; a new box is marked in the round’s colour, and the text view marks every word that changed" : "") + ".</p>";
+    return root;
+  }
+  /* where a mark of a diagram goes: the id's own row; else the text it names, found in the document's text or view */
+  function vzLeave(docKey) {
+    const d = docList().find((x) => x.key === docKey); if (!d || modeOf(d) !== "diagram") return false;
+    view.mode[docKey] = (viewFor(d) && !(d.covered && ev())) ? "view" : "text"; view.painted = ""; paintAll(); return true;
+  }
+  function vzGoId(id, docKey) {
+    const find = () => { const hit = view.refs.get(String(id).toUpperCase()); return (hit && hit.element) || idTarget(id); };
+    let t = find();
+    if (!t && vzLeave(docKey)) t = find();
+    if (t) jumpTo(t); else toast(id + " is not shown in this gate; it is in the text of the record.");
+  }
+  function vzGoText(text, docKey) {
+    vzLeave(docKey);
+    const b = $("d-" + docKey); if (!b) return;
+    b.open = true;
+    const want = plainTitle(text).toLowerCase().slice(0, 40);
+    const hit = [...b.querySelectorAll("tr, li, p, dt, dd, h3, h4, summary")].find((n) => plainTitle(n.textContent).toLowerCase().includes(want));
+    jumpTo(hit || b);
   }
   function setSeg(key, mode) { const seg = $("seg-" + key); if (!seg) return; seg.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === mode))); }
   function fillText(body, d, i, detached) {
@@ -2713,13 +3353,14 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const ents = blk.data.entities; const { before, after } = textAround(d.text, blk);
     const names = new Set(ents.map((e) => str(e.name)));
     const edge = (c) => { const s = str(c).toLowerCase(); const [left = "", right = ""] = s.split(/\bto\b/); const manyL = /many|\*|\bn\b|\d+\.\./.test(left); const manyR = /many|\*|\bn\b|\.\./.test(right); return `${manyL ? "}o" : "||"}--${manyR ? "o{" : "||"}`; };
-    let dia = "erDiagram\n"; const seen = new Set();
-    ents.forEach((e) => list(e.relationships).forEach((r) => { const to = str(r.to); if (!names.has(to)) return; const k = [e.name, to].sort().join("|"); if (seen.has(k)) return; seen.add(k); const lab = str(r.cardinality || "").replace(/["\n]/g, " ").slice(0, 24); dia += `  ${str(e.name).replace(/\W/g, "_")} ${edge(r.cardinality)} ${to.replace(/\W/g, "_")} : "${lab}"\n`; }));
+    const seen = new Set(), eedges = [];
+    ents.forEach((e) => list(e.relationships).forEach((r) => { const to = str(r.to); if (!names.has(to)) return; const k = [e.name, to].sort().join("|"); if (seen.has(k)) return; seen.add(k); eedges.push({ from: str(e.name), to, text: str(r.cardinality || "").replace(/\s+/g, " ").slice(0, 24) }); }));
+    const eobj = { id: d.key + ":relations", kind: "flow", dir: "LR", title: "", nodes: ents.map((e) => ({ id: str(e.name), label: str(e.name), shape: "box" })), edges: eedges, alt: `Entity relationships: ${ents.length} entities, ${eedges.length} relations.` };
     const root = wrap();
     if (before.trim()) root.appendChild(mdBlocks(d, stripH1(before), true, 0));
     const owners = [...new Set(ents.map((e) => str(e.owner)).filter(Boolean))];
     root.insertAdjacentHTML("beforeend", `<div class="vtools"><span>${ents.length} entities</span>${owners.map((o) => `<span class="chip muted">${esc(o)}</span>`).join("")}</div>`);
-    if (seen.size) { const sec = section(d, 1, "Entity relationships", true, `${seen.size} relations`); sec.secbody.appendChild(diagramBox(dia)); root.appendChild(sec); }
+    if (seen.size) { const sec = section(d, 1, "Entity relationships", true, `${seen.size} relations`); sec.secbody.appendChild(diagramBox(JSON.stringify(eobj), eobj)); root.appendChild(sec); }
     ents.forEach((e, i) => {
       const sec = section(d, 10 + i, str(e.name), i < 8, `${list(e.attributes).length} attributes`);
       if (e.owner) sec.querySelector("summary").insertAdjacentHTML("beforeend", `<span class="chip muted">${esc(str(e.owner))}</span>`);
@@ -2779,13 +3420,13 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const groupTitle = (c) => groupOf(groups, blk.raw, "name: " + str(c.name)) || "Components";
     const byGroup = new Map(); comps.forEach((c) => { const g = groupTitle(c); if (!byGroup.has(g)) byGroup.set(g, []); byGroup.get(g).push(c); });
     const sid = (s) => "n_" + str(s).replace(/[^A-Za-z0-9]/g, "_");
-    let dia = "flowchart LR\n"; let gi = 0;
-    byGroup.forEach((items, title) => { dia += `  subgraph g${gi++}["${title.replace(/["]/g, "'").slice(0, 60)}"]\n`; items.forEach((c) => { dia += `    ${sid(c.name)}["${str(c.name)}"]\n`; }); dia += "  end\n"; });
-    comps.forEach((c) => list(c.depends_on).forEach((dep) => { const to = str(dep && dep.component !== undefined ? dep.component : dep); if (!names.has(to)) return; dia += `  ${sid(c.name)} ${/event|async|queue|message/i.test(str(dep.style)) ? "-.->" : "-->"} ${sid(to)}\n`; }));
+    const gnodes = comps.map((c) => ({ id: str(c.name), label: str(c.name), shape: "box", group: groupTitle(c) })), gedges = [];
+    comps.forEach((c) => list(c.depends_on).forEach((dep) => { const to = str(dep && dep.component !== undefined ? dep.component : dep); if (!names.has(to)) return; gedges.push(Object.assign({ from: str(c.name), to }, /event|async|queue|message/i.test(str(dep.style)) ? { style: "dashed" } : {})); }));
+    const gobj = { id: d.key + ":graph", kind: "flow", dir: "LR", title: "", nodes: gnodes, edges: gedges, alt: `Component dependency graph: ${gnodes.length} components, ${gedges.length} dependencies.` };
     const root = wrap();
     if (before.trim()) root.appendChild(mdBlocks(d, stripH1(before), false, 0));
     root.insertAdjacentHTML("beforeend", `<div class="vtools"><span>${comps.length} components in ${byGroup.size} group${byGroup.size === 1 ? "" : "s"}</span><span class="hint">solid: a call · dashed: an event or message</span></div>`);
-    const dsec = section(d, 1, "Dependency graph", comps.length <= 30, `${comps.length} nodes`); dsec.secbody.appendChild(diagramBox(dia)); root.appendChild(dsec);
+    const dsec = section(d, 1, "Dependency graph", comps.length <= 30, `${comps.length} nodes`); dsec.secbody.appendChild(diagramBox(JSON.stringify(gobj), gobj)); root.appendChild(dsec);
     let n = 10;
     byGroup.forEach((items, title) => {
       const sec = section(d, n++, title, true, `${items.length} components`);
@@ -3844,7 +4485,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const rd = e.target.closest(".rdot");
     if (rd) { e.preventDefault(); e.stopPropagation(); readAndFold([rd.dataset.read], !isRead(rd.dataset.read)); return; }
     const sb = e.target.closest(".seg button");
-    if (sb) { e.preventDefault(); e.stopPropagation(); view.mode[sb.dataset.key] = sb.dataset.mode; view.painted = ""; paintAll(); return; }
+    if (sb && sb.dataset.mode) { e.preventDefault(); e.stopPropagation(); view.mode[sb.dataset.key] = sb.dataset.mode; saveMode(sb.dataset.key, sb.dataset.mode); view.painted = ""; paintAll(); return; }
     const nb = e.target.closest(".notebtn[data-key]");
     if (nb) {
       e.preventDefault(); e.stopPropagation();
@@ -3853,7 +4494,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
       else { box.hidden = true; view.openNotes.delete(key); nb.setAttribute("aria-pressed", String(!!(view.notes[key] || "").trim())); }
     }
   });
-  el.col.addEventListener("toggle", (e) => { const d = e.target; if (d.open) drawDiagrams(d); }, true);
+  el.col.addEventListener("toggle", (e) => { if (e.target.open) stickyTables(); }, true);
 
   /* ---------- elements: every component, entity, rule, unit, bolt, operation, story and requirement has its own read mark ----------
      A view builds its cards, table rows and sections as it always did; markElements then finds them in what the view made
@@ -3998,7 +4639,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const open = openTargets(B).length;
     return `<details class="block bt" open id="b-bt-matrix" data-block="bt-matrix"><summary>${CARET}<h2>Target matrix</h2><span class="hint wide">every quality target once${open ? "; the open ones carry your decision" : ""}</span><span class="end"><span class="pill quiet num" id="bt-dcount"></span>${rdot("bt-matrix")}</span></summary>` +
       `<div class="body">${open ? '<p class="dsum">Choose for each open target: <b>Accept as known</b> keeps it as a known limit, <b>Follow-up</b> records it as work for later, <b>Fix now</b> sends it back as a Request Changes naming the targets. Your choices go to Claude with your answer in chat.</p>' : ""}` +
-      `<div class="btool"><input type="search" id="bt-q" placeholder="Search by ID or text" aria-label="Search the targets" autocomplete="off"><div class="bchips" id="bt-vchips" role="group" aria-label="Filter by verdict"></div><div class="bchips" id="bt-uchips" role="group" aria-label="Filter by Unit"></div></div>` +
+      `<div id="bt-heat"></div><div class="btool"><input type="search" id="bt-q" placeholder="Search by ID or text" aria-label="Search the targets" autocomplete="off"><div class="bchips" id="bt-vchips" role="group" aria-label="Filter by verdict"></div><div class="bchips" id="bt-uchips" role="group" aria-label="Filter by Unit"></div></div>` +
       `<div class="tm" id="bt-tm" role="table" aria-label="Targets"></div></div></details>`;
   }
   function tmRow(t, B, f) {
@@ -4021,7 +4662,8 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const B = bt(); const tm = $("bt-tm"); if (!B || !tm) return;
     const f = view.bt, all = B.targets;
     const q = f.q.trim().toLowerCase();
-    const pass = (t) => (!f.v.size || f.v.has(t.verdict)) && (!f.u.size || f.u.has(t.unit || "")) && (!q || [t.id, t.expected, t.actual, t.evidence, t.source].some((x) => String(x || "").toLowerCase().includes(q)));
+    const H = heatModel(B);
+    const pass = (t) => (!f.v.size || f.v.has(t.verdict)) && (!f.u.size || f.u.has(t.unit || "")) && (!f.grp || (H && H.by(t) === f.grp)) && (!q || [t.id, t.expected, t.actual, t.evidence, t.source].some((x) => String(x || "").toLowerCase().includes(q)));
     const rows = all.map((t, i) => [t, i]).sort((a, b) => ((VRANK[a[0].verdict] ?? 4) - (VRANK[b[0].verdict] ?? 4)) || a[1] - b[1]).map((x) => x[0]).filter(pass);
     const verdicts = ["Not Met", "Unverified", "Met", "N/A"].filter((v) => all.some((t) => t.verdict === v));
     $("bt-vchips").innerHTML = verdicts.map((v) => `<button type="button" class="bchip" data-btv="${esc(v)}" aria-pressed="${f.v.has(v)}">${esc(v)}<span class="n">${all.filter((t) => t.verdict === v).length}</span></button>`).join("");
@@ -4035,8 +4677,23 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
       (rest.length ? `<details class="tm-fold"${foldOpen ? " open" : ""}><summary>${CARET}${esc(names.join(" and "))}<span class="n">${rest.length}</span></summary>${rest.map((t) => tmRow(t, B, f)).join("")}</details>` : "") +
       (rows.length ? "" : '<div class="tm-none">No target matches. Clear a filter or the search.</div>');
     Object.keys(view.picks).forEach((id) => { const st = view.noteStat["pick:" + id]; if (st) setNoteStat("pick:" + id, st[0], st[1]); });
+    const hb = $("bt-heat"); if (hb) hb.innerHTML = H ? GateViz.heat(Object.assign({ active: f.heat }, H)) : "";
   }
-  const foldWanted = () => view.bt.fold || !!view.bt.q.trim() || [...view.bt.v].some((v) => !isOpenT({ verdict: v }));
+  /* Units across, groups down (the id's prefix, else the source's name), each cell its worst verdict: only from 12 targets up, and
+     only when it compares something. A second view of the one list: pressing a cell filters that list. */
+  const HEAT_MIN = 12;
+  function heatModel(B) {
+    const ts = (B && B.targets) || []; if (ts.length < HEAT_MIN) return null;
+    const pre = (t) => String(t.id).split(":").pop().replace(/[\d.\-_]+$/, "").toUpperCase() || "Other";
+    const src = (t) => String(t.source || "").replace(/,\s*targets?\s*$/i, "").replace(/^\s*u\d+[\w-]*\s+/i, "").trim() || "Other";
+    const by = new Set(ts.map(pre)).size >= 2 ? pre : src;
+    const cols = [...new Set(ts.map((t) => t.unit || "—"))], rows = [...new Set(ts.map(by))];
+    if (cols.length < 2 && rows.length < 2) return null;
+    const cells = {};
+    ts.forEach((t) => { const k = by(t) + "\u0001" + (t.unit || "—"), c = cells[k] || (cells[k] = { n: 0, worst: t.verdict }); c.n++; if ((VRANK[t.verdict] ?? 4) < (VRANK[c.worst] ?? 4)) c.worst = t.verdict; });
+    return { cols, rows, cells, by };
+  }
+  const foldWanted = () => view.bt.fold || !!view.bt.heat || !!view.bt.q.trim() || [...view.bt.v].some((v) => !isOpenT({ verdict: v }));
   /* the rows are drawn again: their round marks come back with them */
   function btRepaint() {
     btRender(); btDecideCount();
@@ -4052,7 +4709,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
   function jumpTarget(id) {
     const B = bt(); const t = B && (B.targets || []).find((x) => x.id === id); if (!t) return;
     const b = $("b-bt-matrix"); if (b) b.open = true;
-    const f = view.bt; f.v = new Set(); f.u = new Set(); f.q = ""; const q = $("bt-q"); if (q) q.value = "";
+    const f = view.bt; f.v = new Set(); f.u = new Set(); f.q = ""; f.grp = ""; f.heat = ""; const q = $("bt-q"); if (q) q.value = "";
     if (!isOpenT(t)) f.fold = true;
     if (view.filter === "unread" && isRead(tkey(t))) { view.filter = "all"; }
     btRepaint();
@@ -4073,10 +4730,11 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const v = e.target.closest("[data-btv]");
     if (v) {
       e.preventDefault(); const f = view.bt, val = v.dataset.btv;
+      f.heat = ""; f.grp = "";
       if (v.dataset.btonly) { f.v = new Set([val]); f.u = new Set(); f.q = ""; const q = $("bt-q"); if (q) q.value = ""; } else if (f.v.has(val)) f.v.delete(val); else f.v.add(val);
       btRepaint(); if (v.dataset.btonly) { const m = $("b-bt-matrix"); if (m) jumpTo(m); } return;
     }
-    const u = e.target.closest("[data-btu]"); if (u) { e.preventDefault(); const f = view.bt; if (f.u.has(u.dataset.btu)) f.u.delete(u.dataset.btu); else f.u.add(u.dataset.btu); btRepaint(); return; }
+    const u = e.target.closest("[data-btu]"); if (u) { e.preventDefault(); const f = view.bt; f.heat = ""; f.grp = ""; if (f.u.has(u.dataset.btu)) f.u.delete(u.dataset.btu); else f.u.add(u.dataset.btu); btRepaint(); return; }
     const x = e.target.closest("[data-btx]");
     if (x) { e.preventDefault(); const id = x.dataset.btx; if (view.bt.rows.has(id)) view.bt.rows.delete(id); else view.bt.rows.add(id); const row = x.closest(".tm-row"), det = row.querySelector(".tm-det"); det.hidden = !view.bt.rows.has(id); x.setAttribute("aria-expanded", String(!det.hidden)); return; }
     const pk = e.target.closest("[data-pick]");
@@ -4298,6 +4956,11 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     return `<section class="esec"><h3>Rules checked<span class="hint">${C.length} criteria from the stage's definition, its reviewer, the project's rules and earlier stages${fails ? ` · <b class="bad">${fails} fail</b>` : ""}</span></h3><div class="cov2 ctally">${bars}</div>` +
       `<div class="lg"><span><i class="cv-holds"></i>Holds</span><span><i class="cv-fails"></i>Fails</span><span><i class="cv-na"></i>Not relevant here</span></div>${groups}</section>`;
   }
+  /* one dot per criterion, grouped as the criteria are; a dot opens its criterion */
+  function criteriaDots(C) {
+    return GateViz.dots(Object.keys(ORIGIN).filter((o) => C.some((c) => c.origin === o)).map((o) => ({ name: ORIGIN[o][0], items: C.filter((c) => c.origin === o).map((c) => ({
+      key: c.key, v: c.verdict in CVERDICT ? c.verdict : "unjudged", title: plainTitle(c.title), label: CVERDICT[c.verdict] ? CVERDICT[c.verdict][0] : "Not judged" })) })));
+  }
   function evalBlock(E) {
     const v = VERDICT[E.verdict] || ["Evaluated", "quiet", ""];
     const C = (view.gate && view.gate.criteria) || [];
@@ -4306,7 +4969,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
       .filter(([k]) => (E[k] || []).length).map(([k, t, tip]) => `<section class="ecol k-${k}"><h3 data-tip="${esc(tip)}">${t}<span class="n">${E[k].length}</span></h3>${pointList(E[k], k)}</section>`).join("");
     const noConflict = !(E.conflicts || []).length && C.some((c) => c.origin === "rule" || c.origin === "earlier") ? `<p class="hint none">No conflict found with the project's rules or earlier stages.</p>` : "";
     return `<details class="block evalb" open id="b-eval" data-block="evaluation"><summary>${CARET}<h2>Claude's evaluation</h2><span class="pill ${v[1]}" data-tip="${esc(v[2])}">${esc(v[0])}</span><span class="end">${rdot("evaluation")}</span></summary>` +
-      `<div class="body"><div class="etext${isRead("eval:text") ? " read" : ""}" data-item="eval:text">${idot("eval:text", "the evaluation")}<p class="decides">${inline(E.decides || "")}</p>` +
+      `<div class="body">${criteriaDots(C)}<div class="etext${isRead("eval:text") ? " read" : ""}" data-item="eval:text">${idot("eval:text", "the evaluation")}<p class="decides">${inline(E.decides || "")}</p>` +
       ((E.lookFirst || []).length ? `<section class="esec lf"><h3>Look at first</h3><ol class="lfl">${E.lookFirst.map((p) => `<li><p class="pt1">${inline(p.text)}</p>${p.why ? `<p class="why"><b>Why first</b>${inline(p.why)}</p>` : ""}${srcs(p)}</li>`).join("")}</ol></section>` : "") +
       (cols ? `<div class="egrid">${cols}</div>` : "") + noConflict + `</div>` + criteriaHtml(C) + `</div></details>`;
   }
@@ -4463,6 +5126,30 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const s = e.target.closest("[data-src]"); if (!s) return;
     e.preventDefault(); e.stopPropagation(); openSource(s.dataset.src);
   }, true);
+
+  /* ---------- the visuals: a mark filters or jumps to the real row; nothing here has a read key of its own ---------- */
+  GateViz.bind(el.col);
+  el.col.addEventListener("click", (e) => {
+    const doc = (n) => { const w = n.closest("[data-vzdoc]"); return w ? w.dataset.vzdoc : ""; };
+    const go = e.target.closest("[data-vz-go]");
+    if (go && go.dataset.vzGo) { e.preventDefault(); e.stopPropagation(); const key = go.dataset.vzGo; if (critOf(key)) openSource("c:" + key); else if (itemOf(key)) openSource("i:" + itemOf(key).key); else vzGoId(key, doc(go)); return; }
+    const tx = e.target.closest("[data-vz-text]"); if (tx) { e.preventDefault(); e.stopPropagation(); vzGoText(tx.dataset.vzText, doc(tx)); return; }
+    const nd = e.target.closest(".vz-node[data-vz-go='']"); if (nd) { e.preventDefault(); e.stopPropagation(); vzGoText(nd.dataset.id, doc(nd)); return; }
+    const set = e.target.closest("[data-vz-set]"); if (set) { e.preventDefault(); e.stopPropagation(); vzSet(set.dataset.vzSet); return; }
+    const jp = e.target.closest("[data-vz-jump]"); if (jp) { e.preventDefault(); const t = document.getElementById(jp.dataset.vzJump); if (t) jumpTo(t); }
+  }, true);
+  function vzSet(v) {
+    const m = String(v).match(/^heat:(?:(col|row|cell):(.*))?$/s); if (!m) return;
+    const f = view.bt; f.u = new Set(); f.grp = ""; f.heat = "";
+    if (m[1]) {
+      const hit = m[2];
+      if (m[1] === "col") f.u = new Set([hit === "—" ? "" : hit]); else if (m[1] === "row") f.grp = hit; else { const [g, u] = hit.split("\u0001"); f.grp = g; f.u = new Set([u === "—" ? "" : u]); }
+      f.heat = m[1] + ":" + hit; f.v = new Set(); f.q = "";
+      const q = $("bt-q"); if (q) q.value = "";
+    }
+    btRepaint();
+    if (m[1]) { const tm = $("bt-tm"); if (tm) jumpTo(tm); }
+  }
 
   /* ---------- "What changed in round N": Claude's account of the revision, then every change on the page ---------- */
   const rvShown = () => !!(view.gate && (view.gate.revision || view.prev || (view.gate.why === "revision" && roundNo() > 1)));

@@ -559,6 +559,13 @@ def table_rows(text):
     return rows
 
 
+def auto_verified(path):
+    """How many points the code summary says its automated tests cover: the bullets of its Verified Here, Verified By Tests, Tests
+    Run or Automated section. The unit-end page's verification funnel starts from this number."""
+    parts = summary_sections(path)
+    return len(bullets(next((b for k, b in parts.items() if k.startswith(("verified here", "verified by tests", "tests run", "automated"))), "")))
+
+
 def unit_end_sections(unit, defs, questions):
     path = os.path.join(unit.stage_folder("code-generation"), "code-summary.md")
     if not os.path.isfile(path):
@@ -795,6 +802,9 @@ def draft(args):
         bundle["sections"] = unit_end_sections(unit, defs, questions)
         bundle["design"] = folded_design(approved)
         summary = read(os.path.join(unit.stage_folder("code-generation"), "code-summary.md"))
+        auto = auto_verified(os.path.join(unit.stage_folder("code-generation"), "code-summary.md"))
+        if auto:
+            bundle["verification"] = {"auto": auto}  # the points the code summary says its automated tests cover; the page's funnel starts there
         first = re.search(r"(?ms)^# .*?\n\s*\n(.+?)(?:\n\s*\n|\Z)", summary)
         header["lede"] = plain(first.group(1)) if first else ""
         bundle["provenance"]["records"] = [rel(os.path.join(unit.stage_folder("code-generation"), "code-summary.md"), project)]

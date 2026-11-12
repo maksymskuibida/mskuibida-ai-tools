@@ -11,10 +11,14 @@ shared/, and this script writes it into every plugin that carries it:
   shared/rev-diff/rev-diff.js       -> every page that carries /* rev-diff.js:begin */ and :end */ (what changed between
   shared/rev-diff/rev-diff.css         rounds, word by word); the CSS between /* rev-diff.css:begin */ and :end */
 
+  shared/gate-viz/gate-viz.js       -> the gate pages that draw visuals (diagrams, heat grid, funnel, timeline, lanes), between
+  shared/gate-viz/gate-viz.css         /* gate-viz.js:begin */ and :end */; the CSS between /* gate-viz.css:begin */ and :end */
+
   sync-shared.py                     write the shared copies into every plugin file that carries one
   sync-shared.py --check             exit 1, naming each file, when a copy differs from shared/ (CI runs this)
   sync-shared.py --add-page <html>   give a page both blocks: the CSS at the end of its first <style>, the script as a
                                      <script> of its own before its first <script>
+  sync-shared.py --add-viz <html>    give a page the gate-viz blocks (CSS at the end of its first <style>, script before its first <script>)
   sync-shared.py --add-python <dir>  copy aidlc_ids.py into a plugin's scripts folder
   sync-shared.py --add-links <dir>   copy aidlc_links.py into a plugin's scripts folder
 
@@ -33,7 +37,8 @@ PY = "aidlc_ids.py"
 LINKS_PY = "aidlc_links.py"
 LINKS = os.path.join(ROOT, "shared", "aidlc-links")
 BLOCKS = {"aidlc-ids.js": "aidlc-ids/aidlc-ids.js", "aidlc-ids.css": "aidlc-ids/aidlc-ids.css",
-          "rev-diff.js": "rev-diff/rev-diff.js", "rev-diff.css": "rev-diff/rev-diff.css"}
+          "rev-diff.js": "rev-diff/rev-diff.js", "rev-diff.css": "rev-diff/rev-diff.css",
+          "gate-viz.js": "gate-viz/gate-viz.js", "gate-viz.css": "gate-viz/gate-viz.css"}
 
 
 def read(path):
@@ -87,15 +92,30 @@ def add_page(path):
     write(path, synced_page(text))
 
 
+def add_viz(path):
+    text = read(path)
+    if "/* gate-viz.css:begin */" not in text:
+        text = text.replace("</style>", "/* gate-viz.css:begin */\n/* gate-viz.css:end */\n</style>", 1)
+    if "/* gate-viz.js:begin */" not in text:
+        at = text.find("<script")
+        if at < 0:
+            raise SystemExit(f"sync-shared.py: {path} has no <script> to put the shared one before")
+        text = text[:at] + "<script>\n/* gate-viz.js:begin */\n/* gate-viz.js:end */\n</script>\n" + text[at:]
+    write(path, synced_page(text))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="sync-shared.py")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--add-page", action="append", default=[])
+    ap.add_argument("--add-viz", action="append", default=[])
     ap.add_argument("--add-python", action="append", default=[])
     ap.add_argument("--add-links", action="append", default=[])
     args = ap.parse_args(argv)
     for path in args.add_page:
         add_page(os.path.abspath(path))
+    for path in args.add_viz:
+        add_viz(os.path.abspath(path))
     for folder in args.add_python:
         os.makedirs(folder, exist_ok=True)
         write(os.path.join(folder, PY), read(os.path.join(SHARED, PY)))

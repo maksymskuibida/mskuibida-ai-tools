@@ -16,6 +16,7 @@
     "plan": { "$ref": "#/$defs/plan" },
     "answers": { "type": "array", "items": { "$ref": "#/$defs/answerGroup" } },
     "design": { "$ref": "#/$defs/design" },
+    "verification": { "type": "object", "additionalProperties": false, "properties": { "auto": { "type": "integer", "minimum": 0, "description": "How many points the code summary says its automated tests cover (the bullets of its Verified Here, Verified By Tests, Tests Run or Automated section). The unit-end page's verification funnel counts them before the points you verify." } }, "description": "What the unit-end page's verification funnel starts from. unit_bundle.py draft writes it when the code summary has such a section." },
     "maps": { "type": "array", "items": { "$ref": "#/$defs/mapLink" }, "description": "The project maps published for the intent, [{kind, url, title}]: the page's header links them. unit_bundle.py finalize writes it from what map_bundle.py published." },
     "ids": {
       "type": "object",
