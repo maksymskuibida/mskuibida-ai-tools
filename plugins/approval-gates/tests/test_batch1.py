@@ -276,8 +276,8 @@ class TestOneListOfTargets(unittest.TestCase):
             self.assertEqual(len(got["matrixDoc"]), 1)
             d = got["matrixDoc"][0]
             self.assertFalse(d["open"])
-            self.assertIn("shown above as the target matrix", d["hint"])
-            self.assertIn("shown above as the target matrix", d["note"])
+            self.assertIn("is the target matrix above", d["hint"])
+            self.assertIn("the target matrix above, drawn once", d["note"])
             self.assertEqual(got["targetTablesShown"], 0, "the table is not drawn again as a full document")
 
     def test_an_item_that_is_a_target_links_to_its_row(self):

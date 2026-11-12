@@ -18,7 +18,7 @@ function tools(w) {
   const d = w.document, $ = (s) => d.querySelector(s), all = (s) => [...d.querySelectorAll(s)];
   const shown = (n) => !!n && !n.hidden && !n.closest("[hidden]") && !n.closest(".eh");
   const filter = (name) => all("#bar .fpill").find((b) => b.firstChild.textContent === name).click();
-  const progress = () => text($("#bar .progress-r .num"));
+  const progress = () => { const r = $("#ready"); return r ? "Read " + (+r.dataset.total - +r.dataset.unread) + "/" + r.dataset.total : ""; };
   const dotKeys = () => all("[data-iread]").map((n) => n.dataset.iread).concat(all("[data-eread]").map((n) => n.dataset.eread)).concat(all(".rdot").map((n) => "block:" + n.dataset.read));
   return { d, $, all, shown, filter, progress, dotKeys };
 }
@@ -33,7 +33,7 @@ const scenarios = {
     const fold = $("details.tm-fold");
     return {
       blocks: all("#col > details.block, #col > section").map((b) => b.id),
-      decideBlock: !!$("#b-bt-decide"), decideChip: all("#bar .jchip").some((c) => /Decisions/.test(c.textContent)),
+      decideBlock: !!$("#b-bt-decide"), decideChip: all("#col > details.block:not([hidden])").some((c) => /Decisions/.test(c.textContent)),
       rowIds: rows.map((r) => r.dataset.tid), openRows: rows.filter((r) => !r.closest("details.tm-fold")).map((r) => r.dataset.tid),
       foldRows: rows.filter((r) => r.closest("details.tm-fold")).map((r) => r.dataset.tid), foldSummary: text(fold && fold.querySelector("summary")), foldOpen: !!(fold && fold.open),
       cardsOfTargets: all(".dcard[data-did]").length, picksPerOpenRow: rows.filter((r) => !r.closest("details.tm-fold")).map((r) => r.querySelectorAll("[data-pick]").length),
@@ -126,7 +126,7 @@ const scenarios = {
     const { d, $, all } = tools(w);
     const tag = (n) => [...n.querySelectorAll(".rv-tags .rv-tag")].map(text);
     return {
-      chips: all("#bar .jchip").map(text),
+      chips: all("#col > details.block:not([hidden])").map((b) => text(b.querySelector(":scope > summary"))),
       findings: all(".fcard").map((n) => ({ id: n.dataset.fid, cls: ["rv-new", "rv-chg", "rv-same"].filter((c) => n.classList.contains(c)), tags: tag(n), ins: [...n.querySelectorAll("ins.rv-ins")].map(text), del: [...n.querySelectorAll("del.rv-del")].map(text) })),
       targets: all(".tm-row[data-tid]").map((n) => ({ id: n.dataset.tid, cls: ["rv-new", "rv-chg", "rv-same"].filter((c) => n.classList.contains(c)), tags: tag(n), ins: [...n.querySelectorAll("ins.rv-ins")].map(text) })),
       removed: all(".rvgone .rv-removed").map(text), list: all("#rv-list li").map(text),

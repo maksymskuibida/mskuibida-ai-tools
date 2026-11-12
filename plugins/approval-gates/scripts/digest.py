@@ -28,11 +28,13 @@ import re
 
 import handling
 
-KINDS = (("NFR", "nfr"), ("FR", "requirement"), ("REQ", "requirement"), ("BR", "rule"), ("ADR", "decision"), ("US", "story"))
-ITEM_ID = re.compile(r"^(?:NFR|FR|REQ|BR|US)\d+(?:\.\d+)*$|^ADR-\d+$")
+# "U" comes last: US1.1 is a story, U1 a Unit; Units are items of Units Generation only (UNIT_DOCS), where they are what the stage defines
+KINDS = (("NFR", "nfr"), ("FR", "requirement"), ("REQ", "requirement"), ("BR", "rule"), ("ADR", "decision"), ("US", "story"), ("U", "unit"))
+UNIT_DOCS = ("unit-of-work",)
+ITEM_ID = re.compile(r"^(?:NFR|FR|REQ|BR|US)\d+(?:\.\d+)*$|^ADR-\d+$|^U\d+$")
 ID_TOKEN = re.compile(r"(?<![\w.-])((?:NFR|FR|REQ|BR|US|AC)\d+(?:\.\d+)*|ADR-\d+|R-\d+)(?![\w-])")
-HEADING = re.compile(r"^#{2,4}\s+((?:NFR|FR|REQ|BR|US)\d+(?:\.\d+)*|ADR-\d+)\b[\s:.—-]*(.*)$")
-BULLET = re.compile(r"^\s*[-*]\s+\*\*((?:NFR|FR|REQ|BR|US)\d+(?:\.\d+)*|ADR-\d+)\b[^*]*\*\*:?\s*(.*)$")
+HEADING = re.compile(r"^#{2,4}\s+(?:Unit\s+)?((?:NFR|FR|REQ|BR|US)\d+(?:\.\d+)*|ADR-\d+|U\d+(?![\w.-]))\b[\s:.—-]*(.*)$")
+BULLET = re.compile(r"^\s*[-*]\s+\*\*(?:Unit\s+)?((?:NFR|FR|REQ|BR|US)\d+(?:\.\d+)*|ADR-\d+|U\d+(?![\w.-]))\b[^*]*\*\*:?\s*(.*)$")
 CRITERION = re.compile(r"^\s*[-*]\s+(AC\d+(?:\.\d+)*)\s+(.*)$")
 TRACE_STAGE_KINDS = ("requirement", "nfr")
 YAML_ENTRY = re.compile(r"^(\s*)-\s+id:\s*[\"']?((?:NFR|FR|REQ|BR|US)\d+(?:\.\d+)*|ADR-\d+)[\"']?\s*$")
@@ -179,6 +181,8 @@ def build(docs, ids, stage_folder, given=None):
         for rid, title, body in from_yaml(d["text"]) + from_lines(d["text"]) + from_tables(d["text"]):
             kind = kind_of(rid)
             if not kind:
+                continue
+            if kind == "unit" and d["key"] not in UNIT_DOCS:  # a Unit named in another stage's table is a reference, not an item
                 continue
             if rid in seen:  # the heading and the table name the same item: keep the fuller one
                 item = seen[rid]

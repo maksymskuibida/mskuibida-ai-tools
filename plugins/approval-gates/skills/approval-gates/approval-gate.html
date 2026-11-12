@@ -261,22 +261,37 @@ var GateViz = (function () {
   }
 
   /* ---------- a trace ribbon: columns left to right, a curve for every link ---------- */
-  function trace(d, c) {
-    var cols = d.cols || [], per = {}, W = 150, H = 38, GX = 70, GY = 12, top = 30;
+  /* natural order: US2.1 before US10.1, FR9 before FR10 */
+  function natKey(s) { return String(s).split(/(\d+)/).map(function (p, i) { return i % 2 ? +p : p.toLowerCase(); }); }
+  function natCmp(a, b) {
+    var x = natKey(a), y = natKey(b), n = Math.min(x.length, y.length);
+    for (var i = 0; i < n; i++) if (x[i] !== y[i]) return typeof x[i] === "number" && typeof y[i] === "number" ? x[i] - y[i] : (String(x[i]) < String(y[i]) ? -1 : 1);
+    return x.length - y.length;
+  }
+  var TRACE_MAX_COL = 10, TRACE_MAX_EDGES = 36, chosen = {};  /* above this size a trace is a tangle: it is offered per requirement */
+  /* the ribbon of one set of nodes: each column in natural order, then swept back and forth so that a box sits near the boxes it links to */
+  function drawTrace(d, c) {
+    var cols = d.cols || [], per = {}, W = 150, H = 38, GX = 70, GY = 12, top = 30, edges = d.edges || [];
     (d.nodes || []).forEach(function (n) { (per[n.col] = per[n.col] || []).push(n); });
-    cols.forEach(function (k, ci) {  /* fewer crossings: a box sits near the boxes it is linked to in the column before */
-      if (!ci) return;
-      var at = {}; (per[cols[ci - 1].key] || []).forEach(function (n, i) { at[n.id] = i; });
-      var mean = function (n) { var xs = (d.edges || []).map(function (e) { return e[1] === n.id && at.hasOwnProperty(e[0]) ? at[e[0]] : e[0] === n.id && at.hasOwnProperty(e[1]) ? at[e[1]] : null; }).filter(function (x) { return x !== null; }); return xs.length ? xs.reduce(function (a, b) { return a + b; }, 0) / xs.length : 1e9; };
-      (per[k.key] || []).sort(function (a, b) { return mean(a) - mean(b); });
-    });
+    cols.forEach(function (k) { (per[k.key] || []).sort(function (a, b) { return natCmp(a.id, b.id); }); });
+    var pos = function (key) { var at = {}; (per[key] || []).forEach(function (n, i) { at[n.id] = i; }); return at; };
+    var sweep = function (ci, from) {
+      var at = pos(cols[from].key);
+      var mean = function (n) { var xs = edges.map(function (e) { return e[1] === n.id && at.hasOwnProperty(e[0]) ? at[e[0]] : e[0] === n.id && at.hasOwnProperty(e[1]) ? at[e[1]] : null; }).filter(function (x) { return x !== null; }); return xs.length ? xs.reduce(function (a, b) { return a + b; }, 0) / xs.length : 1e9; };
+      var arr = per[cols[ci].key] || [], idx = {}; arr.forEach(function (n, i) { idx[n.id] = i; });
+      arr.sort(function (a, b) { return (mean(a) - mean(b)) || (idx[a.id] - idx[b.id]); });
+    };
+    for (var pass = 0; pass < 3; pass++) {
+      for (var ci = 1; ci < cols.length; ci++) sweep(ci, ci - 1);
+      for (var cj = cols.length - 2; cj >= 0; cj--) sweep(cj, cj + 1);
+    }
     var rows = Math.max.apply(null, cols.map(function (k) { return (per[k.key] || []).length; }).concat([1]));
     var at = {}, width = cols.length * W + (cols.length - 1) * GX + 16, height = top + rows * (H + GY) + 8;
     cols.forEach(function (k, ci) { (per[k.key] || []).forEach(function (n, ri) { at[n.id] = { x: 8 + ci * (W + GX), y: top + ri * (H + GY) }; }); });
     var mk = mark();
     var svg = '<svg class="vz-svg" xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + " " + height + '" role="img" aria-label="' + esc(d.alt || "") + '">' + mk.defs;
     cols.forEach(function (k, ci) { svg += '<text class="vz-colh" x="' + (8 + ci * (W + GX)) + '" y="16">' + esc(k.label) + "</text>"; });
-    (d.edges || []).forEach(function (e) {
+    edges.forEach(function (e) {
       var a = at[e[0]], b = at[e[1]]; if (!a || !b) return;
       var ax = a.x + W, ay = a.y + H / 2, bx = b.x, by = b.y + H / 2, m = (ax + bx) / 2;
       svg += '<g class="vz-edge" data-from="' + esc(e[0]) + '" data-to="' + esc(e[1]) + '"><path d="M' + ax + " " + ay + " C" + m + " " + ay + " " + m + " " + by + " " + bx + " " + by + '" marker-end="url(#' + mk.id + ')"/></g>';
@@ -289,7 +304,23 @@ var GateViz = (function () {
     });
     return svg + "</svg>";
   }
-
+  /* The trace: all at once while it reads (a few boxes a column); above that it is a tangle, so it is offered per requirement: pick one, see its chain. */
+  function trace(d, c) {
+    var cols = d.cols || [], nodes = d.nodes || [], edges = d.edges || [];
+    var big = Math.max.apply(null, cols.map(function (k) { return nodes.filter(function (n) { return n.col === k.key; }).length; }).concat([0])) > TRACE_MAX_COL || edges.length > TRACE_MAX_EDGES;
+    if (!big || !cols.length) return drawTrace(d, c);
+    var first = nodes.filter(function (n) { return n.col === cols[0].key; }).sort(function (a, b) { return natCmp(a.id, b.id); });
+    var sel = chosen[d.id || "trace"]; if (!first.some(function (n) { return n.id === sel; })) sel = first.length ? first[0].id : "";
+    var chain = function (id) {  /* what it leads to and what leads to it, through every column */
+      var keep = {}, out = {}, back = {}; keep[id] = 1;
+      var go = function (fromIdx, toIdx) { var q = [id], seen = {}; seen[id] = 1; while (q.length) { var x = q.shift(); edges.forEach(function (e) { var nx = e[fromIdx] === x ? e[toIdx] : null; if (nx && !seen[nx]) { seen[nx] = 1; keep[nx] = 1; q.push(nx); } }); } };
+      go(0, 1); go(1, 0);
+      return { cols: cols, nodes: nodes.filter(function (n) { return keep[n.id]; }), edges: edges.filter(function (e) { return keep[e[0]] && keep[e[1]]; }), alt: d.alt, id: d.id };
+    };
+    return '<div class="vz-pickrow"><label>' + esc(cols[0].label) + ' <select class="vz-pick" data-vz-pick="' + esc(d.id || "trace") + '" aria-label="Pick one to see its chain">' + first.map(function (n) { return '<option value="' + esc(n.id) + '"' + (n.id === sel ? " selected" : "") + ">" + esc(n.label ? n.id + " " + clip(n.label, 40) : n.id) + "</option>"; }).join("") + "</select></label>" +
+      '<span class="hint">' + plural(first.length, cols[0].label.toLowerCase().replace(/s$/, "")) + ", " + plural(edges.length, "link") + ": too many to draw at once, so pick one and see what it leads to</span></div>" +
+      first.map(function (n) { return '<div class="vz-chain" data-for="' + esc(n.id) + '"' + (n.id === sel ? "" : " hidden") + ">" + drawTrace(chain(n.id), c) + "</div>"; }).join("");
+  }
   /* ---------- layers: a band per layer, the components in it, what they depend on one hover away ---------- */
   function layers(d, c, opts) {
     var uses = {};
@@ -400,7 +431,7 @@ var GateViz = (function () {
       return '<button type="button" class="vz-seg ' + s.k + '" style="flex:' + pct.toFixed(2) + ' 1 0" data-vz-set="verif:' + s.k + '" aria-pressed="' + (on === s.k) + '" aria-label="' + lab + '" data-tip="' + tip + '">' + inner + "</button>";
     }).join("");
     var line = segs.map(function (s) { return s.label + " " + s.n; }).join(", ");
-    return '<figure class="vz vz-funnel" data-aidlc-noids role="group" aria-label="' + esc("Verification funnel: " + total + " points; " + line) + '"><figcaption class="vz-title">Where the ' + plural(total, "point") + ' stand<span class="hint">press a part to filter the points below</span></figcaption><div class="vz-bar">' + bar + "</div>" +
+    return '<figure class="vz vz-funnel" data-aidlc-noids role="group" aria-label="' + esc("Verification funnel: " + total + " points; " + line) + '"><figcaption class="vz-title">Where the ' + plural(total, "point") + ' stand<span class="hint">press a part to show only its points; the tests&#39; part is not one of the rows below</span></figcaption><div class="vz-bar">' + bar + "</div>" +
       (on ? '<button type="button" class="vz-clear" data-vz-set="verif:">Show all points</button>' : "") + '<ul class="vz-sr">' + segs.map(function (s) { return "<li>" + esc(s.label + ": " + s.n) + "</li>"; }).join("") + "</ul></figure>";
   }
 
@@ -475,6 +506,12 @@ var GateViz = (function () {
     root.addEventListener("mouseout", off); root.addEventListener("focusout", off);
     root.addEventListener("keydown", function (e) {
       var n = e.target.closest && e.target.closest(".vz-node[data-vz-go], .vz-msg"); if (n && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); n.dispatchEvent(new MouseEvent("click", { bubbles: true })); }
+    });
+    /* a trace too big to draw at once: the picked requirement's chain shows, the others are hidden; the choice is kept */
+    root.addEventListener("change", function (e) {
+      var s = e.target.closest && e.target.closest("select.vz-pick"); if (!s) return;
+      chosen[s.getAttribute("data-vz-pick") || "trace"] = s.value;
+      [].forEach.call((s.closest(".vz") || root).querySelectorAll(".vz-chain"), function (c) { c.hidden = c.getAttribute("data-for") !== s.value; });
     });
   }
 
@@ -1261,7 +1298,7 @@ h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em; line
 .jchip .count { font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .jchip .udot { width: 7px; height: 7px; border-radius: 4px; background: var(--accent); }
 .jchip.read .udot { background: transparent; border: 1.5px solid var(--control); }
-.railtoggle { display: none; }
+.railtoggle, .bmb.railtoggle { display: none; }
 
 /* desk: outline + blocks */
 .desk { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 16px; align-items: start; }
@@ -1486,9 +1523,9 @@ ol.opts > li > b { font: 600 12px/22px var(--mono); text-align: center; border-r
 ol.opts > li.chosen { border-color: var(--ok-fg); background: var(--ok-bg); }
 ol.opts > li.chosen > b { background: var(--ok-fg); color: var(--surface); }
 ol.opts > li > div { min-width: 0; overflow-wrap: anywhere; }
-.answer { display: flex; gap: 10px; align-items: baseline; padding: 7px 10px; border-left: 3px solid var(--ok-fg); background: var(--ok-bg); border-radius: 0 6px 6px 0; margin: 6px 0 2px; }
-.answer b { font-size: 12px; font-weight: 600; color: var(--ok-fg); }
-.answer span { min-width: 0; overflow-wrap: anywhere; }
+div.answer { display: flex; gap: 10px; align-items: baseline; padding: 7px 10px; border-left: 3px solid var(--ok-fg); background: var(--ok-bg); border-radius: 0 6px 6px 0; margin: 6px 0 2px; }
+div.answer b { font-size: 12px; font-weight: 600; color: var(--ok-fg); }
+div.answer span { min-width: 0; overflow-wrap: anywhere; }
 .qafter { color: var(--muted); font-size: 13px; }
 .screens { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 12px; margin: 0 0 .8em; align-items: start; }
 figure.screen { margin: 0; border: 1px solid var(--control); border-radius: 12px; background: var(--surface); overflow: hidden; min-width: 0; }
@@ -1513,7 +1550,7 @@ figure.screen > details.sub { margin: 0; padding: 4px 12px 6px; border-top: 1px 
   .desk { grid-template-columns: minmax(0, 1fr); }
   #rail { position: static; max-height: 60vh; display: none; }
   #rail.show { display: grid; }
-  .railtoggle { display: inline-flex; align-items: center; }
+  .railtoggle, .bmb.railtoggle { display: inline-flex; align-items: center; }
 }
 @media (max-width: 767px) {
   .head { padding: 16px; }
@@ -1570,6 +1607,9 @@ figure.screen > details.sub { margin: 0; padding: 4px 12px 6px; border-top: 1px 
 .tm-head { background: var(--raised); font-size: 12px; font-weight: 500; color: var(--muted); border-bottom: 1px solid var(--line); }
 .tm-row { border-top: 1px solid var(--line-soft); border-left: 3px solid transparent; font-size: 13px; min-width: 0; }
 .tm-head + .tm-row { border-top: 0; }
+.tm-showing { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 12px; font-size: 12.5px; color: var(--fg-2); background: var(--accent-tint); border-bottom: 1px solid var(--line); }
+.tm-showing button { min-height: 24px; padding: 0 10px; font-size: 12px; }
+.tag.dis { display: flex; flex-wrap: wrap; white-space: normal; margin-top: 4px; width: fit-content; max-width: 100%; line-height: 1.3; overflow-wrap: anywhere; }  /* in its own space under the verdict, never over the next column */
 .tm-row.notmet { border-left-color: var(--crit-fg); } .tm-row.unverified { border-left-color: var(--warn-dot); }
 .tm-row:hover > .tm-line { background: var(--hover); }
 .tm-line > div { min-width: 0; overflow-wrap: anywhere; color: var(--fg-2); }
@@ -1599,8 +1639,8 @@ details.crow[open] > summary::before { transform: rotate(90deg); }
 .bts[data-item] { position: relative; }
 .bts > .idot { position: absolute; top: 4px; right: 4px; margin: 0; width: 28px; height: 28px; }
 .bts.read > .idot i { background: transparent; border-color: var(--control); }
-.why { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 10px; font-size: 11.5px; font-weight: 500; white-space: nowrap; background: var(--raised); color: var(--fg-2); }
-.why.notcovered { background: var(--warn-bg); color: var(--warn-fg); }
+span.why { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 10px; font-size: 11.5px; font-weight: 500; white-space: nowrap; background: var(--raised); color: var(--fg-2); }
+span.why.notcovered { background: var(--warn-bg); color: var(--warn-fg); }
 .records > .body { display: grid; gap: 12px; padding-left: 12px; }
 .answer .ans-g { margin-top: 14px; } .answer .ans-g h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--fg-2); display: flex; gap: 8px; align-items: baseline; }
 .answer .ans-g h3 .n { font: 12px var(--mono); color: var(--muted); }
@@ -1728,7 +1768,10 @@ ol.lfl > li::before { content: counter(lf); position: absolute; left: 12px; top:
 .ecol { min-width: 0; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); border-top-width: 3px; background: var(--surface); }
 .ecol.k-risks { border-top-color: var(--crit-fg); } .ecol.k-gaps { border-top-color: var(--warn-dot); } .ecol.k-conflicts { border-top-color: var(--r2-fg); } .ecol.k-solid { border-top-color: var(--ok-fg); }
 ul.pts { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
-li.pt { display: grid; gap: 4px; min-width: 0; } li.pt + li.pt { padding-top: 10px; border-top: 1px solid var(--line-soft); }
+li.pt { display: grid; gap: 4px; min-width: 0; position: relative; padding-right: 34px; }
+li.pt > .idot, ol.lfl > li > .idot { position: absolute; top: 4px; right: 2px; margin: 0; width: 28px; height: 28px; }
+ol.lfl > li { padding-right: 40px; }
+li.pt.read .idot i, ol.lfl > li.read .idot i { background: transparent; border-color: var(--control); } li.pt + li.pt { padding-top: 10px; border-top: 1px solid var(--line-soft); }
 li.pt > p { margin: 0; font-size: 13.5px; line-height: 1.5; overflow-wrap: anywhere; }
 li.pt > .tag { justify-self: start; }
 .srcs { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin-top: 4px; }
@@ -2034,7 +2077,74 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
 }
 @media (max-width: 560px) { .vz-layer, .vz-lane { grid-template-columns: minmax(0, 1fr); } .vz-lname { padding-top: 0; } .vz-item { max-width: 100%; } .vz-lstep { max-width: 100%; } }
 @media (prefers-reduced-motion: no-preference) { .vz-node rect, .vz-edge path, .vz-item { transition: stroke .12s, opacity .12s, background .12s; } }
+/* a trace too big to draw at once is offered per requirement */
+.vz-pickrow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0 0 8px; }
+.vz-pickrow label { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--fg-2); }
+.vz-pickrow select { max-width: min(420px, 70vw); font: inherit; font-size: 13px; font-weight: 400; color: var(--fg); background: var(--surface); border: 1px solid var(--control); border-radius: 6px; padding: 4px 8px; min-height: 30px; }
+.vz-pickrow .hint { font-size: 12px; }
+.vz-seg.auto { cursor: default; }
 /* gate-viz.css:end */
+/* ===== fix round 1: the bar, round marks in Clean, phone ===== */
+/* Round changes are always visible: Clean keeps each mark (a round-coloured tag and edge) and the things removed, struck where they were. */
+#col[data-rv="clean"] .rv-tag { display: inline-flex !important; background: color-mix(in srgb, var(--rvc) 16%, transparent); color: var(--rvc); }
+#col[data-rv="clean"] .rv-tag.gone { background: var(--rv-del-bg); color: var(--rv-del-fg); }
+#col[data-rv="clean"] .rv-tags { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+#col[data-rv="clean"] :is(div, li, p, details, section).rv-gone, #col[data-rv="clean"] :is(div, details, section).rv-removed, #col[data-rv="clean"] details.rv-only { display: block !important; }
+#col[data-rv="clean"] tr.rv-gone { display: table-row !important; }
+#col[data-rv="clean"] span.rv-gone { display: inline !important; }
+#col[data-rv="clean"] :is(.rv-gone, .rv-removed) del.rv-del { display: inline !important; }
+#col[data-rv="clean"] .irow.rv-removed .ih { display: flex !important; }
+#col[data-rv="clean"] :is(.rv-chg, .rv-new) { box-shadow: inset 3px 0 0 var(--rvc) !important; }
+#col[data-rv="clean"] .irow.rv-chg, #col[data-rv="clean"] .irow.rv-new { box-shadow: inset 3px 0 0 var(--rvc) !important; }
+#col[data-rv="clean"] .rv-removed { box-shadow: inset 3px 0 0 var(--rv-gone) !important; }
+.rv-tag[data-tip], .rv-tag { cursor: help; }
+/* the bar: one row; the rest sits in menus */
+.gbar { flex-direction: row; align-items: center; padding: 8px 12px; gap: 8px; background: var(--surface); backdrop-filter: none; }
+.gbar .barrow { flex: 1 1 auto; flex-wrap: nowrap; gap: 8px 12px; min-width: 0; }
+.gbar .filters { flex: 0 1 auto; flex-wrap: nowrap; }
+.gbar .fpill { height: 30px; padding: 0 11px; white-space: nowrap; }
+.gbar .ready { flex: 0 1 auto; min-width: 0; margin-left: 4px; white-space: nowrap; }
+.gbar .savestat { margin-left: auto; }
+.bmenus { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
+.bm { position: relative; }
+.bmb { height: 30px; min-height: 30px; padding: 0 11px; display: inline-flex; align-items: center; gap: 6px; border-radius: 15px; white-space: nowrap; }
+.bmb .n { font: 500 11px var(--mono); color: var(--muted); }
+.bmb .bi { display: none; }
+/* outline labels wrap, never clip mid-word */
+.rdoc { align-items: flex-start; height: auto; }
+.rdoc > .rtitle, #rail .rtitle { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; line-height: 1.35; }
+.rsec { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+.bmb[aria-expanded="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.bpop { position: absolute; right: 0; top: calc(100% + 8px); z-index: 20; min-width: 240px; max-width: min(520px, calc(100vw - 32px)); display: grid; gap: 10px; padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 28px rgba(23, 26, 33, .18); }
+.bmrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.bml { font-size: 12px; font-weight: 600; color: var(--fg-2); min-width: 64px; }
+.bmh { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--fg-2); }
+.bmh .hint { display: block; font-weight: 400; }
+.bpop .rv-legend, .bpop .vz-tl { margin: 0; padding: 0; list-style: none; }
+.bpop .fpill { height: 28px; }
+.ackbtn { min-height: 26px; padding: 0 10px; border-radius: 13px; font-size: 12px; font-weight: 500; flex: none; white-space: nowrap; background: var(--surface); }
+@media (max-width: 1099px) {
+  .gbar .barrow { flex-wrap: wrap; }
+}
+@media (max-width: 767px) {
+  .gbar { padding: 5px 8px; }
+  .gbar .barrow { gap: 4px 8px; }
+  .gbar .filters { overflow-x: auto; max-width: 100%; }
+  .gbar .fpill { height: 26px; min-height: 26px; padding: 0 9px; font-size: 12.5px; }
+  .gbar .fpill .n { margin-left: 3px; }
+  .gbar .savestat { display: none; }
+  .gbar .ready { margin-left: 0; font-size: 12px; }
+  .gbar .rdy { padding: 0 8px; font-size: 12px; height: 26px; min-height: 26px; }
+  .bmenus { gap: 4px; }
+  .bmb { padding: 0 9px; height: 26px; min-height: 26px; font-size: 12.5px; }
+  .bmb .n { display: none; }
+  .bmb.railtoggle .bl { display: none; }
+  .bmb.railtoggle .bi { display: block; }
+  .gbar .ready { flex: 1 1 auto; }
+  .bm { position: static; }  /* the menu opens under the bar, across its width */
+  .bpop { position: absolute; left: 0; right: 0; top: calc(100% + 8px); max-width: none; }
+  p.why, .pt1, .decides { white-space: normal; overflow-wrap: anywhere; }
+}
 </style>
 
 <main class="wrap">
@@ -2062,8 +2172,9 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
   const el = { crumbs: $("crumbs"), title: $("title"), lede: $("lede"), hfacts: $("hfacts"), revs: $("revs"), list: $("list"), gate: $("gate"), bar: $("bar"),
     rail: $("rail"), col: $("col"), band: $("band"), pop: $("pop"), toast: $("toast") };
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const fmt = (iso) => { try { return new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }); } catch { return iso || ""; } };
-  const clock = () => new Date().toLocaleTimeString([], { timeStyle: "short" });
+  /* one English format, never the browser's own locale inside English text */
+  const fmt = (iso) => { try { const d = new Date(iso); return isNaN(d) ? String(iso || "") : d.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }); } catch { return iso || ""; } };
+  const clock = () => new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
   const gateId = () => { const h = decodeURIComponent(location.hash.replace(/^#/, "")); return /^[a-z0-9._-]+$/i.test(h) ? h : ""; };
   const setStatus = (t, cls) => { el.lede.textContent = t || ""; el.lede.className = "lede" + (cls ? " loadmsg " + cls : ""); el.lede.hidden = !t; };
   const WHY = { first: "first presentation", revision: "after a revision", stale: "the review was out of date" };
@@ -2090,7 +2201,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
   const fresh = () => ({ unsub: [], gate: null, docs: new Map(), docsLoaded: false, notes: {}, dirty: new Set(), noteStat: {}, unsaved: false, saving: false, failed: false,
     noteTimer: null, painted: "", openNotes: new Set(), railSig: "", mode: {}, picks: {}, fpicks: {}, iopen: new Set(), bt: { v: new Set(), u: new Set(), q: "", rows: new Set(), fold: false, grp: "", heat: "" }, refs: new Map(), ids: {}, railOpen: {},
     reads: {}, readKey: "", hashes: {}, groups: {}, filter: "all", needsKeep: new Set(), nsNow: new Set(), nav: {}, prev: null, prevDocs: null, changed: {},
-    rounds: [], roundsLoaded: false, baseDocs: {}, prevList: [], itemDelta: null, rv: { groups: [] }, rvSeq: 0, rvAt: -1, rvOnly: 0, rvLegend: "", chainReady: false, rvTrees: new Map() });
+    rounds: [], roundsLoaded: false, cs: null, menu: "", drawn: false, keepOpen: null, baseDocs: {}, prevList: [], itemDelta: null, rv: { groups: [] }, rvSeq: 0, rvAt: -1, rvOnly: 0, rvLegend: "", chainReady: false, rvTrees: new Map() });
   const view = Object.assign({ id: "", diagrams: 0 }, fresh());
   const hasMd = () => typeof marked !== "undefined" && typeof DOMPurify !== "undefined";
 
@@ -2291,9 +2402,10 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     return out;
   }
   function computeChanges() {
-    view.changed = {}; view.itemDelta = null; view.recDelta = {};
+    view.changed = {}; view.itemDelta = null; view.recDelta = {}; view.cs = null;
     if (!view.prevDocs) return;
     const g = view.gate, b = view.prev.g;
+    view.cs = diffThings(thingsOf(b, view.prevList), thingsOf(g, docList()));
     docList().forEach((d) => {
       if (d.pending || d.partial) return;
       const old = view.prevDocs.get(d.key);
@@ -2331,7 +2443,8 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
   }
   /* a part's tag: new, changed (+words −words) or removed since the base round */
   const rvCount = (c) => c && (c.ins || c.del) ? `<span class="rv-n" data-tip="${esc("Words added and removed since " + sinceLabel())}">${c.ins ? `<span class="p">+${c.ins}</span>` : ""}${c.ins && c.del ? " " : ""}${c.del ? `<span class="m">−${c.del}</span>` : ""}</span>` : "";
-  const rvTag = (t, c) => `<span class="rv-tag ${t === "new" ? "new" : t === "gone" ? "gone" : "chg"}">${t === "new" ? "new" : t === "gone" ? "removed since " + esc(sinceLabel()) : "changed"}</span>` + (t === "gone" ? "" : rvCount(c));
+  /* every mark carries the round that made it ("v3 changed"), in both views: Clean draws it in the round's own colour */
+  const rvTag = (t, c, extra) => `<span class="rv-tag ${t === "new" ? "new" : t === "gone" ? "gone" : "chg"}" data-tip="${esc((t === "new" ? "New in round " : t === "gone" ? "Removed in round " : "Changed in round ") + roundNo() + ", compared with " + sinceLabel())}">v${esc(roundNo())} ${t === "new" ? "new" : t === "gone" ? "removed" : "changed"}</span>` + (extra || "") + (t === "gone" ? "" : rvCount(c));
   function tagInto(n, html) {
     const span = document.createElement("span"); span.className = "rv-tags"; span.dataset.rvSkip = ""; span.innerHTML = html;
     if (n.matches("tr")) { const c = n.cells[0]; if (c) c.appendChild(span); return; }
@@ -2351,9 +2464,12 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const h = n.matches("tr") ? (n.cells[1] || n.cells[0]) : n.querySelector("h1, h2, h3, h4, .ctitle, b");
     return h ? plainTitle(h.textContent).replace(ID_LEAD, "").toLowerCase() : "";
   };
-  const rvName = (n) => n.matches("details.sec") && !(n.dataset.ekey || n.dataset.rvkey) ? plainTitle(n.dataset.title) : ekeyId(n) + ((() => { const t = rvTitleOf(n); return t && t !== ekeyId(n).toLowerCase() ? " · " + plainTitle((n.matches("tr") ? (n.cells[1] || n.cells[0]) : n.querySelector("h1, h2, h3, h4, .ctitle, b") || {}).textContent || "").replace(ID_LEAD, "") : ""; })());
+  /* an element's id may end in a hash that tells twins apart ("Opening hours#dz2yt0.291"); it names nothing to a reader */
+  const cleanId = (s) => String(s || "").replace(/#[a-z0-9]+\.\d+$/i, "");
+  const rvName = (n) => n.matches("details.sec") && !(n.dataset.ekey || n.dataset.rvkey) ? plainTitle(n.dataset.title) : cleanId(ekeyId(n)) + ((() => { const t = rvTitleOf(n); return t && t !== cleanId(ekeyId(n)).toLowerCase() ? " · " + plainTitle((n.matches("tr") ? (n.cells[1] || n.cells[0]) : n.querySelector("h1, h2, h3, h4, .ctitle, b") || {}).textContent || "").replace(ID_LEAD, "") : ""; })());
   /* the base round of a document, drawn like this one, off screen; its elements carry data-rvkey, never a read mark */
   function rvBuild(d, i) {
+    d = shownDoc(d);
     const keep = view.refs; view.refs = new Map();
     try {
       const vf = d.covered && ev() ? null : viewFor(d), mode = view.mode[d.key] || "view";
@@ -2457,7 +2573,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
       nodes: [...el.col.querySelectorAll(".fcard[data-fid]")].map((n) => ({ id: n.dataset.fid, node: n })), list: (g) => ((g.findings || {}).items || []), idOf: (f) => f.id, name: (f) => f.id + " · " + plainTitle(f.title),
       fields: [["h3", (f) => inline(f.title || "")], [".fplain", (f) => inline(f.plain || "")], [".faction", (f) => inline(f.action || "")], [".fwhere", (f) => esc(f.where || "")]] });
     if (BT && (BT.targets || []).length && $("b-bt-matrix")) out.push({ key: "bt-matrix", title: "Target matrix", block: $("b-bt-matrix"), end: $("bt-tm"), after: true, tagIn: ".tm-id", cur: new Map(BT.targets.map((t) => [tkey(t), t])),
-      nodes: [...el.col.querySelectorAll(".tm-row[data-tid]")].map((n) => ({ id: n.dataset.item, node: n })), list: (g) => ((g.buildTest || {}).targets || []), idOf: tkey, name: (t) => t.id + " · " + (t.expected || t.verdict),
+      nodes: [...el.col.querySelectorAll(".tm-row[data-tid]")].map((n) => ({ id: n.dataset.item, node: n })), list: (g) => ((g.buildTest || {}).targets || []), idOf: tkey, name: (t) => t.id,  /* the ledger names the target by id and links to its row; the row says the rest */
       fields: [[".c-exp", (t) => esc(t.expected || "")], [".c-act", (t) => esc(t.actual || "")], [".c-ev", (t) => esc(t.evidence || "")]],
       was: (o, t) => o.verdict !== t.verdict ? `<span class="rv-tag gone" data-tip="${esc("Its verdict in " + sinceLabel())}">was ${esc(o.verdict)}</span>` : "" });
     return out;
@@ -2546,9 +2662,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const { rs, nos, last, counts } = ch, rows = rs.map((r) => ({ g: r.g, docs: view.baseDocs[r.id] || [] })).concat([{ g: view.gate, docs: docList() }]);
     const sets = rows.map((r) => thingsOf(r.g, r.docs)), out = [{ k: nos[0], tone: RevDiff.tone(nos[0]), base: true, changed: 0, added: 0, removed: 0 }];
     for (let i = 1; i <= last; i++) {
-      const a = sets[i - 1], b = sets[i]; let changed = 0, added = 0, removed = 0;
-      b.forEach((v, k) => { if (!a.has(k)) added++; else if (a.get(k) !== v) changed++; });
-      a.forEach((v, k) => { if (!b.has(k)) removed++; });
+      const { changed, added, removed } = diffThings(sets[i - 1], sets[i]);
       out.push({ k: nos[i], tone: RevDiff.tone(nos[i]), changed, added, removed, words: counts[nos[i]] || 0 });
     }
     return out;
@@ -2607,6 +2721,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
   function rvApply() {
     view.rv = { groups: [] }; view.rvSeq = 0;
     el.col.dataset.rv = rvOn() ? "show" : "clean";
+    el.col.classList.remove("rv-t2", "rv-t3", "rv-t4", "rv-t5"); el.col.classList.add("rv-t" + RevDiff.tone(roundNo()));  /* --rvc: the colour of the round on show */
     if (!view.prev) { paintRvList(); return; }
     rvEval(); rvItemsGroup(); rvItems($("itemsbody") || $("digestbody")); rvSummary(); rvRecs(); rvBrief();
     const docs = docList(), here = new Set(docs.map((d) => d.key));
@@ -2614,7 +2729,9 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     /* a document gone since the base round is listed; a review copy is replaced by the next one and is not */
     view.prevList.filter((d) => !here.has(d.key) && !/^review-\d+$/.test(keyOf(d))).forEach((d) => rvGroup(d.key, d.title || d.key, "", "gone", { del: RevDiff.countWords(d.text) }));
     paintRvList();
+    if (view.chainReady) view.rvLegend = GateViz.timeline(roundStats(rvChain()), view.rvOnly);  /* the timeline in both views; Clean adds each round's words */
     if (!rvOn()) rvAttribute();
+    else { const slot = $("rvlegend"); if (slot) slot.innerHTML = view.rvLegend; }
   }
 
   function mapsHtml(maps) {
@@ -2665,9 +2782,10 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const E = ev(), covered = new Set(coveredDocs().map((d) => d.key));
     if (E) {  /* the evaluation's own text, and each criterion: separate things, each with its own mark; the block is read when all are */
       const C = g.criteria || [];
-      view.hashes["eval:text"] = hash(JSON.stringify(E));
+      view.hashes["eval:text"] = hash(E.decides || "");
+      evCards(E).forEach((c) => { view.hashes[c.key] = hash(JSON.stringify(c.p)); });  /* each card is its own element with its own mark */
       C.forEach((c) => { view.hashes["crit:" + c.key] = hash(JSON.stringify([c.key, c.origin, c.verdict, c.note || "", c.title, c.text || "", String(c.source || "").replace(/#L\d+.*$/, "")])); });
-      view.groups.evaluation = ["eval:text"].concat(C.map((c) => "crit:" + c.key));
+      view.groups.evaluation = ["eval:text"].concat(evCards(E).map((c) => c.key), C.map((c) => "crit:" + c.key));
     }
     view.groups.records = docs.filter((d) => !d.pending && !covered.has(d.key)).map((d) => d.key);
     if (rvShown()) view.hashes.revision = hash(JSON.stringify([g.revision || null, roundNo()]));
@@ -2682,7 +2800,8 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const frag = [];
     if (B) frag.push(btStrip(B));
     if (rvShown()) frag.push(revBlock());
-    if (E) { frag.push(evalBlock(E)); if (DG) frag.push(itemsBlock(DG)); }
+    /* a block with no items is not drawn: the traceability line it used to hold sits at the foot of the evaluation */
+    if (E) { const itemsShown = !!(DG && DG.items.length); frag.push(evalBlock(E, DG && !itemsShown ? DG : null)); if (itemsShown) frag.push(itemsBlock(DG)); }
     if (g.summary) frag.push(`<details class="block sum" open id="b-summary" data-block="summary"><summary>${CARET}<h2>${E ? "Completion summary" : "Summary"}</h2><span class="hint wide">what Claude did in this stage</span><span class="end">${rdot("summary")}</span></summary><div class="body md" id="summarymd"></div></details>`);
     if (DG && !E) frag.push(digestBlock(DG));
     if (FN) frag.push(findingsBlock(FN));
@@ -2691,6 +2810,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     if (!docs.length) frag.push(view.docsLoaded ? '<div class="card0 msg"><b>No documents yet.</b><p>Claude writes them with the gate; they appear here as soon as they land.</p></div>' : '<p class="hint">Loading documents…</p>');
     if (docs.length) frag.push(recordsBlock(docs));
     frag.push(answerBlock());
+    const keepOpen = view.keepOpen ? new Map([...el.col.querySelectorAll("details[id]")].map((d) => [d.id, d.open])) : null; view.keepOpen = false;
     el.col.innerHTML = frag.join("") + '<div class="card0 nomatch" id="nomatch" hidden></div>';
     if (g.summary) renderMarkdown($("summarymd"), g.summary);
     if (g.brief) fillBrief(g);
@@ -2699,8 +2819,10 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     findingsCount(); Object.keys(view.fpicks).forEach((id) => { const st = view.noteStat["fpick:" + id]; if (st) setNoteStat("fpick:" + id, st[0], st[1]); });
     btRender(); btDecideCount(); { const q = $("bt-q"); if (q) q.value = view.bt.q; }
     openAll();
+    if (keepOpen) keepOpen.forEach((o, id) => { const d = $(id); if (d && d.open !== o) d.open = o; });  /* a re-draw the person asked for leaves every block and section as it was */
     docs.forEach((d) => { const b = $("d-" + d.key); if (b && d.path) regRef("file:" + d.path.split("/").pop().toLowerCase(), b, d.title || d.key, d.path.split("/").pop()); });
     view.ids = idMap(docs);
+    linkTargets(el.col);
     linkRefs(el.col);
     tipTerms(el.col);
     rowHandles(el.col);
@@ -2708,6 +2830,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     drawDiagrams(el.col);
     stickyTables();
     view.railSig = ""; paintChrome(docs);
+    view.drawn = true; restorePlace();
   }
   const rdot = (key) => `<button type="button" class="rdot" data-read="${esc(key)}" aria-label="Mark as read" data-tip="Mark as read"><i aria-hidden="true"></i></button>`;
 
@@ -2718,7 +2841,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     if (rvShown()) { const G = (view.rv || {}).groups || []; out.push({ key: "revision", go: "b-revision", short: "What changed", count: G.length ? String(G.reduce((s, x) => s + Math.max(1, x.items.length), 0)) : "", tip: "What changed in this round: Claude's account of the revision and every change on the page" }); }
     if (E) {
       out.push({ key: "evaluation", go: "b-eval", short: "Evaluation", count: "", extra: (E.lookFirst || []).length ? `<span class="tag" ${toneOf("warn")}>${E.lookFirst.length} to look at first</span>` : "", tip: "Claude's evaluation of the stage against its rules: what to look at first, risks, gaps, conflicts" });
-      const J = judgedItems(); if (J.length) out.push({ key: "items", go: "b-items", short: "Items", count: "", tip: "Every requirement, rule, decision and story, summarised and labelled by Claude" });
+      const J = judgedItems(); if (J.length || ((dg() || {}).items || []).length) out.push({ key: "items", go: "b-items", short: "Items", count: "", tip: "Every requirement, rule, decision and story, summarised and labelled by Claude" });
     }
     const DG = !E && dg(); if (DG) out.push({ key: "digest", go: "b-digest", short: "At a glance", count: "", tip: "The stage item by item: requirements, rules, decisions and stories, each with its own read mark" });
     if (g.summary) out.push({ key: "summary", go: "b-summary", short: "Summary", count: "", tip: "The summary of what Claude did in this stage" });
@@ -2760,6 +2883,15 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     return true;
   }
   const nsShown = (k) => view.nsNow.has(k) || view.needsKeep.has(k);
+  /* Something tagged not handled, not met, failing or not judged has no pick to make, but it is not settled by being read: it
+     stays in Needs you until the person acknowledges it with "Seen, will answer in chat". The mark is the hash of the thing, so a
+     changed one needs its acknowledgement again. It lives with the read marks and never counts as a read. */
+  const ackKey = (k) => "ack:" + k;
+  const isAcked = (k) => !!view.hashes[k] && view.reads[ackKey(k)] === view.hashes[k];
+  function setAck(k, on) {
+    if (on && view.hashes[k]) view.reads[ackKey(k)] = view.hashes[k]; else delete view.reads[ackKey(k)];
+    saveReads(); paintChrome(docList());
+  }
 
   /* ---------- Needs you: one definition of what waits on the person ----------
      Every consumer reads this list: the filter, its count, the bar's readiness counter, the Your answer block. A thing
@@ -2775,13 +2907,13 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     if (B) {
       (B.targets || []).forEach((t) => {
         if (isOpenT(t)) { if (!(view.picks[t.id] || {}).pick) out.push({ key: tkey(t), kind: "target", decision: true }); }
-        else if (t.disagree && t.disagree.length && !isRead(tkey(t))) out.push({ key: tkey(t), kind: "target", decision: false });
+        else if (t.disagree && t.disagree.length && !isAcked(tkey(t))) out.push({ key: tkey(t), kind: "target", decision: false });
       });
-      if ((B.commands || []).some((c) => !c.ok) && !isRead("cmd:failed")) out.push({ key: "cmd:failed", kind: "command", decision: false });
+      if ((B.commands || []).some((c) => !c.ok) && !isAcked("cmd:failed")) out.push({ key: "cmd:failed", kind: "command", decision: false });
     }
     const F = fnd(); if (F) F.items.forEach((f) => { if (!fpickDone(f)) out.push({ key: "finding:" + f.id, kind: "finding", decision: true }); });
-    const D = dg(); if (D) D.items.forEach((it) => { const c = it.coveredBy; if (c && !c.link && !c.acceptanceReason && !targetOfItem(it) && !isRead("item:" + it.key)) out.push({ key: "item:" + it.key, kind: "item", decision: false }); });
-    (g.criteria || []).forEach((c) => { if (c.verdict !== "holds" && c.verdict !== "n/a" && !isRead("crit:" + c.key)) out.push({ key: "crit:" + c.key, kind: "criterion", decision: false }); });
+    const D = dg(); if (D) D.items.forEach((it) => { const c = it.coveredBy; if (c && !c.link && !c.acceptanceReason && !targetOfItem(it) && !isAcked("item:" + it.key)) out.push({ key: "item:" + it.key, kind: "item", decision: false }); });
+    (g.criteria || []).forEach((c) => { if (c.verdict !== "holds" && c.verdict !== "n/a" && !isAcked("crit:" + c.key)) out.push({ key: "crit:" + c.key, kind: "criterion", decision: false }); });
     return out;
   }
   /* what groups readable parts without being one: hidden under Unread when every part is read */
@@ -2792,8 +2924,8 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const lp = leafProgress();
     const total = lp.total, read = lp.read;
     const NEED = needs(); view.nsNow = new Set(NEED.map((n) => n.key));
-    const nChanged = Object.keys(view.changed).length, nNotes = noted().length;
-    const filters = [["all", "All", blocks.filter((b) => !b.nested).length], ["needs", "Needs you", NEED.length], ["unread", "Unread", total - read]].concat(nChanged ? [["changed", "Changed", nChanged]] : []).concat(nNotes ? [["notes", "With notes", nNotes]] : []);
+    const CS = changeSummary(), nChanged = CS ? CS.n : Object.keys(view.changed).length, nNotes = noted().length;  /* the one count of changes: the pill, the banner, the timeline and the list of changes all read it */
+    const filters = [["all", "All", blocks.filter((b) => !b.nested).length, "Every block of the page"], ["needs", "Needs you", NEED.length, "Only what waits on you: a decision with no pick, or something not handled, failing or not judged that you have not acknowledged"], ["unread", "Unread", total - read, "Only the things you have not read yet (key u goes to the next)"]].concat(nChanged ? [["changed", "Changed", nChanged, CS ? "Only what changed, is new or was removed since " + sinceLabel() + " (" + CS.changed + " changed, " + CS.added + " new, " + CS.removed + " removed)" : "Only what changed since the earlier round"]] : []);
     if (!filters.some((f) => f[0] === view.filter)) view.filter = "all";
     /* header facts */
     const b = g.brief ? parseBrief(g.brief) : null; const open = b ? b.rows.filter((x) => isOpenStatus(x.status)).length : null;
@@ -2801,19 +2933,15 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
       (open !== null ? `<div class="fact"><span>Open findings</span><b class="num${open ? " warn" : ""}">${open}</b></div>` : "") +
       `<div class="fact"><span>Your notes</span><b class="num">${nNotes}</b></div>`;
     el.hfacts.hidden = false;
-    if (view.prev && nChanged) {
-      const t = revTone(roundNo()); const nNew = Object.values(view.changed).filter((x) => x === "new").length;
-      el.revs.innerHTML = `<span class="sw" style="background:var(--${t}-fg)"></span><span>Compared with ${esc(sinceLabel())} (${esc(fmt(view.prev.g.createdAt))}): ${[nChanged - nNew ? plural(nChanged - nNew, "part") + " changed" : "", nNew ? plural(nNew, "part") + " new" : ""].filter(Boolean).join(", ")}. ${rvOn() ? "Inside them, words added are highlighted and words removed are struck through." : "Changes are hidden: choose Changes in the bar to mark them."}</span>` +
-        `<button type="button" class="fpill" data-filter="${view.filter === "changed" ? "all" : "changed"}" aria-pressed="${view.filter === "changed"}">Show only what changed</button>`;
+    if (view.prev && CS && CS.n) {
+      const t = revTone(roundNo());
+      el.revs.innerHTML = `<span class="sw" style="background:var(--${t}-fg)"></span><span>Round ${esc(roundNo())} compared with ${esc(sinceLabel())} (${esc(fmt(view.prev.g.createdAt))}): ${[CS.changed ? CS.changed + " changed" : "", CS.added ? CS.added + " new" : "", CS.removed ? CS.removed + " removed" : ""].filter(Boolean).join(" · ")}. Each one carries its round's tag${rvOn() ? "; words added are highlighted and words removed are struck through" : ", in both views"}.</span>`;
       el.revs.hidden = false;
     } else el.revs.hidden = true;
-    /* the sticky bar; focus stays on the control it was on */
+    /* the sticky bar: one row. Filters, the readiness counter, then three small controls (Rounds, View, Outline); a menu holds the rest.
+       Focus stays on the control it was on. */
     const f = document.activeElement; const keep = f && el.bar.contains(f) ? [...f.attributes].map((a) => a.name).find((n) => /^data-(?!tip)/.test(n)) : null; const keepVal = keep ? f.getAttribute(keep) : null;
-    const pct = total ? Math.round(read / total * 100) : 100;
-    el.bar.innerHTML = `<div class="barrow"><div class="filters" role="group" aria-label="Show">${filters.map((x) => `<button type="button" class="fpill" data-filter="${x[0]}" aria-pressed="${view.filter === x[0]}">${x[1]}<span class="n">${x[2]}</span></button>`).join("")}</div>${rvBar()}` +
-      `<div class="tools">${readyHtml(NEED, total - read)}<span class="savestat" id="savestat" role="status" aria-live="polite"></span><span class="progress-r" data-tip="Every separate thing you marked read with its dot: items, criteria, findings, targets, elements, documents. One turns unread again only when its own text changes."><span class="num">Read ${read}/${total}</span><span class="meter" aria-hidden="true"><i style="width:${pct}%"></i></span></span>` +
-      `<button type="button" data-all="open">Expand all</button><button type="button" data-all="close">Collapse all</button><button type="button" class="wide" data-allread="1">Mark all read</button><button type="button" class="railtoggle" data-outline="1" aria-controls="rail" aria-expanded="${el.rail.classList.contains("show")}">Outline</button></div></div>` +
-      `<nav class="chips" aria-label="Jump to">${blocks.filter((x) => !x.nested && passes(x.key)).map((x) => `<a class="jchip${isRead(x.key) ? " read" : ""}" href="#" data-go="${esc(x.go)}" data-tip="${esc("Jump to " + x.tip + (isRead(x.key) ? " (read)" : " (unread)"))}"><span class="udot" aria-hidden="true"></span>${esc(x.short)}${revTag(x.key)}${x.count ? `<span class="count">${esc(x.count)}</span>` : ""}${x.extra || ""}<span class="sr">${isRead(x.key) ? ", read" : ", unread"}</span></a>`).join("")}</nav>`;
+    el.bar.innerHTML = barHtml(filters, NEED, total - read, nNotes, CS, total);
     if (keep) { const back = el.bar.querySelector(`[${keep}="${CSS.escape(keepVal)}"]`); if (back) back.focus(); }
     paintSave();
     /* blocks: read state and the filter */
@@ -2821,17 +2949,28 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     blocks.forEach((x) => {
       const node = $(x.go); if (!node) return;
       const r = isRead(x.key); node.classList.toggle("read", r);
-      const dot = node.querySelector(":scope > summary .rdot"); if (dot) { const lab = r ? "Mark as unread" : "Mark as read"; dot.setAttribute("aria-label", lab); dot.dataset.tip = lab; }
+      const dot = node.querySelector(":scope > summary .rdot"); if (dot) { const lab = r ? "Mark as unread" : "Mark as read", nm = plainTitle(((node.querySelector(":scope > summary h2") || {}).textContent) || ""); dot.setAttribute("aria-label", nm ? lab + ": " + nm : lab); dot.dataset.tip = lab; }
       const ok = passes(x.key); node.hidden = !ok; if (ok && !x.nested) shown++;
     });
-    const sb = $("b-bt-strip"); if (sb) { sb.hidden = view.filter === "needs" && !nsShown("cmd:failed"); sb.querySelectorAll(".bts:not([data-item])").forEach((n) => { n.hidden = view.filter === "needs"; }); }
+    const sb = $("b-bt-strip"); if (sb) { sb.hidden = (view.filter === "needs" && !nsShown("cmd:failed")) || (view.filter === "unread" && !(view.hashes["cmd:failed"] && !isRead("cmd:failed")));  /* under Unread the strip stays only while it holds something unread */ sb.querySelectorAll(".bts:not([data-item])").forEach((n) => { n.hidden = view.filter === "needs"; }); }
     const ab = $("b-answer"); if (ab) { ab.hidden = view.filter !== "all"; paintAnswer(); }
     el.col.classList.toggle("only-changed", view.filter === "changed");
     el.col.querySelectorAll("[data-item]").forEach((n) => {
       const r = isRead(n.dataset.item); n.classList.toggle("read", r);
       const ns = view.filter === "needs"; n.classList.toggle("nsettled", ns && !view.nsNow.has(n.dataset.item));
       n.hidden = (view.filter === "unread" && r) || (view.filter === "changed" && n.classList.contains("rv-same")) || (ns && (!nsShown(n.dataset.item) || n.classList.contains("tlink")));  /* the item that only points at a target is not a second copy of it */
-      const d = [...n.querySelectorAll("[data-iread]")].find((x) => x.dataset.iread === n.dataset.item); if (d) { d.dataset.tip = r ? "Read. Press to mark unread" : "Mark as read"; d.setAttribute("aria-label", (r ? "Mark unread: " : "Mark read: ") + (n.dataset.item.split(":").slice(1).join(":") || "")); d.classList.toggle("isread", r); }
+      const d = [...n.querySelectorAll("[data-iread]")].find((x) => x.dataset.iread === n.dataset.item); if (d) { d.dataset.tip = r ? "Read. Press to mark unread" : "Mark as read"; d.setAttribute("aria-label", (r ? "Mark unread: " : "Mark read: ") + readName(n, n.dataset.item.split(":").slice(1).join(":"))); d.classList.toggle("isread", r); }
+    });
+    { const E = ev(), lfc = $("lf-count"); if (E && lfc) { const n = (E.lookFirst || []).filter((p) => !isRead(evKey("lf", p))).length; lfc.textContent = n + " to look at first"; lfc.hidden = !n; } }  /* clears when each card is read */
+    /* a thing that waits without a pick (not handled, not met, failing, sources disagree) carries its own acknowledgement */
+    const waits = new Map(NEED.filter((n) => !n.decision).map((n) => [n.key, n]));
+    el.col.querySelectorAll("[data-item]").forEach((n) => {
+      const k = n.dataset.item, has = n.querySelector(":scope [data-ack]");
+      if (waits.has(k) && !has && !n.classList.contains("rv-removed")) {
+        const b = document.createElement("button"); b.type = "button"; b.className = "ackbtn"; b.dataset.ack = k; b.textContent = "Seen, will answer in chat";
+        b.dataset.tip = "You have seen this and will say what to do about it in your answer. It stops counting as waiting on you; reading it does not.";
+        const dot = n.querySelector(".idot"); if (dot && dot.parentElement) dot.parentElement.insertBefore(b, dot); else n.appendChild(b);
+      } else if (!waits.has(k) && has) has.remove();
     });
     paintElems();
     /* a container whose readable parts are all read (or all unchanged) leaves with them: no empty shell under Unread or Changed */
@@ -2849,6 +2988,40 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     el.band.hidden = false;
     paintRail(docs);
   }
+  /* ---------- the bar ----------
+     One row on a wide screen, at most two short ones on a phone: the filters and the readiness counter always; Rounds (the
+     timeline, as one control that opens), View (Changes | Clean, Expand all, Collapse all, Mark all read) and Outline (the
+     jump to a block: on a narrow screen a button that opens the outline) as small buttons that open a menu. */
+  const rvSeg = () => `<span class="seg rvseg" role="group" aria-label="How the changes show"><button type="button" data-rvview="show" aria-pressed="${rvOn()}" data-tip="Mark what changed since ${esc(sinceLabel())}: words added are highlighted, words removed struck">Changes</button><button type="button" data-rvview="clean" aria-pressed="${!rvOn()}" data-tip="The page as it is now, each round's changes in that round's colour">Clean</button></span>`;
+  const rvStepper = () => !view.prev || !rvOn() ? "" : `<span class="rvbar"><button type="button" class="rvstep" data-rvstep="-1" aria-label="Previous change" data-tip="Previous change (k)">${UP}</button><span class="num rvpos" id="rvpos" aria-live="polite">${view.rvAt >= 0 ? view.rvAt + 1 : "–"} / ${rvStops().length}</span><button type="button" class="rvstep" data-rvstep="1" aria-label="Next change" data-tip="Next change (j)">${DOWN}</button></span>`;
+  function barHtml(filters, NEED, unread, nNotes, CS, total) {
+    const on = view.menu || "";
+    const pills = filters.map((x) => `<button type="button" class="fpill" data-filter="${x[0]}" aria-pressed="${view.filter === x[0]}"${x[3] ? ` data-tip="${esc(x[3])}"` : ""}>${x[1]}<span class="n">${x[2]}</span></button>`).join("");
+    const rounds = view.prev ? `<div class="bm"><button type="button" class="bmb" data-menu="rounds" aria-haspopup="true" aria-expanded="${on === "rounds"}" aria-controls="m-rounds" data-tip="The rounds of this stage and what each one changed">Rounds<span class="n">v${esc(roundNo())}</span></button>` +
+      `<div class="bpop" id="m-rounds" role="group" aria-label="Rounds"${on === "rounds" ? "" : " hidden"}><p class="bmh">What each round changed<span class="hint">press a round to show only its colour</span></p><span id="rvlegend">${view.rvLegend || ""}</span>${CS ? `<p class="bmh hint">Round ${esc(roundNo())} against ${esc(sinceLabel())}: ${CS.changed} changed · ${CS.added} new · ${CS.removed} removed</p>` : ""}</div></div>` : "";
+    const menu = `<div class="bm"><button type="button" class="bmb" data-menu="view" aria-haspopup="true" aria-expanded="${on === "view"}" aria-controls="m-view" data-tip="How the page shows its changes, and the bulk actions">View</button>` +
+      `<div class="bpop" id="m-view" role="group" aria-label="View"${on === "view" ? "" : " hidden"}>` +
+      (view.prev ? `<div class="bmrow"><span class="bml">Changes</span>${rvSeg()}${rvStepper()}</div>` : "") +
+      `<div class="bmrow"><button type="button" data-all="open" data-tip="Open every block and section">Expand all</button><button type="button" data-all="close" data-tip="Close every block and section">Collapse all</button></div>` +
+      (nNotes ? `<div class="bmrow"><button type="button" class="fpill" data-filter="notes" aria-pressed="${view.filter === "notes"}" data-tip="Only the documents you left a note on">With notes<span class="n">${nNotes}</span></button></div>` : "") +
+      `<div class="bmrow"><button type="button" data-allread="1" data-tip="Mark every readable thing read (a decision still waits for its pick)">Mark all read</button></div></div></div>`;
+    const outline = `<button type="button" class="bmb railtoggle" data-outline="1" aria-controls="rail" aria-expanded="${el.rail.classList.contains("show")}" aria-label="Outline" data-tip="The outline: every block and file, to jump to"><svg class="bi" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="M2 4h12M2 8h12M2 12h8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg><span class="bl">Outline</span></button>`;
+    return `<div class="barrow"><div class="filters" role="group" aria-label="Show">${pills}</div>${readyHtml(NEED, unread, total)}<span class="savestat" id="savestat" role="status" aria-live="polite"></span><div class="bmenus">${rounds}${menu}${outline}</div></div>`;
+  }
+  function setMenu(name) {
+    view.menu = view.menu === name ? "" : (name || "");
+    el.bar.querySelectorAll("[data-menu]").forEach((b) => { const o = b.dataset.menu === view.menu; b.setAttribute("aria-expanded", String(o)); const pop = $("m-" + b.dataset.menu); if (pop) pop.hidden = !o; });
+  }
+  document.addEventListener("click", (e) => { if (view.menu && !(e.target.closest && e.target.closest(".bm"))) setMenu(""); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && view.menu) { const b = el.bar.querySelector(`[data-menu="${view.menu}"]`); setMenu(""); if (b) b.focus(); } });
+  /* what changed, in one function: the pill, the banner, the timeline and the list read it */
+  function diffThings(a, b) {
+    let changed = 0, added = 0, removed = 0;
+    b.forEach((v, k) => { if (!a.has(k)) added++; else if (a.get(k) !== v) changed++; });
+    a.forEach((v, k) => { if (!b.has(k)) removed++; });
+    return { changed, added, removed, n: changed + added + removed };
+  }
+  const changeSummary = () => view.cs || null;
   function paintSave() {
     const s = $("savestat"); if (!s) return;
     if (view.saving) { s.className = "savestat busy"; s.innerHTML = '<i aria-hidden="true"></i>Saving your note…'; }
@@ -2916,11 +3089,12 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const kind = KIND[d.kind] ? `<span class="pill quiet" data-tip="${esc(KIND_TIP[d.kind])}">${KIND[d.kind]}</span>` : "";
     const showNote = view.openNotes.has(d.key) || note;
     return `<details class="block doc${ch ? " rev" + t.slice(1) : ""}" id="d-${esc(d.key)}" data-block="${esc(d.key)}"${mx ? " data-matrixdoc" : ""}${closed ? "" : " open"}>
-      <summary>${CARET}<h2>${esc(d.title || d.key)}</h2>${revTag(d.key)}${kind}${why ? `<span class="why ${why[0]}" data-why="${why[0]}" data-tip="${esc(why[2])}">${esc(why[1])}</span>` : ""}${mx ? '<span class="hint mxsum">its targets table is shown above as the target matrix</span>' : ""}${file}<span class="end">${size}${note ? '<i class="notedot" data-tip="You left a note on this document"></i>' : ""}<span class="seg" id="seg-${esc(d.key)}" role="group" aria-label="Show the document as" hidden><button type="button" data-mode="view" data-key="${esc(d.key)}" data-tip="A view made for this kind of document">View</button><button type="button" data-mode="text" data-key="${esc(d.key)}" data-tip="The document as written">Text</button><button type="button" data-mode="diagram" data-key="${esc(d.key)}" data-tip="The structure of this document drawn as a diagram" hidden>Diagram</button></span><button type="button" class="notebtn" data-key="${esc(d.key)}" aria-controls="nb-${esc(d.key)}" aria-pressed="${showNote ? "true" : "false"}">${note ? "Your note" : "Add a note"}</button>${aw ? "" : rdot(d.key)}</span></summary>
-      <div class="body">${mx ? '<p class="mxnote">The targets table of this file is shown above as the <a href="#" data-mxgo="1">target matrix</a>. This is the file as written.</p>' : ""}<div class="notebox" id="nb-${esc(d.key)}"${showNote ? "" : " hidden"}><label for="nt-${esc(d.key)}"><b>Note to Claude</b><span>on this document; it goes with your answer in chat</span><span class="stat" id="ns-${esc(d.key)}" aria-live="polite"></span></label><textarea id="nt-${esc(d.key)}" rows="2" placeholder="Something to change, check or keep in mind"></textarea></div><div id="db-${esc(d.key)}"></div></div>
+      <summary>${CARET}<h2>${esc(d.title || d.key)}</h2>${revTag(d.key)}${kind}${why ? `<span class="why ${why[0]}" data-why="${why[0]}" data-tip="${esc(why[2])}">${esc(why[1])}</span>` : ""}${mx ? '<span class="hint mxsum">its targets table is the target matrix above</span>' : ""}${file}<span class="end">${size}${note ? '<i class="notedot" data-tip="You left a note on this document"></i>' : ""}<span class="seg" id="seg-${esc(d.key)}" role="group" aria-label="Show the document as" hidden><button type="button" data-mode="view" data-key="${esc(d.key)}" data-tip="A view made for this kind of document">View</button><button type="button" data-mode="text" data-key="${esc(d.key)}" data-tip="The document as written">Text</button><button type="button" data-mode="diagram" data-key="${esc(d.key)}" data-tip="The structure of this document drawn as a diagram" hidden>Diagram</button></span><button type="button" class="notebtn" data-key="${esc(d.key)}" aria-controls="nb-${esc(d.key)}" aria-pressed="${showNote ? "true" : "false"}">${note ? "Your note" : "Add a note"}</button>${aw ? "" : rdot(d.key)}</span></summary>
+      <div class="body">${mx ? '<p class="mxnote">The targets table of this file is the <a href="#" data-mxgo="1">target matrix</a> above, drawn once; the rest of the file is here as written.</p>' : ""}<div class="notebox" id="nb-${esc(d.key)}"${showNote ? "" : " hidden"}><label for="nt-${esc(d.key)}"><b>Note to Claude</b><span>on this document; it goes with your answer in chat</span><span class="stat" id="ns-${esc(d.key)}" aria-live="polite"></span></label><textarea id="nt-${esc(d.key)}" rows="2" placeholder="Something to change, check or keep in mind"></textarea></div><div id="db-${esc(d.key)}"></div></div>
     </details>`;
   }
   function fillDoc(d, i) {
+    d = shownDoc(d);
     const body = $("db-" + d.key); const ta = $("nt-" + d.key);
     ta.value = view.notes[d.key] || "";
     const st = view.noteStat[d.key]; if (st) setNoteStat(d.key, st[0], st[1]);
@@ -2936,21 +3110,35 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
       seg.querySelector('[data-mode="view"]').hidden = !vf;
       seg.querySelector('[data-mode="diagram"]').hidden = !dgs.length;
     }
-    if (mode === "diagram") { setSeg(d.key, "diagram"); body.appendChild(diagramsView(d, dgs)); return; }
-    if (vf && mode === "view") {
+    /* Diagram shows the diagrams, and the record's own view or text is still built under them, hidden: its read marks and totals
+       do not depend on which way the record is shown. */
+    const dia = mode === "diagram"; let host = body;
+    if (dia) { setSeg(d.key, "diagram"); body.appendChild(diagramsView(d, dgs)); host = document.createElement("div"); host.className = "vzunder"; host.hidden = true; body.appendChild(host); }
+    if (vf && (mode === "view" || dia)) {
       let built = null;
       try { built = vf.render(d, i); } catch (e) { built = null; console.warn("view failed", d.key, e); }
       if (built) {
         markElements(built, d);
-        setSeg(d.key, "view");
-        body.appendChild(built);
-        fileOutline(body, d);
+        if (!dia) setSeg(d.key, "view");
+        host.appendChild(built);
+        if (!dia) fileOutline(host, d);
         return;
       }
     }
-    if (vf || dgs.length) setSeg(d.key, "text");
-    fillText(body, d, i);
-    fileOutline(body, d);
+    if (!dia && (vf || dgs.length)) setSeg(d.key, "text");
+    fillText(host, d, i);
+    if (!dia) fileOutline(host, d);
+  }
+  /* a re-draw the person asked for (Text, View, Diagram, Changes, Clean) keeps every block and section as it was and the control under their pointer where it was */
+  function holdPlace(node) {
+    view.keepOpen = true;
+    const at = node && node.getBoundingClientRect ? node : null;
+    view.hold = at ? { id: at.id || "", sel: at.dataset.mode ? `.seg button[data-mode="${at.dataset.mode}"][data-key="${CSS.escape(at.dataset.key || "")}"]` : "", top: at.getBoundingClientRect().top } : null;
+  }
+  function restorePlace() {
+    const h = view.hold; view.hold = null; if (!h) return;
+    const n = h.id ? $(h.id) : (h.sel ? el.col.querySelector(h.sel) : null);
+    if (n) { const d = n.getBoundingClientRect().top - h.top; if (d) window.scrollBy(0, d); }
   }
   /* A long file gets its headings as a list: a sticky one beside it on wide screens, a collapsible strip on narrow ones. */
   function fileOutline(body, d) {
@@ -2991,7 +3179,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
   /* where a mark of a diagram goes: the id's own row; else the text it names, found in the document's text or view */
   function vzLeave(docKey) {
     const d = docList().find((x) => x.key === docKey); if (!d || modeOf(d) !== "diagram") return false;
-    view.mode[docKey] = (viewFor(d) && !(d.covered && ev())) ? "view" : "text"; view.painted = ""; paintAll(); return true;
+    view.mode[docKey] = (viewFor(d) && !(d.covered && ev())) ? "view" : "text"; view.keepOpen = true; view.painted = ""; paintAll(); return true;
   }
   function vzGoId(id, docKey) {
     const find = () => { const hit = view.refs.get(String(id).toUpperCase()); return (hit && hit.element) || idTarget(id); };
@@ -3095,7 +3283,11 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
       const blk = v.element.closest(".block"); const d = blk && docs.find((x) => "d-" + x.key === blk.id);
       out[id] = { title: String(v.title || "").replace(/\s+/g, " ").replace(new RegExp("^" + reEsc(id) + "\\b[\\s:.—–-]*"), "").slice(0, 200), doc: d && d.path ? d.path : "" };
     });
-    return Object.assign(out, (view.gate && view.gate.ids) || {});
+    Object.assign(out, (view.gate && view.gate.ids) || {});
+    /* a tooltip says what the id is, never the markdown table the definition was read from */
+    const plainTip = (s) => { s = String(s == null ? "" : s); const m = s.match(/\s*\|[^|\n]*\|/); return m && /\|\s*:?-{2,}/.test(s) ? "" : s; };
+    Object.keys(out).forEach((k) => { const v = out[k]; if (v && typeof v === "object") out[k] = Object.assign({}, v, v.title != null ? { title: plainTip(v.title) } : {}, v.text != null ? { text: plainTip(v.text) } : {}); });
+    return out;
   }
   const idTarget = (id) => { const css = window.CSS && CSS.escape ? CSS.escape(id) : id; return el.col.querySelector(`[data-aidlc-id="${css}"]`); };
   function registerMdRefs(root) {
@@ -4448,7 +4640,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     el.col.querySelectorAll("details.tm-fold").forEach((d) => { d.open = foldWanted(); });
     el.col.querySelectorAll("details.block.doc[data-matrixdoc]").forEach((b) => { b.open = false; });  /* its targets table is the matrix above; the file opens on request */
     const rec = $("b-records"); if (rec) rec.open = recordsOpen();  /* Records stays folded while there is anything else to read */
-    if (dg() || ev()) el.col.querySelectorAll("details.block.doc").forEach((b) => { b.open = false; });  /* the digest or the evaluation leads; the documents wait below */
+    if ((dg() || ev()) && !recordsAreContent()) el.col.querySelectorAll("details.block.doc").forEach((b) => { b.open = false; });  /* the digest or the evaluation leads; the documents wait below */
     if (ev()) {
       const sum = $("b-summary"); if (sum) sum.open = false;
       el.col.querySelectorAll("details.crow").forEach((d) => { d.open = false; });
@@ -4467,14 +4659,15 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     el.rail.querySelectorAll("details.rgroup").forEach((g) => { g.open = on; view.railOpen[g.dataset.key] = on; });
   }
   function onChromeClick(e) {
-    const t = e.target.closest("[data-filter], [data-all], [data-allread], [data-outline], [data-go], [data-retry], [data-rvview], [data-rvstep], [data-rdy]"); if (!t) return;
+    const t = e.target.closest("[data-filter], [data-all], [data-allread], [data-outline], [data-go], [data-retry], [data-rvview], [data-rvstep], [data-rdy], [data-menu]"); if (!t) return;
     e.preventDefault();
+    if (t.dataset.menu) { setMenu(t.dataset.menu); return; }
     if (t.dataset.rdy) { if (t.dataset.rdy === "a") toAnswer(); else navTo(t.dataset.rdy); return; }
     if (t.dataset.rvview) { RevDiff.setPref(t.dataset.rvview); view.rvAt = -1; view.painted = ""; paintAll(); const b = el.bar.querySelector(`[data-rvview="${t.dataset.rvview}"]`); if (b) b.focus(); return; }
     if (t.dataset.rvstep) { rvStep(+t.dataset.rvstep); return; }
-    if (t.dataset.filter) { view.filter = t.dataset.filter; view.needsKeep = new Set(needs().map((n) => n.key)); paintChrome(docList()); }
-    else if (t.dataset.all) expandAll(t.dataset.all === "open");
-    else if (t.dataset.allread) { readAndFold(blocksOf(docList()).map((b) => b.key), true); setRead(Object.keys(view.hashes), true); paintItems(); }
+    if (t.dataset.filter) { view.filter = t.dataset.filter; view.needsKeep = new Set(needs().map((n) => n.key)); if (view.filter === "changed") { const r = $("b-records"); if (r) r.open = true; } paintChrome(docList()); }
+    else if (t.dataset.all) { expandAll(t.dataset.all === "open"); setMenu(""); }
+    else if (t.dataset.allread) { setMenu(""); readAndFold(blocksOf(docList()).map((b) => b.key), true); setRead(Object.keys(view.hashes), true); paintItems(); }
     else if (t.dataset.outline) { el.rail.classList.toggle("show"); t.setAttribute("aria-expanded", String(el.rail.classList.contains("show"))); if (el.rail.classList.contains("show")) el.rail.scrollIntoView({ block: "nearest" }); }
     else if (t.dataset.retry) { view.unsaved = true; view.failed = false; flushNotes(); }
     else if (t.dataset.go) go(t.dataset.go, t);
@@ -4484,8 +4677,9 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
   el.col.addEventListener("click", (e) => {
     const rd = e.target.closest(".rdot");
     if (rd) { e.preventDefault(); e.stopPropagation(); readAndFold([rd.dataset.read], !isRead(rd.dataset.read)); return; }
+    const ak = e.target.closest("[data-ack]"); if (ak) { e.preventDefault(); e.stopPropagation(); setAck(ak.dataset.ack, true); return; }
     const sb = e.target.closest(".seg button");
-    if (sb && sb.dataset.mode) { e.preventDefault(); e.stopPropagation(); view.mode[sb.dataset.key] = sb.dataset.mode; saveMode(sb.dataset.key, sb.dataset.mode); view.painted = ""; paintAll(); return; }
+    if (sb && sb.dataset.mode) { e.preventDefault(); e.stopPropagation(); holdPlace(sb); view.mode[sb.dataset.key] = sb.dataset.mode; saveMode(sb.dataset.key, sb.dataset.mode); view.painted = ""; paintAll(); const again = el.col.querySelector(`.seg button[data-mode="${sb.dataset.mode}"][data-key="${CSS.escape(sb.dataset.key)}"]`); if (again) again.focus({ preventScroll: true }); return; }
     const nb = e.target.closest(".notebtn[data-key]");
     if (nb) {
       e.preventDefault(); e.stopPropagation();
@@ -4535,7 +4729,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
       view.hashes[key] = hash(norm(n.textContent) + (det ? "\n" + norm(det.textContent) : "")); keys.push(key);
       n.dataset.ekey = key; if (det) det.dataset.ekeyOf = key;
       const dot = document.createElement("button"); dot.type = "button"; dot.className = "idot edot"; dot.dataset.eread = key;
-      dot.innerHTML = '<i aria-hidden="true"></i>'; dot.dataset.id = id;
+      dot.innerHTML = '<i aria-hidden="true"></i>'; dot.dataset.id = id; dot.dataset.name = readName(n, id);
       dot.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); toggleElem(key, dot); });
       if (n.matches("tr")) {
         const td = document.createElement("td"); td.className = "edotc"; td.appendChild(dot); n.appendChild(td);
@@ -4572,7 +4766,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
       const det = n.matches("tr.rrow") ? n.nextElementSibling : n.matches("tr.frow") ? n.parentElement.querySelector(`tr.fdet[data-for="${n.dataset.i}"]`) : null;
       if (det && det.dataset.ekeyOf === key) det.classList.toggle("eh", hide);
       const dot = n.querySelector("[data-eread]");
-      if (dot) { const lab = (r ? "Mark unread: " : "Mark read: ") + (dot.dataset.id || ""); dot.classList.toggle("isread", r); dot.setAttribute("aria-label", lab); dot.dataset.tip = r ? "Read. Press to mark unread" : "Mark as read"; }
+      if (dot) { const lab = (r ? "Mark unread: " : "Mark read: ") + (dot.dataset.name || cleanId(dot.dataset.id) || ""); dot.classList.toggle("isread", r); dot.setAttribute("aria-label", lab); dot.dataset.tip = r ? "Read. Press to mark unread" : "Mark as read"; }
     });
     const allRead = (root) => { const its = root.querySelectorAll("[data-ekey]"); return its.length > 0 && [...its].every((n) => isRead(n.dataset.ekey)); };
     el.col.querySelectorAll("details.sec, .tablewrap").forEach((c) => { c.classList.toggle("eh", unread && !c.matches("[data-ekey]") && allRead(c)); });
@@ -4634,6 +4828,28 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     return hits.length === 1 ? hits[0] : null;
   }
   const MATRIX_HEAD = /^\s*\|[^\n]*\bverdict\b[^\n]*\|[ \t]*\n\s*\|[\s:|-]+\|/im;
+  /* A record whose targets table became the matrix draws its other sections only: the table is cut out of the text it shows. */
+  function stripMatrixTable(text) {
+    let lines = String(text || "").split("\n"), noted = false;
+    for (;;) {  /* every targets table of the file (one per Unit, say), not only the first */
+      const at = lines.findIndex((l, i) => /^\s*\|/.test(l) && /\bverdict\b/i.test(l) && /\btarget( id)?\b/i.test(l) && /^\s*\|[\s:|-]+\|/.test(lines[i + 1] || ""));
+      if (at < 0) break;
+      let end = at; while (end < lines.length && /^\s*\|/.test(lines[end])) end++;
+      lines = lines.slice(0, at).concat(noted ? [] : ["*The targets table of this file is the target matrix above.*"], lines.slice(end)); noted = true;
+    }
+    return lines.join("\n");
+  }
+  const shownDoc = (d) => isMatrixDoc(d) ? Object.assign({}, d, { text: stripMatrixTable(d.text) }) : d;
+  /* a target named in the first cell of another record's table links to its row in the matrix */
+  function linkTargets(root) {
+    const B = bt(); if (!B || !(B.targets || []).length) return;
+    root.querySelectorAll(".block.doc:not([data-matrixdoc]) table td:first-child, .block.doc:not([data-matrixdoc]) table th[scope=row]").forEach((c) => {
+      if (c.querySelector("a") || c.closest(".rv-removed, .rv-gone")) return;
+      const say = c.textContent.trim(); if (!/^[\w-]+:?[\w.-]*$/.test(say)) return;
+      const hit = B.targets.filter((t) => t.id === say || (t.unit ? t.unit + ":" : "") + t.id === say); if (hit.length !== 1) return;
+      c.innerHTML = `<a class="xref" href="#" data-aidlc-noids data-tgo="${esc(tkey(hit[0]))}" data-tip="${esc("This target is one row of the target matrix; press to go to it")}">${esc(c.textContent.trim())}</a>`;
+    });
+  }
   const isMatrixDoc = (d) => !!(bt() && (bt().targets || []).length && MATRIX_HEAD.test(String(d.text || "")) && /\btarget( id)?\b/i.test((String(d.text).match(MATRIX_HEAD) || [""])[0]));
   function btMatrixBlock(B) {
     const open = openTargets(B).length;
@@ -4672,7 +4888,8 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const top = rows.filter(isOpenT), rest = rows.filter((t) => !isOpenT(t));
     const names = ["Met", "N/A"].filter((v) => rest.some((t) => t.verdict === v)).concat(rest.some((t) => ["Met", "N/A"].indexOf(t.verdict) < 0) ? ["Other"] : []);
     const foldOpen = foldWanted();
-    tm.innerHTML = `<div class="tm-head" role="row"><div role="columnheader">Target</div><div role="columnheader">Verdict</div><div role="columnheader">Expected</div><div role="columnheader">Actual</div><div role="columnheader">Evidence</div><div role="columnheader"></div></div>` +
+    const filtered = !!(f.v.size || f.u.size || f.grp || q);
+    tm.innerHTML = (filtered ? `<div class="tm-showing" role="status"><span>Showing ${rows.length} of ${all.length} targets</span><button type="button" data-btclear="1" data-tip="Show every target again">Clear filters</button></div>` : "") + `<div class="tm-head" role="row"><div role="columnheader">Target</div><div role="columnheader">Verdict</div><div role="columnheader">Expected</div><div role="columnheader">Actual</div><div role="columnheader">Evidence</div><div role="columnheader"></div></div>` +
       top.map((t) => tmRow(t, B, f)).join("") +
       (rest.length ? `<details class="tm-fold"${foldOpen ? " open" : ""}><summary>${CARET}${esc(names.join(" and "))}<span class="n">${rest.length}</span></summary>${rest.map((t) => tmRow(t, B, f)).join("")}</details>` : "") +
       (rows.length ? "" : '<div class="tm-none">No target matches. Clear a filter or the search.</div>');
@@ -4693,6 +4910,10 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     ts.forEach((t) => { const k = by(t) + "\u0001" + (t.unit || "—"), c = cells[k] || (cells[k] = { n: 0, worst: t.verdict }); c.n++; if ((VRANK[t.verdict] ?? 4) < (VRANK[c.worst] ?? 4)) c.worst = t.verdict; });
     return { cols, rows, cells, by };
   }
+  el.col.addEventListener("click", (e) => {
+    const c = e.target.closest("[data-btclear]"); if (!c) return;
+    e.preventDefault(); const f = view.bt; f.v = new Set(); f.u = new Set(); f.grp = ""; f.heat = ""; f.q = ""; const q = $("bt-q"); if (q) q.value = ""; btRepaint();
+  });
   const foldWanted = () => view.bt.fold || !!view.bt.heat || !!view.bt.q.trim() || [...view.bt.v].some((v) => !isOpenT({ verdict: v }));
   /* the rows are drawn again: their round marks come back with them */
   function btRepaint() {
@@ -4707,7 +4928,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
   }
   /* open the matrix on a target, folding it out if it is Met or N/A, and land on its row */
   function jumpTarget(id) {
-    const B = bt(); const t = B && (B.targets || []).find((x) => x.id === id); if (!t) return;
+    const B = bt(); const t = B && (B.targets || []).find((x) => tkey(x) === id || x.id === id); if (!t) return;
     const b = $("b-bt-matrix"); if (b) b.open = true;
     const f = view.bt; f.v = new Set(); f.u = new Set(); f.q = ""; f.grp = ""; f.heat = ""; const q = $("bt-q"); if (q) q.value = "";
     if (!isOpenT(t)) f.fold = true;
@@ -4832,10 +5053,21 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
 
   /* ---------- At a glance: the stage item by item (gate_bundle.py writes `digest`; scripts/digest.py) ---------- */
   const dg = () => (view.gate && view.gate.digest && ((view.gate.digest.items || []).length || (view.gate.digest.trace || []).length)) ? view.gate.digest : null;
-  const KIND_NAMES = { requirement: ["Requirements", "requirement"], nfr: ["Non-functional requirements", "NFR"], rule: ["Business rules", "rule"], decision: ["Decisions", "decision"], story: ["Stories", "story"] };
-  const KIND_ORDER = ["requirement", "nfr", "rule", "decision", "story"];
+  const KIND_NAMES = { requirement: ["Requirements", "requirement", "requirements"], nfr: ["Non-functional requirements", "NFR", "NFRs"], rule: ["Business rules", "rule", "rules"], decision: ["Decisions", "decision", "decisions"], story: ["Stories", "story", "stories"],
+    unit: ["Units", "Unit", "Units"], component: ["Components", "component", "components"] };
+  const KIND_ORDER = ["requirement", "nfr", "rule", "decision", "story", "unit", "component"];
+  const kindName = (k, n) => n === 1 ? KIND_NAMES[k][1] : KIND_NAMES[k][2];  /* the right plural: stories, not storys */
   const itemKeys = () => Object.keys(view.hashes).filter((k) => k.startsWith("item:") || k.startsWith("finding:"));
   const itemProgress = () => { const keys = itemKeys(); return { total: keys.length, read: keys.filter((k) => isRead(k)).length }; };
+  /* what a read dot marks, in words: the id and the title or first words of the thing, never its internal key */
+  function readName(n, fallback) {
+    const q = (s) => n.querySelector(s), tx = (x) => plainTitle(x ? x.textContent : "");
+    let t;
+    if (n.matches("tr")) t = [...n.cells].slice(0, 2).map((c) => tx(c)).filter(Boolean).join(" ");
+    else { const id = tx(q(".iid, .tm-id")), body = tx(q(".ctitle, .isum, .pt1, h1, h2, h3, h4, b, .decides, p, summary")); t = (id && body && !body.startsWith(id) ? id + " " : "") + (body || id); }
+    t = (t || "").trim();
+    return (t || cleanId(fallback) || "this").slice(0, 80);
+  }
   const idot = (key, label) => `<button type="button" class="idot" data-iread="${esc(key)}" aria-label="${esc((isRead(key) ? "Mark unread: " : "Mark read: ") + label)}" data-tip="${isRead(key) ? "Read. Press to mark unread" : "Mark as read"}"><i aria-hidden="true"></i></button>`;
   const share = (it) => it.coveredBy && it.coveredBy.link ? "ok" : it.coveredBy && it.coveredBy.acceptanceReason ? "acc" : it.settled ? "old" : "new";
   const SHARE_NAMES = { ok: "Covered, linked", acc: "Accepted, with a reason", new: "New in this stage", old: "Settled earlier" };
@@ -4861,7 +5093,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const kinds = KIND_ORDER.filter((k) => D.items.some((i) => i.kind === k)); if (!kinds.length) return "";
     const rows = kinds.map((k) => {
       const its = D.items.filter((i) => i.kind === k); const by = { ok: 0, acc: 0, new: 0, old: 0 }; its.forEach((i) => { by[share(i)]++; });
-      const segs = ["ok", "acc", "new", "old"].filter((s) => by[s]).map((s) => `<i class="${s}" style="flex:${by[s]} 1 0" data-tip="${esc(by[s] + " " + KIND_NAMES[k][1] + (by[s] === 1 ? "" : "s") + ": " + SHARE_NAMES[s].toLowerCase())}"></i>`).join("");
+      const segs = ["ok", "acc", "new", "old"].filter((s) => by[s]).map((s) => `<i class="${s}" style="flex:${by[s]} 1 0" data-tip="${esc(by[s] + " " + kindName(k, by[s]) + ": " + SHARE_NAMES[s].toLowerCase())}"></i>`).join("");
       return `<span class="k">${esc(KIND_NAMES[k][0])}</span><div class="sbar" role="img" aria-label="${esc(KIND_NAMES[k][0] + ": " + ["ok", "acc", "new", "old"].filter((s) => by[s]).map((s) => by[s] + " " + SHARE_NAMES[s].toLowerCase()).join(", "))}">${segs}</div><span class="n">${its.length}</span>`;
     }).join("");
     const used = ["ok", "acc", "new", "old"].filter((s) => D.items.some((i) => share(i) === s));
@@ -4938,9 +5170,20 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     if (it) return `<button type="button" class="src mono" data-src="i:${esc(it.key)}" data-tip="${esc(it.summary || it.title)}">${esc(ref)}</button>`;
     return `<button type="button" class="src mono" data-src="f:${esc(ref)}" data-tip="A review finding on this page">${esc(ref)}</button>`;
   }
+  const KIND_LABEL_EV = { risks: "Risk", gaps: "Gap", conflicts: "Conflict", solid: "Solid" };
   const srcs = (p) => (p.sources || []).length ? `<div class="srcs"><span>From</span>${p.sources.map(srcChip).join("")}</div>` : "";
   function pointList(points, kind) {
-    return `<ul class="pts">${points.map((p) => `<li class="pt">${kind === "risks" && LABEL[p.severity] ? `<span class="tag" ${toneOf(LABEL[p.severity][1])} data-tip="${esc(LABEL[p.severity][2])}">${esc(LABEL[p.severity][0])}</span>` : ""}<p>${inline(p.text)}</p>${srcs(p)}</li>`).join("")}</ul>`;
+    return `<ul class="pts">${points.map((p) => `<li class="pt${isRead(evKey(kind, p)) ? " read" : ""}" data-item="${esc(evKey(kind, p))}">${evDot(kind, p, KIND_LABEL_EV[kind] || kind)}${kind === "risks" && LABEL[p.severity] ? `<span class="tag" ${toneOf(LABEL[p.severity][1])} data-tip="${esc(LABEL[p.severity][2])}">${esc(LABEL[p.severity][0])}</span>` : ""}<p>${inline(p.text)}</p>${srcs(p)}</li>`).join("")}</ul>`;
+  }
+  /* what a criterion says beyond its title: the title is not said again under it */
+  function critText(c) {
+    const t = String(c.text || "").trim(); if (!t) return "";
+    const ti = plainTitle(c.title).replace(/[:.]$/, ""), lines = t.split("\n"), first = plainTitle(lines[0]).replace(/[:.]$/, "");
+    let rest = t;
+    if (first && first === ti) rest = lines.slice(1).join("\n").trim();
+    else if (first && ti && first.startsWith(ti)) rest = [first.slice(ti.length).replace(/^[\s:.—–-]+/, "")].concat(lines.slice(1)).join("\n").trim();
+    const p = plainTitle(rest);
+    return !p || p === ti || p === plainTitle(c.note || "") ? "" : rest;
   }
   function criteriaHtml(C) {
     if (!C.length) return "";
@@ -4952,26 +5195,31 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
       return `<span class="k">${esc(ORIGIN[o][0])}</span><div class="sbar" role="img" aria-label="${esc(ORIGIN[o][0] + ": " + said)}">${Object.keys(n).filter((v) => n[v]).map((v) => `<i class="cv-${v === "n/a" ? "na" : v}" style="flex:${n[v]} 1 0" data-tip="${esc(n[v] + " " + CVERDICT[v][0].toLowerCase())}"></i>`).join("")}</div><span class="n">${n.fails ? `<b class="bad">${n.fails} fail${n.fails === 1 ? "s" : ""}</b> · ` : ""}${its.length}</span>`;
     }).join("");
     const groups = Object.keys(ORIGIN).filter((o) => by(o).length).map((o) => `<details class="cgroup" data-origin="${o}"${view.iopen.has("cg:" + o) || by(o).some((c) => c.verdict === "fails") ? " open" : ""}><summary>${esc(ORIGIN[o][0])} <span class="hint">${esc(ORIGIN[o][2])} · ${by(o).length}</span></summary>` +
-      by(o).sort((a, b) => (a.verdict === "fails" ? 0 : a.verdict === "holds" ? 1 : 2) - (b.verdict === "fails" ? 0 : b.verdict === "holds" ? 1 : 2)).map((c) => `<details class="crow${isRead("crit:" + c.key) ? " read" : ""}" id="crit-${esc(c.key)}" data-item="crit:${esc(c.key)}"><summary><span class="tag" ${toneOf(CVERDICT[c.verdict] ? CVERDICT[c.verdict][1] : "low")}>${esc(CVERDICT[c.verdict] ? CVERDICT[c.verdict][0] : "?")}</span><span class="ctitle">${inline(c.title)}</span>${idot("crit:" + c.key, c.key)}</summary><div class="cbody">${c.note ? `<p class="cnote"><b>Claude:</b> ${inline(c.note)}</p>` : ""}${c.text && c.text !== c.title ? `<div class="md" data-md="${esc(c.text)}"></div>` : ""}<span class="mono hint">${esc(String(c.source || "").replace(/^path:/, "").replace(/#L\d+.*$/, ""))}</span></div></details>`).join("") + `</details>`).join("");
-    return `<section class="esec"><h3>Rules checked<span class="hint">${C.length} criteria from the stage's definition, its reviewer, the project's rules and earlier stages${fails ? ` · <b class="bad">${fails} fail</b>` : ""}</span></h3><div class="cov2 ctally">${bars}</div>` +
-      `<div class="lg"><span><i class="cv-holds"></i>Holds</span><span><i class="cv-fails"></i>Fails</span><span><i class="cv-na"></i>Not relevant here</span></div>${groups}</section>`;
+      by(o).sort((a, b) => (a.verdict === "fails" ? 0 : a.verdict === "holds" ? 1 : 2) - (b.verdict === "fails" ? 0 : b.verdict === "holds" ? 1 : 2)).map((c) => `<details class="crow${isRead("crit:" + c.key) ? " read" : ""}" id="crit-${esc(c.key)}" data-item="crit:${esc(c.key)}"><summary><span class="tag" ${toneOf(CVERDICT[c.verdict] ? CVERDICT[c.verdict][1] : "low")}>${esc(CVERDICT[c.verdict] ? CVERDICT[c.verdict][0] : "?")}</span><span class="ctitle">${inline(c.title)}</span>${idot("crit:" + c.key, c.key)}</summary><div class="cbody">${c.note ? `<p class="cnote"><b>Claude:</b> ${inline(c.note)}</p>` : ""}${critText(c) ? `<div class="md" data-md="${esc(critText(c))}"></div>` : ""}<span class="mono hint">${esc(String(c.source || "").replace(/^path:/, "").replace(/#L\d+.*$/, ""))}</span></div></details>`).join("") + `</details>`).join("");
+    return `<section class="esec"><h3>Rules checked<span class="hint">${C.length} criteria from the stage's definition, its reviewer, the project's rules and earlier stages${fails ? ` · <b class="bad">${fails} fail</b>` : ""}</span></h3>${groups}</section>`;
   }
   /* one dot per criterion, grouped as the criteria are; a dot opens its criterion */
   function criteriaDots(C) {
     return GateViz.dots(Object.keys(ORIGIN).filter((o) => C.some((c) => c.origin === o)).map((o) => ({ name: ORIGIN[o][0], items: C.filter((c) => c.origin === o).map((c) => ({
       key: c.key, v: c.verdict in CVERDICT ? c.verdict : "unjudged", title: plainTitle(c.title), label: CVERDICT[c.verdict] ? CVERDICT[c.verdict][0] : "Not judged" })) })));
   }
-  function evalBlock(E) {
+  /* the cards of the evaluation: what to look at first and every risk, gap, conflict and solid point. The key is the card's own text, so a reworded card is unread again. */
+  const EV_KINDS = [["lf", "lookFirst", "Look at first"], ["risks", "risks", "Risk"], ["gaps", "gaps", "Gap"], ["conflicts", "conflicts", "Conflict"], ["solid", "solid", "Solid"]];
+  const evKey = (kind, p) => "evc:" + kind + ":" + hash(JSON.stringify([p.text, p.severity || "", p.why || ""]));
+  const evCards = (E) => EV_KINDS.flatMap(([kind, field]) => (E[field] || []).map((p) => ({ key: evKey(kind, p), kind, p })));
+  const evDot = (kind, p, name) => idot(evKey(kind, p), name + ": " + plainTitle(p.text).slice(0, 60));
+  function evalBlock(E, traceOnly) {
     const v = VERDICT[E.verdict] || ["Evaluated", "quiet", ""];
     const C = (view.gate && view.gate.criteria) || [];
     const cols = [["risks", "Risks", "What could go wrong if this is approved as it is"], ["gaps", "Gaps", "What the stage should say and does not"],
       ["conflicts", "Conflicts", "Where it disagrees with an earlier stage or a project rule"], ["solid", "Solid", "What holds and needs no second look"]]
       .filter(([k]) => (E[k] || []).length).map(([k, t, tip]) => `<section class="ecol k-${k}"><h3 data-tip="${esc(tip)}">${t}<span class="n">${E[k].length}</span></h3>${pointList(E[k], k)}</section>`).join("");
     const noConflict = !(E.conflicts || []).length && C.some((c) => c.origin === "rule" || c.origin === "earlier") ? `<p class="hint none">No conflict found with the project's rules or earlier stages.</p>` : "";
-    return `<details class="block evalb" open id="b-eval" data-block="evaluation"><summary>${CARET}<h2>Claude's evaluation</h2><span class="pill ${v[1]}" data-tip="${esc(v[2])}">${esc(v[0])}</span><span class="end">${rdot("evaluation")}</span></summary>` +
-      `<div class="body">${criteriaDots(C)}<div class="etext${isRead("eval:text") ? " read" : ""}" data-item="eval:text">${idot("eval:text", "the evaluation")}<p class="decides">${inline(E.decides || "")}</p>` +
-      ((E.lookFirst || []).length ? `<section class="esec lf"><h3>Look at first</h3><ol class="lfl">${E.lookFirst.map((p) => `<li><p class="pt1">${inline(p.text)}</p>${p.why ? `<p class="why"><b>Why first</b>${inline(p.why)}</p>` : ""}${srcs(p)}</li>`).join("")}</ol></section>` : "") +
-      (cols ? `<div class="egrid">${cols}</div>` : "") + noConflict + `</div>` + criteriaHtml(C) + `</div></details>`;
+    return `<details class="block evalb" open id="b-eval" data-block="evaluation"><summary>${CARET}<h2>Claude's evaluation</h2><span class="pill ${v[1]}" data-tip="${esc(v[2])}">${esc(v[0])}</span><span class="tag" id="lf-count" ${toneOf("warn")} hidden></span><span class="end">${rdot("evaluation")}</span></summary>` +
+      `<div class="body">${criteriaDots(C)}<div class="etext${isRead("eval:text") ? " read" : ""}" data-item="eval:text">${idot("eval:text", "the evaluation")}<p class="decides">${inline(E.decides || "")}</p></div>` +
+      ((E.lookFirst || []).length ? `<section class="esec lf"><h3>Look at first</h3><ol class="lfl">${E.lookFirst.map((p) => `<li class="${isRead(evKey("lf", p)) ? "read" : ""}" data-item="${esc(evKey("lf", p))}">${evDot("lf", p, "Look at first")}<p class="pt1">${inline(p.text)}</p>${p.why ? `<p class="why"><b>Why first</b>${inline(p.why)}</p>` : ""}${srcs(p)}</li>`).join("")}</ol></section>` : "") +
+      (cols ? `<div class="egrid">${cols}</div>` : "") + noConflict + criteriaHtml(C) +
+      (traceOnly && (traceOnly.trace || []).length ? `<details class="settled" data-settled="trace"${view.iopen.has("settled:trace") ? " open" : ""}><summary>Traceability: ${traceOnly.trace.filter((t) => t.ok).length} of ${traceOnly.trace.length} covered</summary>${traceHtml(traceOnly)}</details>` : "") + `</div></details>`;
   }
   function asWritten(it) {
     if (!it.body) return "";
@@ -4994,12 +5242,16 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const tg = targetOfItem(it); if (tg) return targetItemRow(it, tg);
     const key = "item:" + it.key, read = isRead(key), open = view.iopen.has(it.key);
     const doc = docs.find((d) => d.key === it.doc); const L = LABEL[it.label];
-    const rel = (it.relates || it.mentions || []).length ? `<div class="rel"><span>Relates to</span>${(it.relates || it.mentions).map((m) => `<span class="chip">${esc(m)}</span>`).join("")}</div>` : "";
+    /* said once: an id the opened text already shows (a story's own criteria) is not listed again as "Relates to" */
+    const shown = (m) => new RegExp("(^|[^\\w.-])" + String(m).replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "($|[^\\w-])").test(String(it.body || ""));
+    const relIds = (it.relates || it.mentions || []).filter((m) => !shown(m));
+    const rel = relIds.length ? `<div class="rel"><span>Relates to</span>${relIds.map((m) => `<span class="chip">${esc(m)}</span>`).join("")}</div>` : "";
+    const sameAsSum = rvNorm(it.summary || "").toLowerCase().includes(rvNorm(it.title || "").toLowerCase());
     return `<div class="irow j${read ? " read" : ""}${it.lookFirst ? " lf" : ""}" id="item-${esc(it.key)}" data-item="${esc(key)}" data-aidlc-id="${esc(it.id)}"><div class="ih">` +
       `<button type="button" class="ix" data-iopen="${esc(it.key)}" aria-expanded="${open}" aria-label="${esc((open ? "Hide " : "Show ") + it.id + " as written")}">${CHEV}</button>` +
-      `<div class="imain"><div class="imeta"><span class="iid">${esc(it.id)}</span><span class="kind">${esc(KIND_SHORT[it.kind] || it.kind)}</span>${L ? `<span class="tag" ${toneOf(L[1])} data-tip="${esc(L[2])}">${esc(L[0])}</span>` : ""}${it.unchanged ? '<span class="tag" data-tip="Its text is the same as in the last round">unchanged</span>' : ""}${handledChip(it)}</div>` +
+      `<div class="imain"><div class="imeta"><span class="iid">${esc(it.id)}</span><span class="kind">${esc(KIND_SHORT[it.kind] || it.kind)}</span>${L ? `<span class="tag" ${toneOf(L[1])} data-tip="${esc(L[2])}">${esc(L[0])}</span>` : ""}${handledChip(it)}</div>` +
       `<button type="button" class="isum" data-iopen="${esc(it.key)}">${inline(it.summary || it.title)}</button></div>${idot(key, it.id)}</div>` + reasonHtml(it) +
-      (open ? `<div class="ib aw-wrap"><p class="awt"><b>As written</b>${inline(it.title)}</p>${asWritten(it)}${rel}${doc ? `<a class="jump" href="#" data-go="d-${esc(doc.key)}">in ${esc(doc.path ? doc.path.split("/").pop() : doc.title)}</a>` : ""}</div>` : "") + "</div>";
+      (open ? `<div class="ib aw-wrap"><p class="awt"><b>As written</b>${sameAsSum ? "" : inline(it.title)}</p>${asWritten(it)}${rel}${doc ? `<a class="jump" href="#" data-go="d-${esc(doc.key)}">in ${esc(doc.path ? doc.path.split("/").pop() : doc.title)}</a>` : ""}</div>` : "") + "</div>";
   }
   function itemsBlock(D) {
     const docs = docList(); const all = D.items;
@@ -5014,9 +5266,9 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
       .filter((t) => t[1].length).map(([t, its, hint]) => `<div class="dsec tier"><h3>${esc(t)}<span class="hint">${its.length}${hint ? " · " + esc(hint) : ""}</span></h3><div class="lane">${its.map((i) => itemRow2(i, docs)).join("")}</div></div>`).join("");
     const settled = all.filter((i) => i.settled && !i.coveredBy);
     const folded = (k, title, its) => its.length ? `<details class="settled" data-settled="${k}"${view.iopen.has("settled:" + k) ? " open" : ""}><summary>${esc(title)} (${its.length})</summary><div class="lane">${its.map((i) => k === "earlier" ? itemRow(i, docs) : itemRow2(i, docs)).join("")}</div></details>` : "";
-    const kinds = KIND_ORDER.filter((k) => judged.some((i) => i.kind === k)).map((k) => plural(judged.filter((i) => i.kind === k).length, KIND_NAMES[k][1])).join(", ");
+    const kinds = KIND_ORDER.filter((k) => judged.some((i) => i.kind === k)).map((k) => { const n = judged.filter((i) => i.kind === k).length; return n + " " + kindName(k, n); }).join(", ");
     const T = D.trace || [];
-    return `<details class="block items" open id="b-items" data-block="items"><summary>${CARET}<h2>What the stage says</h2><span class="hint wide">${esc(kinds)}; open one to read it as written</span><span class="end"><span class="pill quiet num" id="items-read"></span>${rdot("items")}</span></summary>` +
+    return `<details class="block items" open id="b-items" data-block="items"><summary>${CARET}<h2>What the stage says</h2><span class="hint wide">${kinds ? esc(kinds) + "; open one" : "Open one"} to read it as written</span><span class="end"><span class="pill quiet num" id="items-read"></span>${rdot("items")}</span></summary>` +
       `<div class="body" id="itemsbody">${tiers}${folded("unchanged", "Unchanged since the last round", fold)}${folded("earlier", "Settled in an earlier stage, quoted here", settled)}` +
       (T.length ? `<details class="settled" data-settled="trace"${view.iopen.has("settled:trace") ? " open" : ""}><summary>Traceability: ${T.filter((t) => t.ok).length} of ${T.length} covered</summary>${traceHtml(D)}</details>` : "") + `</div></details>`;
   }
@@ -5043,13 +5295,15 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const k = covered.has(d.key) ? "covered" : refs.includes(d) ? "reference" : isMatrixDoc(d) ? "matrix" : ev() ? "notcovered" : "doc";
     return [k, RWHY[k][1], RWHY[k][2]];
   }
-  const recordsOpen = () => { const g = view.gate; return !(ev() || dg() || fnd() || g.summary || g.brief || (bt() && (bt().targets || []).length)); };
+  /* a stage whose real content is its records (no items, findings, targets or review) opens them and says so */
+  const recordsAreContent = () => !((dg() || {}).items || []).length && !fnd() && !(bt() && (bt().targets || []).length) && !(view.gate && view.gate.brief);
+  const recordsOpen = () => { const g = view.gate; return recordsAreContent() || !(ev() || dg() || fnd() || g.summary || g.brief || (bt() && (bt().targets || []).length)); };
   function recordsBlock(docs) {
     const covered = new Set(coveredDocs().map((d) => d.key)), refs = refDocs(docs);
     const rank = { notcovered: 0, doc: 0, matrix: 1, reference: 2, covered: 3 };
     const rows = docs.map((d, i) => ({ d, i, why: whyOf(d, refs, covered) })).sort((a, b) => (rank[a.why[0]] - rank[b.why[0]]) || a.i - b.i);
     const unread = rows.filter((r) => r.why[0] !== "covered" && !r.d.pending && !isRead(r.d.key)).length;
-    return `<details class="block refgrp records" id="b-records" data-block="records"><summary>${CARET}<h2>Records</h2><span class="hint wide">the stage's files as written, for when you want the source</span><span class="end"><span class="pill quiet num" id="rec-count">${plural(docs.length, "file")}</span>${rdot("records")}</span></summary><div class="body">${rows.map((r) => docBlock(r.d, r.i, r.why[0] === "covered", r.why)).join("")}</div></details>`;
+    return `<details class="block refgrp records" id="b-records" data-block="records"><summary>${CARET}<h2>Records</h2><span class="hint wide">${recordsAreContent() ? "what this stage produced, as written" : "the stage's files as written, for when you want the source"}</span><span class="end">${docs.some((d) => view.changed[d.key]) ? `<span class="rv-tag chg" data-tip="${esc("Files changed or new since " + sinceLabel())}">${docs.filter((d) => view.changed[d.key]).length} changed</span>` : ""}<span class="pill quiet num" id="rec-count">${plural(docs.length, "file")}</span>${rdot("records")}</span></summary><div class="body">${rows.map((r) => docBlock(r.d, r.i, r.why[0] === "covered", r.why)).join("")}</div></details>`;
   }
 
   /* ---------- Your answer: what you picked and wrote, as it will reach Claude. Read-only; nothing here is stored ---------- */
@@ -5058,7 +5312,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const targets = B ? (B.targets || []).filter((t) => (view.picks[t.id] || {}).pick || ((view.picks[t.id] || {}).note || "").trim()) : [];
     if (targets.length) groups.push({ id: "targets", title: "Target picks", rows: targets.map((t) => { const p = view.picks[t.id], pk = PICKS.find((x) => x[0] === p.pick); return { key: tkey(t), id: t.id, state: pk ? pk[1] : "No pick", note: (p.note || "").trim() }; }) });
     const fs = F ? F.items.filter((f) => (view.fpicks[f.id] || {}).pick || ((view.fpicks[f.id] || {}).note || "").trim()) : [];
-    if (fs.length) groups.push({ id: "findings", title: "Finding sort", rows: fs.map((f) => { const p = view.fpicks[f.id], pk = FPICKS.find((x) => x[0] === p.pick); return { key: "finding:" + f.id, id: f.id, state: pk ? pk[1] : "Not sorted", note: (p.note || "").trim() }; }) });
+    if (fs.length) groups.push({ id: "findings", title: "Finding sort", rows: fs.map((f) => { const p = view.fpicks[f.id], pk = FPICKS.find((x) => x[0] === p.pick); return { key: "finding:" + f.id, id: f.id, state: pk ? pk[1] + (p.pick === "reject" && !(p.note || "").trim() ? ", reason missing" : "") : "Not sorted", note: (p.note || "").trim() }; }) });
     const notes = docList().filter((d) => (view.notes[d.key] || "").trim());
     if (notes.length) groups.push({ id: "notes", title: "Notes", rows: notes.map((d) => ({ key: d.key, id: d.title || d.key, state: "", note: view.notes[d.key].trim() })) });
     return groups;
@@ -5080,10 +5334,11 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
   }
 
   /* ---------- readiness: what is left before you answer, and the keys that go to it ---------- */
-  function readyHtml(NEED, unread) {
+  function readyHtml(NEED, unread, total) {
     const dec = NEED.filter((n) => n.decision).length;
-    const parts = [dec ? `<button type="button" class="rdy" data-rdy="n" data-tip="Go to the next decision without a pick (key n)">${plural(dec, "decision")} left</button>` : "", unread ? `<button type="button" class="rdy" data-rdy="u" data-tip="Go to the next thing you have not read (key u)">${unread} unread</button>` : ""].filter(Boolean);
-    return `<span class="ready" id="ready" role="status" aria-live="polite" data-decisions="${dec}" data-unread="${unread}">${parts.length ? parts.join('<span class="sep" aria-hidden="true"> · </span>') : '<button type="button" class="rdy ok" data-rdy="a" data-tip="Go to Your answer">Ready to answer</button>'}</span>`;
+    const look = NEED.filter((n) => !n.decision).length;  /* tagged not handled, not met or failing, and not yet acknowledged */
+    const parts = [dec ? `<button type="button" class="rdy" data-rdy="n" data-tip="Go to the next decision without a pick (key n)">${plural(dec, "decision")} left</button>` : "", look ? `<button type="button" class="rdy" data-rdy="n" data-tip="${look === 1 ? "One thing is tagged not handled, not met or failing" : look + " things are tagged not handled, not met or failing"}; read it and choose Seen, will answer in chat, or leave it for your answer (key n)">${look} to look at</button>` : "", unread ? `<button type="button" class="rdy" data-rdy="u" data-tip="Go to the next thing you have not read (key u)">${unread} unread</button>` : ""].filter(Boolean);
+    return `<span class="ready" id="ready" role="status" aria-live="polite" data-decisions="${dec}" data-looks="${look}" data-unread="${unread}" data-total="${total == null ? "" : total}">${parts.length ? parts.join('<span class="sep" aria-hidden="true"> · </span>') : '<button type="button" class="rdy ok" data-rdy="a" data-tip="Go to Your answer">Ready to answer</button>'}</span>`;
   }
   function nodeOfKey(k) {
     const q = (sel) => el.col.querySelector(sel), e = (v) => CSS.escape(v);
@@ -5140,7 +5395,8 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
   }, true);
   function vzSet(v) {
     const m = String(v).match(/^heat:(?:(col|row|cell):(.*))?$/s); if (!m) return;
-    const f = view.bt; f.u = new Set(); f.grp = ""; f.heat = "";
+    const f = view.bt, was = f.heat; f.u = new Set(); f.grp = ""; f.heat = "";
+    if (m[1] && was === m[1] + ":" + m[2]) { btRepaint(); return; }  /* the same cell, row or column again clears it */
     if (m[1]) {
       const hit = m[2];
       if (m[1] === "col") f.u = new Set([hit === "—" ? "" : hit]); else if (m[1] === "row") f.grp = hit; else { const [g, u] = hit.split("\u0001"); f.grp = g; f.u = new Set([u === "—" ? "" : u]); }
@@ -5178,7 +5434,8 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const T = { new: "new", changed: "changed", gone: "removed" };
     const row = (x, cls) => `<li class="${cls || ""}"><button type="button" class="rvlink" data-rvgo="${esc(x.go)}"${x.go ? "" : " disabled"}><span class="rv-tag ${x.t === "new" ? "new" : x.t === "gone" ? "gone" : "chg"}">${T[x.t] || x.t}</span><span class="rvt">${esc(x.title)}</span>${rvCount(x)}</button></li>`;
     const ins = G.reduce((s, x) => s + x.ins, 0), del = G.reduce((s, x) => s + x.del, 0), n = G.reduce((s, x) => s + Math.max(1, x.items.length), 0);
-    if (tot) tot.innerHTML = `${plural(n, "change")} since ${esc(sinceLabel())} · ${rvCount({ ins, del }) || "no words"}`;
+    const CS = changeSummary();  /* the same count as the pill, the banner and the timeline */
+    if (tot) tot.innerHTML = `${CS ? `${plural(CS.n, "change")} since ${esc(sinceLabel())} (${CS.changed} changed, ${CS.added} new, ${CS.removed} removed)` : `${plural(n, "change")} since ${esc(sinceLabel())}`} · ${rvCount({ ins, del }) || "no words"}`;
     box.innerHTML = `<ul class="rvlist">${G.map((x) => row(x, "rvg") + (x.items.length ? `<li class="rvsub"><ul>${x.items.map((y) => row(y)).join("")}</ul></li>` : "")).join("")}</ul>`;
   }
   /* a place the agent named: doc:<key>, doc:<key>#<section or element>, an item id, a criterion key, a finding id */
@@ -5213,9 +5470,6 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     RevDiff.reveal(s[view.rvAt]);
     const p = $("rvpos"); if (p) p.textContent = (view.rvAt + 1) + " / " + s.length;
   }
-  const rvBar = () => !view.prev ? "" : `<div class="rvbar" role="group" aria-label="Changes since ${esc(sinceLabel())}"><span class="seg rvseg"><button type="button" data-rvview="show" aria-pressed="${rvOn()}" data-tip="Mark what changed since ${esc(sinceLabel())}">Changes</button><button type="button" data-rvview="clean" aria-pressed="${!rvOn()}" data-tip="The page as it is now, no marks">Clean</button></span>` +
-    (!rvOn() ? `<span id="rvlegend">${view.rvLegend || ""}</span>` : "") +
-    (rvOn() ? `<button type="button" class="rvstep" data-rvstep="-1" aria-label="Previous change" data-tip="Previous change (k)">${UP}</button><span class="num rvpos" id="rvpos" aria-live="polite">${view.rvAt >= 0 ? view.rvAt + 1 : "–"} / ${rvStops().length}</span><button type="button" class="rvstep" data-rvstep="1" aria-label="Next change" data-tip="Next change (j)">${DOWN}</button>` : "") + `</div>`;
   const UP = '<svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14"><path d="M3 9l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>';
   const DOWN = '<svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14"><path d="M3 5l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>';
   el.col.addEventListener("click", (e) => { const g = e.target.closest("[data-rvgo]"); if (!g) return; e.preventDefault(); e.stopPropagation(); rvGo(g.dataset.rvgo); }, true);

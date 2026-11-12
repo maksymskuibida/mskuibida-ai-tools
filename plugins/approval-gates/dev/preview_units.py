@@ -19,6 +19,7 @@ import validate_bundle  # noqa: E402
 
 INTENT = "260101-bakery-preorder"
 UNIT = "u2-pickup-slots"
+MAPS = [{"kind": "units", "url": "https://example.com/preview/maps-units#260101-bakery-preorder-units", "title": "Unit map"}, {"kind": "components", "url": "https://example.com/preview/maps-components#260101-bakery-preorder-components", "title": "Component map"}]
 LABELS = ["critical", "high", "medium", "medium", "low", "high", "low"]
 LAYERS = ["setup", "data", "logic", "logic", "api", "api", "UI", "UI", "tests", "tests", "checks", "docs"]
 
@@ -34,8 +35,16 @@ def refs(rid, n=2):
     return [{"label": f"Q{(pc.rnd_of(rid, i) % 6) + 1}", "tip": "Your answer to a question in an earlier stage: " + pc.sentence((rid, i, "tip"))[:80], "target": f"#fd-q{(pc.rnd_of(rid, i) % 6) + 1}"} for i in range(n)]
 
 
+def suggested(rows):
+    """Two rows that propose something the person may take or leave: they carry Do it / Leave it."""
+    for r in rows[:2]:
+        r["suggestion"] = True
+    return rows
+
+
 def sections_plan(rev):
-    def rows(prefix, n, kind_seed, stagger=0):
+    def rows(prefix, n, kind_seed, stagger=0, new=False):
+        """`new`: the section that gets the two rows later rounds add (each such row lives in one section, not five)."""
         out = []
         for i in range(1, n + 1):
             r = row(f"{prefix}-{i}", pc.sentence((kind_seed, i))[:110], pc.pick(LABELS, kind_seed, i), rev, {"refs": refs(f"{prefix}{i}")})
@@ -45,19 +54,21 @@ def sections_plan(rev):
         if rev >= 2:
             out[1]["title"] = out[1]["title"] + " (now also on Saturdays)"
             out[1]["body"] += " " + pc.sentence((kind_seed, "r2"))
-            out.insert(2, row(f"{prefix}-{n + 1}", "Saturday pickups open at 07:00", "high", rev))
+            if new:
+                out.insert(2, row(f"{prefix}-{n + 1}", "Saturday pickups open at 07:00", "high", rev))
             out.pop(-1)
         if rev >= 3:
-            out[3]["body"] = pc.para((kind_seed, "r3"), 3)
-            out.append(row(f"{prefix}-{n + 2}", "An order after 23:00 counts for the day after next", "medium", rev))
+            out[min(3, len(out) - 1)]["body"] = pc.para((kind_seed, "r3"), 3)
+            if new:
+                out.append(row(f"{prefix}-{n + 2}", "An order after 23:00 counts for the day after next", "medium", rev))
         return out
     findings = rows("F", 8, "find")
     for i, r in enumerate(findings):
         r["coveredBy"] = {"text": f"Step {i % 8 + 1} settles it", "settled": True, "link": {"kind": "step", "target": f"#step-{i % 8 + 1}"}}
     return [
         {"key": "narrows", "kind": "narrows", "title": "Narrows what you approved", "short": "Narrows", "hint": "An earlier approved record now reads differently", "rows": rows("N", 4, "narrow")},
-        {"key": "visible", "kind": "visible", "title": "What people see, data, API, dependencies", "short": "Visible", "hint": "Changes a person would notice or a contract would feel", "rows": rows("V", 5, "vis")},
-        {"key": "assumptions", "kind": "assumptions", "title": "Assumptions made without asking", "short": "Assumptions", "hint": "Ranked by what it costs if one is wrong", "rows": rows("A", 14, "assume")},
+        {"key": "visible", "kind": "visible", "title": "What people see, data, API, dependencies", "short": "Visible", "hint": "Changes a person would notice or a contract would feel", "rows": suggested(rows("V", 5, "vis"))},
+        {"key": "assumptions", "kind": "assumptions", "title": "Assumptions made without asking", "short": "Assumptions", "hint": "Ranked by what it costs if one is wrong", "rows": rows("A", 14, "assume", new=True)},
         {"key": "findings", "kind": "findings", "title": "Reviewer findings left open", "short": "Findings", "hint": "Not settled in the design; what in the plan settles each", "rows": findings},
         {"key": "tests", "kind": "tests", "title": "Tests", "short": "Tests", "hint": "Grouped; open only when something matters", "rows": rows("T", 6, "tests")}]
 
@@ -93,14 +104,24 @@ def header(page, rev, title):
     return {"project": "Bakery pre-order", "intent": INTENT, "intentName": "Bakery pre-order", "unit": UNIT, "unitName": "Pick-up slots", "title": title,
             "lede": "Customers pick a pick-up slot for tomorrow's loaves; the baker sees one list.", "status": "Plan approval · answer in chat" if page == "plan" else "End of Unit · answer in chat",
             "revision": rev, "revisions": [{"n": n, "note": "first draft" if n == 1 else "revision", "at": f"2026-01-0{n}T09:00:00Z"} for n in range(1, rev + 1)],
-            "facts": [{"label": "Steps", "value": "17"}, {"label": "Look first", "value": "5 rows"}]}
+            "facts": []}
+
+
+def with_facts(b):
+    """The tiles are numbers the page shows: the steps of the plan, the rows to look at first."""
+    rows = [r for s in b["sections"] for r in s["rows"]]
+    look = sum(1 for r in rows if r.get("lookFirst"))
+    facts = ([{"label": "Steps", "value": str(len(b["plan"]["steps"]))}] if b.get("plan") else []) + ([{"label": "Look first", "value": f"{look} row" + ("" if look == 1 else "s")}] if look else [])
+    b["header"]["facts"] = facts
+    return b
 
 
 def plan_bundle(rev):
     b = {"schema": "aidlc-gate-bundle/1", "page": "plan", "id": f"{INTENT}-{UNIT}-plan-v{rev}-2026010{rev}T0900", "createdAt": f"2026-01-0{rev}T09:00:00Z",
-         "header": header("plan", rev, "U2 · Pick-up slots · plan approval"), "sections": sections_plan(rev), "plan": {"title": "Code plan", "hint": "17 steps · ~40 files", "steps": steps_plan(rev)},
-         "answers": answers()}
-    return b
+         "header": header("plan", rev, "U2 · Pick-up slots · plan approval"), "sections": sections_plan(rev), "plan": {"title": "Code plan", "hint": "", "steps": steps_plan(rev)},
+         "answers": answers(), "maps": MAPS}
+    b["plan"]["hint"] = f"{len(b['plan']['steps'])} steps · ~{sum(s['files'] for s in b['plan']['steps'])} files"
+    return with_facts(b)
 
 
 def end_bundle(rev, tested=False):
@@ -133,8 +154,8 @@ def end_bundle(rev, tested=False):
     b = {"schema": "aidlc-gate-bundle/1", "page": "unit-end", "id": f"{INTENT}-{UNIT}-unit-end-v{rev}-2026010{rev}T1000", "createdAt": f"2026-01-0{rev}T10:00:00Z",
          "header": header("unit-end", rev, "U2 · Pick-up slots · end of Unit"), "sections": secs, "answers": [],
          "design": {"bundle": plan_bundle(1)["id"], "rows": [{"id": r["id"], "title": r["title"], "label": r["label"]} for s in plan_bundle(1)["sections"] for r in s["rows"]][:16], "counts": "36 rows · 18 answers · 17 steps"},
-         "verification": {"auto": 14}}
-    return b
+         "verification": {"auto": 14}, "maps": MAPS}
+    return with_facts(b)
 
 
 def revised(make, upto):
@@ -170,6 +191,10 @@ def bundles():
     tested["header"]["revision"] = 4
     tested["header"]["revisions"] = tested["header"]["revisions"] + [{"n": 4, "note": "after your test plan", "at": "2026-01-04T10:00:00Z"}]
     tested["createdAt"] = "2026-01-04T10:00:00Z"
+    unit_bundle.mark_revisions(tested, ends[-1])  # the rows carry the round that changed them, as a real page's do
+    for _s, r in validate_bundle.all_rows(tested):
+        if r.get("rev") == 4 and not r.get("revNote"):
+            r["revNote"] = "Moved after your test plan." if r.get("revKind") == "changed" else "Added after your test plan."
     return [
         ("unit-plan-r1", "Unit pages", "The plan page, first presentation: assumptions, findings, the code plan as lanes by layer and as steps, your answers.", plans[:1], plans[0]),
         ("unit-plan-r3", "Unit pages", "The plan page in version 3: rows and steps new, changed and removed, the version timeline, the Changes and Clean views.", plans, plans[2]),

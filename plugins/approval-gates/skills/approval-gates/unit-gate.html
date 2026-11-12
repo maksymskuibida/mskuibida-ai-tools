@@ -258,7 +258,8 @@ a.aidlc-id:hover { color: var(--accent-strong); }
 .map { position: relative; }
 .map svg { position: absolute; inset: 0; overflow: visible; }
 .node { position: absolute; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--control); background: var(--surface); color: var(--fg); text-decoration: none; overflow: hidden; }
-.node b { font-weight: 500; font-size: 13px; line-height: 1.3; }
+.node b { font-weight: 500; font-size: 13px; line-height: 1.3; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .node small { font-size: 12px; color: var(--muted); line-height: 1.3; }
 .node.core { background: var(--core-bg); color: var(--core-fg); border-color: var(--core-bg); } .node.core small { color: var(--core-fg); opacity: .8; }
 .node.minor { background: var(--raised); }
@@ -277,6 +278,8 @@ a.aidlc-id:hover { color: var(--accent-strong); }
 .lrow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 10px 16px; border-top: 1px solid var(--line-soft); color: var(--fg); text-decoration: none; }
 .lrow:hover { background: var(--hover); color: var(--fg); }
 .lrow b { font-weight: 500; } .lrow small { color: var(--muted); }
+.lrow.old b, .lrow.old small { color: var(--muted); font-weight: 400; }
+.lrow .end { display: inline-flex; gap: 6px; }
 .lrow .end { margin-left: auto; }
 .msg { padding: 28px 24px; display: flex; flex-direction: column; gap: 6px; }
 .msg p { margin: 0; color: var(--fg-2); max-width: 70ch; }
@@ -521,7 +524,74 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
 }
 @media (max-width: 560px) { .vz-layer, .vz-lane { grid-template-columns: minmax(0, 1fr); } .vz-lname { padding-top: 0; } .vz-item { max-width: 100%; } .vz-lstep { max-width: 100%; } }
 @media (prefers-reduced-motion: no-preference) { .vz-node rect, .vz-edge path, .vz-item { transition: stroke .12s, opacity .12s, background .12s; } }
+/* a trace too big to draw at once is offered per requirement */
+.vz-pickrow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0 0 8px; }
+.vz-pickrow label { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--fg-2); }
+.vz-pickrow select { max-width: min(420px, 70vw); font: inherit; font-size: 13px; font-weight: 400; color: var(--fg); background: var(--surface); border: 1px solid var(--control); border-radius: 6px; padding: 4px 8px; min-height: 30px; }
+.vz-pickrow .hint { font-size: 12px; }
+.vz-seg.auto { cursor: default; }
 /* gate-viz.css:end */
+/* ===== fix round 1: the bar (the same on every approval page), round marks in Clean, phone ===== */
+/* Round changes are always visible: Clean keeps each tag (the round's colour) and the rows removed, struck where they were. */
+#app[data-rv="clean"] .rv-tag { display: inline-flex !important; }
+#app[data-rv="clean"] .rv-tag.chg, #app[data-rv="clean"] .rv-tag.new { background: color-mix(in srgb, var(--rvc, var(--rv-chg)) 16%, transparent); color: var(--rvc, var(--rv-chg)); }
+#app[data-rv="clean"] .row.rv-chg { box-shadow: inset 3px 0 0 var(--rv-chg); }
+#app[data-rv="clean"] .row.rv-new { box-shadow: inset 3px 0 0 var(--rv-new); }
+#app[data-rv="clean"] .row.rv-removed { display: block !important; }
+#app[data-rv="clean"] .row.rv-rb { box-shadow: inset 3px 0 0 var(--rvc); }
+.row.rv-removed { box-shadow: inset 3px 0 0 var(--rv-gone); background: color-mix(in srgb, var(--rv-del-bg) 55%, transparent); opacity: 1; }
+.row.rv-removed .rowhead { min-height: 40px; }
+.row.rv-removed .gonet { text-decoration: line-through; text-decoration-thickness: 1px; color: var(--rv-del-fg); white-space: normal; height: auto; padding: 6px 0; }
+.tag.gone { background: var(--rv-del-bg); color: var(--rv-del-fg); }
+.bar { flex-direction: row; align-items: center; padding: 8px 12px; gap: 8px; background: var(--surface); backdrop-filter: none; }
+.bar .barrow { flex: 1 1 auto; flex-wrap: nowrap; gap: 8px 12px; min-width: 0; }
+.bar .filters { flex: 0 1 auto; flex-wrap: nowrap; }
+.bar .pill { height: 30px; padding: 0 11px; white-space: nowrap; }
+.bar .ready { flex: 0 1 auto; min-width: 0; margin-left: 4px; white-space: nowrap; }
+.bmenus { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
+.bm { position: relative; }
+.bmb { height: 30px; min-height: 30px; padding: 0 11px; display: inline-flex; align-items: center; gap: 6px; border-radius: 15px; white-space: nowrap; border: 1px solid var(--control); background: var(--surface); color: var(--fg); font-weight: 500; }
+.bmb:hover { border-color: var(--accent); }
+.bmb .n { font: 500 11px var(--mono); color: var(--muted); }
+.bmb[aria-expanded="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.bpop { position: absolute; right: 0; top: calc(100% + 8px); z-index: 20; min-width: 240px; max-width: min(520px, calc(100vw - 32px)); display: grid; gap: 10px; padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 28px rgba(23, 26, 33, .18); }
+.bmrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.bml { font-size: 12px; font-weight: 600; color: var(--fg-2); min-width: 64px; }
+.bmh { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--fg-2); }
+.bmh .hint { display: block; font-weight: 400; color: var(--muted); }
+.bpop .vz-tl, .bpop .rv-legend { margin: 0; padding: 0; list-style: none; }
+.bpop .seg button { height: 26px; padding: 0 11px; font-size: 12px; }
+.bpop .pill { height: 28px; }
+.bpop .chips { flex-wrap: wrap; overflow: visible; }
+.bpop .chip { height: 30px; }
+.bar [hidden] { display: none !important; }
+.revs { margin: 0; }
+/* the answer block aligns with the other blocks: a chevron's column before its title */
+.answer .sechead h2 { padding-left: 40px; }
+.suggestpick { margin-left: 0; }
+.rowhead .rv-tags .rv-n { font-size: 11px; color: var(--muted); }
+/* a row's note, when the same words sit on most rows, is said once in the banner, not on every row */
+@media (max-width: 767px) {
+  .bar { padding: 5px 8px; }
+  .bar .barrow { flex-wrap: wrap; gap: 4px 8px; }
+  .bar .filters { overflow-x: auto; max-width: 100%; }
+  .bar .pill { height: 26px; min-height: 26px; padding: 0 9px; font-size: 12.5px; }
+  .bar .ready { flex: 1 1 auto; margin-left: 0; font-size: 12px; }
+  .bar .rdy { padding: 0 8px; font-size: 12px; height: 26px; min-height: 26px; }
+  .bmenus { gap: 4px; }
+  .bmb { padding: 0 9px; height: 26px; min-height: 26px; font-size: 12.5px; }
+  .bmb .n { display: none; }
+  .bm { position: static; }  /* the menu opens under the bar, across its width */
+  .bpop { position: absolute; left: 0; right: 0; top: calc(100% + 8px); max-width: none; }
+  /* a row's sentence keeps its width; the tags wrap under it */
+  .rowhead { flex-wrap: wrap; row-gap: 2px; padding: 4px 8px 6px 4px; }
+  .rowhead > .twist { order: -1; }
+  .rowhead .rtitle { order: 1; flex: 1 1 0; min-width: 40%; height: auto; min-height: 32px; padding: 5px 0; white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.35; overflow-wrap: anywhere; }
+  .rowhead > .dot { order: 2; }
+  .rowhead > :is(.tag, .look, .handled, .lab, .layer, .testpick, .rv-tags, .where) { order: 3; }
+  .rowhead > .rtitle + :is(.tag, .look, .handled, .lab, .layer, .testpick, .rv-tags) { margin-left: 44px; }
+  .design .dt { white-space: normal; }
+}
 </style>
 
 <div class="wrap">
@@ -1341,22 +1411,37 @@ var GateViz = (function () {
   }
 
   /* ---------- a trace ribbon: columns left to right, a curve for every link ---------- */
-  function trace(d, c) {
-    var cols = d.cols || [], per = {}, W = 150, H = 38, GX = 70, GY = 12, top = 30;
+  /* natural order: US2.1 before US10.1, FR9 before FR10 */
+  function natKey(s) { return String(s).split(/(\d+)/).map(function (p, i) { return i % 2 ? +p : p.toLowerCase(); }); }
+  function natCmp(a, b) {
+    var x = natKey(a), y = natKey(b), n = Math.min(x.length, y.length);
+    for (var i = 0; i < n; i++) if (x[i] !== y[i]) return typeof x[i] === "number" && typeof y[i] === "number" ? x[i] - y[i] : (String(x[i]) < String(y[i]) ? -1 : 1);
+    return x.length - y.length;
+  }
+  var TRACE_MAX_COL = 10, TRACE_MAX_EDGES = 36, chosen = {};  /* above this size a trace is a tangle: it is offered per requirement */
+  /* the ribbon of one set of nodes: each column in natural order, then swept back and forth so that a box sits near the boxes it links to */
+  function drawTrace(d, c) {
+    var cols = d.cols || [], per = {}, W = 150, H = 38, GX = 70, GY = 12, top = 30, edges = d.edges || [];
     (d.nodes || []).forEach(function (n) { (per[n.col] = per[n.col] || []).push(n); });
-    cols.forEach(function (k, ci) {  /* fewer crossings: a box sits near the boxes it is linked to in the column before */
-      if (!ci) return;
-      var at = {}; (per[cols[ci - 1].key] || []).forEach(function (n, i) { at[n.id] = i; });
-      var mean = function (n) { var xs = (d.edges || []).map(function (e) { return e[1] === n.id && at.hasOwnProperty(e[0]) ? at[e[0]] : e[0] === n.id && at.hasOwnProperty(e[1]) ? at[e[1]] : null; }).filter(function (x) { return x !== null; }); return xs.length ? xs.reduce(function (a, b) { return a + b; }, 0) / xs.length : 1e9; };
-      (per[k.key] || []).sort(function (a, b) { return mean(a) - mean(b); });
-    });
+    cols.forEach(function (k) { (per[k.key] || []).sort(function (a, b) { return natCmp(a.id, b.id); }); });
+    var pos = function (key) { var at = {}; (per[key] || []).forEach(function (n, i) { at[n.id] = i; }); return at; };
+    var sweep = function (ci, from) {
+      var at = pos(cols[from].key);
+      var mean = function (n) { var xs = edges.map(function (e) { return e[1] === n.id && at.hasOwnProperty(e[0]) ? at[e[0]] : e[0] === n.id && at.hasOwnProperty(e[1]) ? at[e[1]] : null; }).filter(function (x) { return x !== null; }); return xs.length ? xs.reduce(function (a, b) { return a + b; }, 0) / xs.length : 1e9; };
+      var arr = per[cols[ci].key] || [], idx = {}; arr.forEach(function (n, i) { idx[n.id] = i; });
+      arr.sort(function (a, b) { return (mean(a) - mean(b)) || (idx[a.id] - idx[b.id]); });
+    };
+    for (var pass = 0; pass < 3; pass++) {
+      for (var ci = 1; ci < cols.length; ci++) sweep(ci, ci - 1);
+      for (var cj = cols.length - 2; cj >= 0; cj--) sweep(cj, cj + 1);
+    }
     var rows = Math.max.apply(null, cols.map(function (k) { return (per[k.key] || []).length; }).concat([1]));
     var at = {}, width = cols.length * W + (cols.length - 1) * GX + 16, height = top + rows * (H + GY) + 8;
     cols.forEach(function (k, ci) { (per[k.key] || []).forEach(function (n, ri) { at[n.id] = { x: 8 + ci * (W + GX), y: top + ri * (H + GY) }; }); });
     var mk = mark();
     var svg = '<svg class="vz-svg" xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + " " + height + '" role="img" aria-label="' + esc(d.alt || "") + '">' + mk.defs;
     cols.forEach(function (k, ci) { svg += '<text class="vz-colh" x="' + (8 + ci * (W + GX)) + '" y="16">' + esc(k.label) + "</text>"; });
-    (d.edges || []).forEach(function (e) {
+    edges.forEach(function (e) {
       var a = at[e[0]], b = at[e[1]]; if (!a || !b) return;
       var ax = a.x + W, ay = a.y + H / 2, bx = b.x, by = b.y + H / 2, m = (ax + bx) / 2;
       svg += '<g class="vz-edge" data-from="' + esc(e[0]) + '" data-to="' + esc(e[1]) + '"><path d="M' + ax + " " + ay + " C" + m + " " + ay + " " + m + " " + by + " " + bx + " " + by + '" marker-end="url(#' + mk.id + ')"/></g>';
@@ -1369,7 +1454,23 @@ var GateViz = (function () {
     });
     return svg + "</svg>";
   }
-
+  /* The trace: all at once while it reads (a few boxes a column); above that it is a tangle, so it is offered per requirement: pick one, see its chain. */
+  function trace(d, c) {
+    var cols = d.cols || [], nodes = d.nodes || [], edges = d.edges || [];
+    var big = Math.max.apply(null, cols.map(function (k) { return nodes.filter(function (n) { return n.col === k.key; }).length; }).concat([0])) > TRACE_MAX_COL || edges.length > TRACE_MAX_EDGES;
+    if (!big || !cols.length) return drawTrace(d, c);
+    var first = nodes.filter(function (n) { return n.col === cols[0].key; }).sort(function (a, b) { return natCmp(a.id, b.id); });
+    var sel = chosen[d.id || "trace"]; if (!first.some(function (n) { return n.id === sel; })) sel = first.length ? first[0].id : "";
+    var chain = function (id) {  /* what it leads to and what leads to it, through every column */
+      var keep = {}, out = {}, back = {}; keep[id] = 1;
+      var go = function (fromIdx, toIdx) { var q = [id], seen = {}; seen[id] = 1; while (q.length) { var x = q.shift(); edges.forEach(function (e) { var nx = e[fromIdx] === x ? e[toIdx] : null; if (nx && !seen[nx]) { seen[nx] = 1; keep[nx] = 1; q.push(nx); } }); } };
+      go(0, 1); go(1, 0);
+      return { cols: cols, nodes: nodes.filter(function (n) { return keep[n.id]; }), edges: edges.filter(function (e) { return keep[e[0]] && keep[e[1]]; }), alt: d.alt, id: d.id };
+    };
+    return '<div class="vz-pickrow"><label>' + esc(cols[0].label) + ' <select class="vz-pick" data-vz-pick="' + esc(d.id || "trace") + '" aria-label="Pick one to see its chain">' + first.map(function (n) { return '<option value="' + esc(n.id) + '"' + (n.id === sel ? " selected" : "") + ">" + esc(n.label ? n.id + " " + clip(n.label, 40) : n.id) + "</option>"; }).join("") + "</select></label>" +
+      '<span class="hint">' + plural(first.length, cols[0].label.toLowerCase().replace(/s$/, "")) + ", " + plural(edges.length, "link") + ": too many to draw at once, so pick one and see what it leads to</span></div>" +
+      first.map(function (n) { return '<div class="vz-chain" data-for="' + esc(n.id) + '"' + (n.id === sel ? "" : " hidden") + ">" + drawTrace(chain(n.id), c) + "</div>"; }).join("");
+  }
   /* ---------- layers: a band per layer, the components in it, what they depend on one hover away ---------- */
   function layers(d, c, opts) {
     var uses = {};
@@ -1480,7 +1581,7 @@ var GateViz = (function () {
       return '<button type="button" class="vz-seg ' + s.k + '" style="flex:' + pct.toFixed(2) + ' 1 0" data-vz-set="verif:' + s.k + '" aria-pressed="' + (on === s.k) + '" aria-label="' + lab + '" data-tip="' + tip + '">' + inner + "</button>";
     }).join("");
     var line = segs.map(function (s) { return s.label + " " + s.n; }).join(", ");
-    return '<figure class="vz vz-funnel" data-aidlc-noids role="group" aria-label="' + esc("Verification funnel: " + total + " points; " + line) + '"><figcaption class="vz-title">Where the ' + plural(total, "point") + ' stand<span class="hint">press a part to filter the points below</span></figcaption><div class="vz-bar">' + bar + "</div>" +
+    return '<figure class="vz vz-funnel" data-aidlc-noids role="group" aria-label="' + esc("Verification funnel: " + total + " points; " + line) + '"><figcaption class="vz-title">Where the ' + plural(total, "point") + ' stand<span class="hint">press a part to show only its points; the tests&#39; part is not one of the rows below</span></figcaption><div class="vz-bar">' + bar + "</div>" +
       (on ? '<button type="button" class="vz-clear" data-vz-set="verif:">Show all points</button>' : "") + '<ul class="vz-sr">' + segs.map(function (s) { return "<li>" + esc(s.label + ": " + s.n) + "</li>"; }).join("") + "</ul></figure>";
   }
 
@@ -1555,6 +1656,12 @@ var GateViz = (function () {
     root.addEventListener("mouseout", off); root.addEventListener("focusout", off);
     root.addEventListener("keydown", function (e) {
       var n = e.target.closest && e.target.closest(".vz-node[data-vz-go], .vz-msg"); if (n && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); n.dispatchEvent(new MouseEvent("click", { bubbles: true })); }
+    });
+    /* a trace too big to draw at once: the picked requirement's chain shows, the others are hidden; the choice is kept */
+    root.addEventListener("change", function (e) {
+      var s = e.target.closest && e.target.closest("select.vz-pick"); if (!s) return;
+      chosen[s.getAttribute("data-vz-pick") || "trace"] = s.value;
+      [].forEach.call((s.closest(".vz") || root).querySelectorAll(".vz-chain"), function (c) { c.hidden = c.getAttribute("data-for") !== s.value; });
     });
   }
 
@@ -1633,6 +1740,7 @@ var GateView = (function () {
   function isRead(st, key, item) { return (st.read[key] || 0) >= revOf(item); }
   /* Everything is open in the Full view; a row the viewer marked read stays folded until they open it. */
   function isOpen(st, key, read) { var o = st.open[key]; return o === undefined ? st.mode === "full" && !read : o; }
+  /* the plain id a row shows: "V-1", with no key of the page's own */
   /* Test now / Later is proof the row was read: set the pick and mark the row read at its rev. A second click on the
      pressed button un-picks and leaves the read state alone. A row that was open stays open, so the pick shows. */
   function applyTestPick(st, key, val, item, readKey) {
@@ -1677,9 +1785,9 @@ var GateView = (function () {
     if (f === "unread") return !isRead(st, key, item);
     if (f === "needs") return !isStep && !!(st.needsNow && (st.needsNow[key] || (st.needsKeep && st.needsKeep[key])));
     if (/^v\d+$/.test(f)) { var v = +f.slice(1); return item.rev === v || (isStep && (item.subs || []).some(function (s) { return s.rev === v; })); }
+    if (f === "changed") return !!(st.rvKeys && st.rvKeys[key]);  /* a step that changed is a changed thing like any row */
     if (isStep) return false;
     if (f === "look") return !!item.lookFirst;
-    if (f === "changed") return !!(st.rvKeys && st.rvKeys[key]);
     if (f === "top") return item.label === "critical" || item.label === "high" || item.label === "core";
     return true;
   }
@@ -1699,10 +1807,19 @@ var GateView = (function () {
 
   /* ---------- pieces ---------- */
   function labelChip(label, count) { return '<span class="lc" style="' + tone(LABEL_TONE[label] || "low") + '">' + esc(label) + "<b>" + count + "</b></span>"; }
+  /* the round tag of a row or step: "v3 changed" or "v3 new", in the round's colour, in both views */
   function revBadge(item, extra) {
     if (!item.rev) return "";
-    var t = revTone(item.rev);
-    return '<span class="tag' + (extra || "") + '" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">v' + int(item.rev) + " " + (item.revKind === "new" ? "new" : "changed") + "</span>";
+    var t = revTone(item.rev), kind = item.revKind === "new" ? "new" : "changed";
+    return '<span class="tag rvb' + (extra || "") + '" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)" title="' + (kind === "new" ? "New in round " : "Changed in round ") + int(item.rev) + '">v' + int(item.rev) + " " + kind + "</span>";
+  }
+  /* a row or step another round removed, listed where it was, struck */
+  function goneRow(g) {
+    return '<div class="row rv-removed" data-gone="1"><div class="rowhead"><span class="rid" title="' + esc(g.id) + '">' + esc(g.id) + '</span><span class="rtitle gonet" title="' + esc(g.title) + '">' + esc(g.title) + '</span><span class="tag rvb gone">' + esc(g.tag || "removed") + "</span></div></div>";
+  }
+  function goneAfter(st, secKey, afterAnchor) {
+    if (!(st.filter === "all" || st.filter === "changed")) return "";
+    return ((st.rvRemoved || {})[secKey] || []).filter(function (g) { return (g.after || "") === (afterAnchor || ""); }).map(goneRow).join("");
   }
   /* An id the shared AidlcIds links: the same shape as its matcher (US1.1, FR1.4, BR1.2, R-01, ADR-009, U3-SD2). */
   var IDISH = /^[A-Z][A-Z]{0,4}-?\d+[a-z]?(?:[.-]\d+[a-z]?)*(?:-[A-Z]{1,4}\d+[a-z]?)?$/;
@@ -1729,7 +1846,9 @@ var GateView = (function () {
     ((bundle.plan || {}).steps || []).forEach(function (st) { (st.implements || []).forEach(fromRef); });
     (bundle.answers || []).forEach(function (g) { (g.questions || []).forEach(function (q) { var id = defs[q.anchor]; if (id && !out[id]) out[id] = { title: String(q.text || ""), text: "Your answer: " + String(q.answer || ""), doc: g.file }; }); });
     var ids = bundle.ids || {};
-    Object.keys(ids).forEach(function (k) { out[k] = ids[k]; });
+    /* a tooltip says what the id is, never the markdown table its definition was read from */
+    var plainTip = function (s) { s = String(s == null ? "" : s); return /\|\s*:?-{2,}/.test(s) && /\|[^|\n]*\|/.test(s) ? "" : s; };
+    Object.keys(ids).forEach(function (k) { var v = ids[k]; out[k] = v && typeof v === "object" ? Object.assign({}, v, v.title != null ? { title: plainTip(v.title) } : {}, v.text != null ? { text: plainTip(v.text) } : {}) : v; });
     return out;
   }
   /* Every id the page can show the definition of, rendered or not, so a link to one in a folded section is live: the
@@ -1752,10 +1871,14 @@ var GateView = (function () {
     var ext = /^https?:\/\//.test(href) ? ' target="_blank" rel="noopener"' : "";
     return '<a class="ref" href="' + esc(href) + '"' + ext + data + ' data-tip="' + esc(ref.tip) + '" aria-label="' + esc(ref.label + ": " + ref.tip) + '">' + esc(ref.label) + "</a>";
   }
-  function noteBox(st, key, placeholder, suggestion) {
-    var note = st.notes[key] || "", pick = st.picks[key];
-    var picks = suggestion ? '<div class="picks" role="group" aria-label="Suggestion"><button type="button" data-act="pick" data-key="' + esc(key) + '" data-val="do" aria-pressed="' + (pick === "do") + '">Do it</button><button type="button" data-act="pick" data-key="' + esc(key) + '" data-val="leave" aria-pressed="' + (pick === "leave") + '">Leave it</button></div>' : "";
-    return '<div class="notebox"><label for="nt-' + esc(key) + '">Note to the agent<textarea id="nt-' + esc(key) + '" rows="2" data-note="' + esc(key) + '" placeholder="' + esc(placeholder) + '">' + esc(note) + '</textarea><span class="notestat" id="ns-' + esc(key) + '">' + esc(st.noteStat[key] || "") + "</span></label>" + picks + "</div>";
+  function noteBox(st, key, placeholder) {
+    var note = st.notes[key] || "";
+    return '<div class="notebox"><label for="nt-' + esc(key) + '">Note to the agent<textarea id="nt-' + esc(key) + '" rows="2" data-note="' + esc(key) + '" placeholder="' + esc(placeholder) + '">' + esc(note) + '</textarea><span class="notestat" id="ns-' + esc(key) + '">' + esc(st.noteStat[key] || "") + "</span></label></div>";
+  }
+  /* Do it / Leave it on a suggestion: on the row's own line, so it can be answered without opening the row, in either view */
+  function suggestPick(st, key) {
+    var pick = st.picks[key];
+    return '<span class="testpick suggestpick" role="group" aria-label="Suggestion"><button type="button" data-act="pick" data-key="' + esc(key) + '" data-val="do" aria-pressed="' + (pick === "do") + '">Do it</button><button type="button" data-act="pick" data-key="' + esc(key) + '" data-val="leave" aria-pressed="' + (pick === "leave") + '">Leave it</button></span>';
   }
 
   /* The pick on a not-verified row: Test now or Later. It decides which rows the agent's test plan covers. */
@@ -1796,7 +1919,7 @@ var GateView = (function () {
       revBadge(r) + (r.lookFirst ? '<span class="look">look first</span>' : "") + handledChip(r, bundle) +
       (r.where ? '<span class="where' + (r.whereIsPath ? " path" : "") + '" title="' + esc(r.where) + '">' + esc(r.where) + "</span>" : "") +
       (vs ? '<span class="tag vst" style="' + tone(vs[1]) + '">' + esc(vs[0]) + "</span>" : "") +
-      ((r._state || sec.kind) === "unverified" ? testPick(st, key) : "") +
+      ((r._state || sec.kind) === "unverified" ? testPick(st, key) : "") + (r.suggestion ? suggestPick(st, key) : "") +
       '<span class="lab" style="' + tone(LABEL_TONE[r.label] || "low") + '">' + esc(r.label) + "</span>" +
       '<button type="button" class="dot" data-act="read" data-key="' + esc(key) + '" aria-label="Mark ' + esc(r.id) + (read ? " unread" : " read") + '" title="Mark ' + (read ? "unread" : "read") + '"><i></i></button></div>';
     var body = "";
@@ -1804,10 +1927,10 @@ var GateView = (function () {
       var refs = (r.refs || []).map(function (x) { return refHtml(x, bundle); }).join("");
       var cov = r.coveredBy && !r.coveredBy.link && !r.coveredBy.acceptanceReason ? '<span class="covered" style="' + tone(r.coveredBy.settled ? "ok" : "warn") + '">' + esc(r.coveredBy.text) + "</span>" : "";
       body = '<div class="rowbody">' +
-        (r.rev && r.revNote ? '<p class="revnote" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">' + esc(r.revNote) + "</p>" : "") +
+        (r.rev && r.revNote && r.revNote !== st.commonNote ? '<p class="revnote" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">' + esc(r.revNote) + "</p>" : "") +
         "<p>" + esc(r.body) + "</p>" +
         (refs || cov ? '<div class="refs">' + (refs && sec.refsLabel ? "<span>" + esc(sec.refsLabel) + "</span>" : "") + refs + cov + "</div>" : "") +
-        noteBox(st, key, "Only if something should change", r.suggestion) + "</div>";
+        noteBox(st, key, "Only if something should change") + "</div>";
     }
     return '<div class="row' + (read ? " read" : "") + (st.filter === "needs" && !(st.needsNow || {})[rowKey(r)] ? " nsettled" : "") + '" id="' + esc(key) + '"' + idAttr(definedIds(bundle), key) + ' style="' + bg + '">' + head + reasonLine(r) + body + "</div>";
   }
@@ -1855,9 +1978,9 @@ var GateView = (function () {
     var boxes = nodes.map(function (n) {
       var p = pos[n.id], tag = n.target ? "a" : "div";
       var nt = n.target ? safeHref(n.target) : "";
-      return "<" + tag + ' class="node ' + esc(n.weight) + '"' + (n.target ? ' href="' + esc(nt) + '" data-jump="' + esc(nt.slice(1)) + '"' : "") + ' style="left:' + p.x + "px;top:" + p.y + "px;width:" + W + "px;height:" + H + 'px"><b>' + esc(n.title) + "</b>" + (n.note ? "<small>" + esc(n.note) + "</small>" : "") + "</" + tag + ">";
+      return "<" + tag + ' class="node ' + esc(n.weight) + '"' + (n.target ? ' href="' + esc(nt) + '" data-jump="' + esc(nt.slice(1)) + '"' : "") + ' style="left:' + p.x + "px;top:" + p.y + "px;width:" + W + "px;height:" + H + 'px" title="' + esc(n.title + (n.note ? " - " + n.note : "")) + '"><b>' + esc(n.title) + "</b>" + (n.note ? "<small>" + esc(n.note) + "</small>" : "") + "</" + tag + ">";
     }).join("");
-    return '<div class="mapwrap"><span>' + esc(m.caption || "How the pieces connect: dark boxes matter most; dashed ones already existed.") + '</span><div class="mapscroll"><div class="map" style="width:' + width + "px;height:" + height + 'px">' +
+    return '<div class="mapwrap"><span>' + esc(m.caption || "How the pieces connect: dark boxes matter most; dashed ones already existed.") + (width > 640 ? " Scroll sideways for the rest." : "") + '</span><div class="mapscroll"><div class="map" style="width:' + width + "px;height:" + height + 'px">' +
       '<svg width="' + width + '" height="' + height + '" aria-hidden="true"><defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--muted)"></path></marker></defs>' + lines + "</svg>" + boxes + "</div></div></div>";
   }
 
@@ -1885,7 +2008,7 @@ var GateView = (function () {
     if (open) {
       body = '<div class="secbody">' + (s.merged ? funnelHtml(st, bundle, rows) : "") + chips + (s.map && st.filter === "all" ? mapHtml(s.map) : "") +
         (s.asApproved ? '<p class="asapproved">The design stays as approved.</p>' : "") +
-        shownRows.map(function (r) { return rowHtml(st, bundle, s, r); }).join("") + "</div>";
+        goneAfter(st, s.key, "") + shownRows.map(function (r) { return rowHtml(st, bundle, s, r) + goneAfter(st, s.key, anchor(r.id)); }).join("") + "</div>";
     }
     return '<section class="card" id="' + esc(s.key) + '" data-sec="' + esc(s.key) + '">' + sectionHead(s.key, s.title, s.hint, open, right) + body + "</section>";
   }
@@ -1902,14 +2025,14 @@ var GateView = (function () {
       '<button type="button" class="dot" data-act="read" data-key="' + key + '" aria-label="Mark step ' + int(step.n) + (read ? " unread" : " read") + '"><i></i></button></div>';
     var body = "";
     if (open) {
-      body = '<div class="rowbody">' + (step.rev && step.revNote ? '<p class="revnote" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">' + esc(step.revNote) + "</p>" : "") +
+      body = '<div class="rowbody">' + (step.rev && step.revNote && step.revNote !== st.commonNote ? '<p class="revnote" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">' + esc(step.revNote) + "</p>" : "") +
         '<ol class="subs">' + (step.subs || []).map(function (s) {
           if (!s.rev) return "<li>" + esc(s.text) + "</li>";
           var u = revTone(s.rev);
           return '<li style="background:var(--' + u + '-bg)">' + esc(s.text) + '<span class="sv" style="color:var(--' + u + '-fg)">v' + int(s.rev) + "</span></li>";
         }).join("") + "</ol>" +
         ((step.implements || []).length ? '<div class="refs"><span>Implements</span>' + step.implements.map(function (x) { return refHtml(x, bundle); }).join("") + "</div>" : "") +
-        noteBox(st, key, "Only if this step should change", false) + "</div>";
+        noteBox(st, key, "Only if this step should change") + "</div>";
     }
     return '<div class="row step' + (read ? " read" : "") + '" id="' + key + '" style="' + (t ? "background:var(--" + t + "-tint)" : "") + '">' + head + body + "</div>";
   }
@@ -1934,7 +2057,7 @@ var GateView = (function () {
       var t = revTone(+v); return '<span class="lc" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">v' + int(v) + "<b>" + steps.filter(function (s) { return s.rev === +v; }).length + "</b></span>";
     }).join("");
     var right = layers + revs + '<span class="shown">' + (st.filter === "all" ? steps.length : shown.length + "/" + steps.length) + "</span>" + secDot(st, bundle, "plan", p.title || "Code plan");
-    var body = open ? '<div class="secbody">' + lanesHtml(steps) + shown.map(function (s) { return stepHtml(st, bundle, s); }).join("") + "</div>" : "";
+    var body = open ? '<div class="secbody">' + lanesHtml(st.filter === "all" ? steps : shown) + goneAfter(st, "plan", "") + shown.map(function (s) { return stepHtml(st, bundle, s) + goneAfter(st, "plan", "step-" + int(s.n)); }).join("") + "</div>" : "";
     return '<section class="card" id="plan" data-sec="plan">' + sectionHead("plan", p.title || "Code plan", p.hint || "", open, right) + body + "</section>";
   }
 
@@ -1960,7 +2083,7 @@ var GateView = (function () {
     var rows = d.rows || [];
     var link = d.bundle ? '<a href="#' + esc(d.bundle) + '" data-nav="' + esc(d.bundle) + '" style="margin-top:10px;font-size:13px">Open the full plan-approval page</a>' : (d.url ? '<a href="' + esc(safeHref(d.url)) + '" target="_blank" rel="noopener">Open the full plan-approval page</a>' : "");
     return '<div class="recpart design" id="design" data-part="design"><h3 class="rech"><span class="tag why">The design you approved</span><span class="hint">same view as at plan approval · you have seen it · ' + esc(d.counts || plural(rows.length, "row")) + '</span></h3><div class="drows">' + rows.map(function (r) {
-      return '<div class="drow"><span class="rid">' + esc(r.id) + '</span><span class="dt" title="' + esc(r.title) + '">' + esc(r.title) + '</span><span class="lab" style="' + tone(LABEL_TONE[r.label] || "low") + '">' + esc(r.label) + "</span></div>";
+      return '<div class="drow" id="design-' + esc(anchor(r.id)) + '"><span class="rid" data-aidlc-noids title="The design row ' + esc(r.id) + ' as you approved it">' + esc(r.id) + '</span><span class="dt" title="' + esc(r.title) + '">' + esc(r.title) + '</span><span class="lab" style="' + tone(LABEL_TONE[r.label] || "low") + '">' + esc(r.label) + "</span></div>";
     }).join("") + link + "</div></div>";
   }
   function recordsHtml(st, bundle) {
@@ -1999,17 +2122,20 @@ var GateView = (function () {
     var h = bundle.header || {}, revs = revisionsIn(bundle);
     var crumbs = '<div class="crumbs"><a href="#" data-nav="">All pages</a><span aria-hidden="true">/</span><span>' + esc(h.project) + '</span><span aria-hidden="true">/</span><span>' + esc(h.intentName || h.intent) + '</span><span aria-hidden="true">/</span><span class="mono">' + esc(h.unit) + "</span>" +
       '<span class="status"><i aria-hidden="true"></i>' + esc(h.status) + "</span>" + mapsHtml(bundle.maps) + "</div>";
-    var facts = (h.facts || []).map(function (f) { return '<div class="fact"><span>' + esc(f.label) + "</span><b>" + esc(f.value) + "</b>" + (f.note ? "<span>" + esc(f.note) + "</span>" : "") + "</div>"; }).join("");
-    var revRow = "";
-    if ((h.revision || 1) > 1) {
-      var first = (h.revisions || [])[0] || { note: "first draft" };
-      revRow = '<div class="revs"><span class="lbl">Revisions:</span><span class="v1"><span class="sw" style="background:var(--control)"></span>v1 ' + esc(first.note) + "</span>" +
-        (h.revisions || []).slice(1).map(function (r) {
-          var rn = int(r.n), t = revTone(rn), on = st.filter === "v" + rn, n = revs[rn] || 0;
-          return '<button type="button" class="revbtn" data-act="filter" data-val="' + (on ? "all" : "v" + rn) + '" aria-pressed="' + on + '" title="' + esc(r.note) + '" style="color:var(--' + t + "-fg);" + (on ? "background:var(--" + t + "-bg);border-color:var(--" + t + "-fg)" : "") + '"><span class="sw" style="background:var(--' + t + '-fg)"></span>v' + rn + " · " + plural(n, "change") + (rn === int(h.revision) ? " (current)" : "") + "</button>";
-        }).join("") + '<span class="hint">Changed rows carry their version; press one to see only its changes.</span></div>';
-    }
-    return '<header class="card head">' + crumbs + '<div class="titlerow"><div><h1>' + esc(pageTitle(h.unit, bundle.page, h.title)) + '</h1><p class="lede">' + esc(h.lede) + "</p></div>" + (facts ? '<div class="facts">' + facts + "</div>" : "") + "</div>" + revRow + "</header>";
+    /* a tile is a number the page can show: "Look first" is the rows the Look first filter shows (none, no tile), "Steps" the rows of the plan block (no plan, no tile) */
+    var lookN = 0; sectionsOf(bundle).forEach(function (s) { (s.rows || []).forEach(function (r) { if (r.lookFirst) lookN++; }); });
+    var facts = (h.facts || []).map(function (f) {
+      if (f.label === "Look first") return lookN ? Object.assign({}, f, { value: plural(lookN, "row") }) : null;
+      if (f.label === "Steps") return bundle.plan ? Object.assign({}, f, { value: String((bundle.plan.steps || []).length) }) : null;
+      return f;
+    }).filter(Boolean).map(function (f) { return '<div class="fact"><span>' + esc(f.label) + "</span><b>" + esc(f.value) + "</b>" + (f.note ? "<span>" + esc(f.note) + "</span>" : "") + "</div>"; }).join("");
+    return '<header class="card head">' + crumbs + '<div class="titlerow"><div><h1>' + esc(pageTitle(h.unit, bundle.page, h.title)) + '</h1><p class="lede">' + esc(h.lede) + "</p></div>" + (facts ? '<div class="facts">' + facts + "</div>" : "") + "</div>" + (st.rv ? rvBanner(st.rv, st.commonNote) : "") + "</header>";
+  }
+  /* what the round on show changed, in one line: the same count as the Changed pill and the timeline (st.rv, from the page's one diff) */
+  function rvBanner(rv, note) {
+    if (!rv || !rv.n) return "";
+    var t = revTone(rv.cur);
+    return '<div class="revs"><span class="sw" style="background:var(--' + t + '-fg)"></span><span>Round ' + int(rv.cur) + " compared with round " + int(rv.since) + ": " + [rv.changed ? rv.changed + " changed" : "", rv.added ? rv.added + " new" : "", rv.removed ? rv.removed + " removed" : ""].filter(Boolean).join(" · ") + ". Each carries its round's tag, in both views." + (note ? " Most changed rows: " + esc(note) : "") + "</span></div>";
   }
 
   function chipFor(st, bundle, key) {
@@ -2030,7 +2156,8 @@ var GateView = (function () {
       var smx = Math.max.apply(null, [0].concat((bundle.plan.steps || []).map(function (s) { return s.rev || 0; })));
       if (smx) { var u = revTone(smx); rev = '<span class="tag" style="background:var(--' + u + "-bg);color:var(--" + u + '-fg)">v' + int(smx) + " ·" + bundle.plan.steps.filter(function (s) { return s.rev; }).length + "</span>"; }
     }
-    return '<a class="chip" href="#' + esc(key) + '" data-jump="' + esc(key) + '">' + esc(short) + rev + top + '<span class="count">' + esc(count) + "</span></a>";
+    var tip = short + ": " + count.replace("/", " of ") + (count ? " not read yet" : "");
+    return '<a class="chip" href="#' + esc(key) + '" data-jump="' + esc(key) + '" title="' + esc(tip) + '">' + esc(short) + rev + top + '<span class="count">' + esc(count) + "</span></a>";
   }
 
   /* the readiness counter: what is left before you answer. Each part is a button that goes to the next such row (keys n and u). */
@@ -2040,18 +2167,34 @@ var GateView = (function () {
       unread ? '<button type="button" class="rdy" data-act="next" data-val="u" title="Go to the next row you have not read (key u)">' + unread + " unread</button>" : ""].filter(Boolean);
     return '<span class="ready" id="ready" role="status" aria-live="polite" data-decisions="' + dec + '" data-unread="' + unread + '">' + (parts.length ? parts.join('<span class="sep" aria-hidden="true"> · </span>') : '<button type="button" class="rdy ok" data-act="toanswer" title="Go to Your answer">Ready to answer</button>') + "</span>";
   }
+  /* The bar is the same on every approval page: one row on a wide screen, at most two short ones on a phone. The filters (All, Needs
+     you, Unread, Changed) and the readiness counter always; Rounds (the timeline), Sections (jump to a block) and View (Summary | Full,
+     Changes | Clean, Look first, High and critical, Expand all, Collapse all, Mark all read) as buttons that open a menu. Each count
+     appears once: the counter holds the unread count, so there is no Read x/y. */
   function barHtml(st, bundle, keys) {
     var items = itemsOf(bundle), read = items.filter(function (x) { return isRead(st, x.key, x.item); }).length;
-    var pct = items.length ? Math.round(read / items.length * 100) : 100;
-    var unitEnd = bundle.page === "unit-end";
+    var unitEnd = bundle.page === "unit-end", rv = st.rv || null, on = st.menu || "";
     var nd = needs(bundle, st);
-    var filters = [["all", "All"], ["look", "Look first"], ["needs", "Needs you", nd.length], ["unread", "Unread"], ["top", unitEnd ? "High and core" : "High and critical"]].concat(st.rvKeys && Object.keys(st.rvKeys).length ? [["changed", "Changed"]] : []);
-    return '<div class="bar" id="bar"><div class="barrow">' +
-      '<div class="seg" role="group" aria-label="Detail"><button type="button" data-act="mode" data-val="summary" aria-pressed="' + (st.mode === "summary") + '">Summary</button><button type="button" data-act="mode" data-val="full" aria-pressed="' + (st.mode === "full") + '">Full</button></div>' +
-      '<div class="filters" role="group" aria-label="Show">' + filters.map(function (f) { return '<button type="button" class="pill" data-act="filter" data-val="' + f[0] + '" aria-pressed="' + (st.filter === f[0]) + '">' + f[1] + (f[2] != null ? '<b class="n">' + f[2] + "</b>" : "") + "</button>"; }).join("") + "</div>" +
-      '<div class="tools">' + readyHtml(nd, items.length - read) + '<span class="progress"><span class="num">Read ' + read + "/" + items.length + '</span><span class="meter" aria-hidden="true"><i style="width:' + pct + '%"></i></span></span>' +
-      '<button type="button" class="btn" data-act="expand">Expand all</button><button type="button" class="btn" data-act="collapse">Collapse all</button><button type="button" class="btn wide" data-act="allread">Mark all read</button></div></div>' +
-      '<nav class="chips" aria-label="Sections">' + keys.map(function (k) { return chipFor(st, bundle, k); }).join("") + "</nav></div>";
+    var lookN = 0, topN = 0;
+    sectionsOf(bundle).forEach(function (s) { (s.rows || []).forEach(function (r) { if (r.lookFirst) lookN++; if (r.label === "critical" || r.label === "high" || r.label === "core") topN++; }); });
+    var filters = [["all", "All", null, "Every block of the page"], ["needs", "Needs you", nd.length, "Only what waits on you: a decision with no pick, or a row not handled that you have not read"], ["unread", "Unread", items.length - read, "Only the rows you have not read yet (key u goes to the next)"]]
+      .concat(rv && rv.n ? [["changed", "Changed", rv.n, "Only what changed, is new or was removed since round " + int(rv.since) + " (" + rv.changed + " changed, " + rv.added + " new, " + rv.removed + " removed)"]] : []);
+    var pills = filters.map(function (f) { return '<button type="button" class="pill" data-act="filter" data-val="' + f[0] + '" aria-pressed="' + (st.filter === f[0]) + '" title="' + esc(f[3]) + '">' + f[1] + (f[2] != null ? '<b class="n">' + f[2] + "</b>" : "") + "</button>"; }).join("");
+    var pop = function (name, body) { return '<div class="bpop" id="m-' + name + '" role="group" aria-label="' + name + '"' + (on === name ? "" : " hidden") + ">" + body + "</div>"; };
+    var mb = function (name, label, tip, extra) { return '<button type="button" class="bmb" data-act="menu" data-val="' + name + '" aria-haspopup="true" aria-expanded="' + (on === name) + '" aria-controls="m-' + name + '" title="' + esc(tip) + '">' + label + (extra || "") + "</button>"; };
+    var rounds = rv ? '<div class="bm">' + mb("rounds", "Rounds", "The rounds of this page and what each one changed", '<span class="n">v' + int(rv.cur) + "</span>") +
+      pop("rounds", '<p class="bmh">What each round changed<span class="hint">press a round to show only its colour</span></p><span id="rvlegend">' + (st.rvTimeline || "") + "</span>" +
+        ((st.rvPick || []).length ? '<label class="rvpick"><span>Compared with</span><select data-rvbase aria-label="The earlier round to compare with">' + st.rvPick.map(function (o) { return '<option value="' + esc(o.id) + '"' + (o.on ? " selected" : "") + ">" + esc(o.label) + "</option>"; }).join("") + "</select></label>" : "") + '<p class="bmh hint">Round ' + int(rv.cur) + " against round " + int(rv.since) + ": " + rv.changed + " changed · " + rv.added + " new · " + rv.removed + " removed</p>") + "</div>" : "";
+    var sections = keys.length ? '<div class="bm">' + mb("sections", "Sections", "Jump to a block of the page") + pop("sections", '<p class="bmh">Jump to<span class="hint">blocks are ordered by what costs most if it is wrong, so the order can change from round to round; the number is rows not read yet of the total</span></p><nav class="chips" aria-label="Sections">' + keys.map(function (k) { return chipFor(st, bundle, k); }).join("") + "</nav>") + "</div>" : "";
+    var view = '<div class="bm">' + mb("view", "View", "Detail, changes, extra filters and the bulk actions") +
+      pop("view", '<div class="bmrow"><span class="bml">Detail</span><div class="seg" role="group" aria-label="Detail"><button type="button" data-act="mode" data-val="summary" aria-pressed="' + (st.mode === "summary") + '" title="One line per row; open a row to read it and write a note">Summary</button><button type="button" data-act="mode" data-val="full" aria-pressed="' + (st.mode === "full") + '" title="Every row open, with its note field">Full</button></div></div>' +
+        (rv ? '<div class="bmrow"><span class="bml">Changes</span><span class="seg rvseg" role="group" aria-label="How the changes show"><button type="button" data-rvview="show" aria-pressed="' + (st.rvShow === true) + '" title="Mark what changed: words added are highlighted, words removed struck">Changes</button><button type="button" data-rvview="clean" aria-pressed="' + (st.rvShow !== true) + '" title="The page as it is now, each round&#39;s changes in that round&#39;s colour">Clean</button></span>' + (st.rvShow === true ? '<span class="rvnav"><button type="button" class="btn" data-rvstep="-1" aria-label="Previous change" title="Previous change (k)">↑</button><span class="num" id="rvpos">' + (st.rvPos || "–") + '</span><button type="button" class="btn" data-rvstep="1" aria-label="Next change" title="Next change (j)">↓</button></span>' : "") + "</div>" : "") +
+        (lookN || topN ? '<div class="bmrow"><span class="bml">Only</span>' +
+          (lookN ? '<button type="button" class="pill" data-act="filter" data-val="look" aria-pressed="' + (st.filter === "look") + '" title="Rows the agent marked to look at first">Look first<b class="n">' + lookN + "</b></button>" : "") +
+          (topN ? '<button type="button" class="pill" data-act="filter" data-val="top" aria-pressed="' + (st.filter === "top") + '" title="' + (unitEnd ? "Rows labelled high or core" : "Rows labelled high or critical") + '">' + (unitEnd ? "High and core" : "High and critical") + '<b class="n">' + topN + "</b></button>" : "") + "</div>" : "") +
+        '<div class="bmrow"><button type="button" class="btn" data-act="expand" title="Open every section and row">Expand all</button><button type="button" class="btn" data-act="collapse" title="Close every section and row">Collapse all</button></div>' +
+        '<div class="bmrow"><button type="button" class="btn" data-act="allread" title="Mark every row read (a decision still waits for its pick)">Mark all read</button></div>') + "</div>";
+    return '<div class="bar" id="bar"><div class="barrow"><div class="filters" role="group" aria-label="Show">' + pills + "</div>" + readyHtml(nd, items.length - read) + '<div class="bmenus">' + rounds + sections + view + "</div></div></div>";
   }
 
   function footerHtml(st, bundle) {
@@ -2064,19 +2207,23 @@ var GateView = (function () {
   /* A section with nothing to show is left out, with its heading, counts and nav chip: it has no rows, or the filter hides
      every one. A section that says something without rows (the design stays as approved, a map) stays. */
   function hasContent(st, bundle, key) {
-    if (key === "plan") { var steps = bundle.plan.steps || []; return steps.some(function (x) { return passes(st, x, stepKey(x), true); }); }
+    if (key === "plan") { var steps = bundle.plan.steps || []; return steps.some(function (x) { return passes(st, x, stepKey(x), true); }) || hasGone(st, "plan"); }
     /* the answers and the approved design hold nothing to read: they show with the whole page, never under a filter */
     if (key === "records") return st.filter === "all" && ((bundle.answers || []).length > 0 || !!(bundle.design && ((bundle.design.rows || []).length || bundle.design.bundle || bundle.design.url)));
     var s = sectionOfKey(bundle, key);
     if (!s) return false;
     if (s.asApproved || (s.map && st.filter === "all")) return true;
-    return (s.rows || []).some(function (r) { return passes(st, r, rowKey(r), false); });
+    return (s.rows || []).some(function (r) { return passes(st, r, rowKey(r), false); }) || hasGone(st, key);
   }
+  function hasGone(st, key) { return (st.filter === "all" || st.filter === "changed") && ((st.rvRemoved || {})[key] || []).length > 0 && (st.filter === "changed" || false); }
 
   /* The whole page for one bundle. st: {mode, filter, open, sec, read, notes, picks, noteStat}. */
   function render(bundle, st) {
-    st = Object.assign({ mode: "full", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {}, vstate: {} }, st || {});
+    st = Object.assign({ mode: "summary", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {}, vstate: {} }, st || {});
     st.needsNow = {}; needs(bundle, st).forEach(function (n) { st.needsNow[n.key] = 1; });
+    /* the same words of reasoning on most changed rows are said once, in the banner, not on every row */
+    var notes = {}; itemsOf(bundle).forEach(function (x) { if (x.item.rev && x.item.revNote) notes[x.item.revNote] = (notes[x.item.revNote] || 0) + 1; });
+    st.commonNote = ""; Object.keys(notes).forEach(function (k) { if (notes[k] >= 4 && notes[k] > (notes[st.commonNote] || 0)) st.commonNote = k; });
     var keys = order(bundle).filter(function (k) { return hasContent(st, bundle, k); }), parts = {};
     sectionsOf(bundle).forEach(function (s) { parts[s.key] = sectionHtml(st, bundle, s); });
     if (bundle.plan) parts.plan = planHtml(st, bundle);
@@ -2085,15 +2232,20 @@ var GateView = (function () {
     return headerHtml(st, bundle) + barHtml(st, bundle, keys) + "<main>" + keys.map(function (k) { return parts[k]; }).join("") + empty + (st.filter === "all" ? answerHtml(st, bundle) : "") + footerHtml(st, bundle) + idIndex(bundle) + "</main>";
   }
 
+  /* one English date, in UTC, the same on every approval page */
+  function listDate(iso) { try { var d = new Date(iso); return isNaN(d) ? String(iso || "") : d.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" }) + " UTC"; } catch (e) { return String(iso || ""); } }
   function listHtml(rows) {
     if (!rows.length) return '<div class="card msg"><b>No pages yet.</b><p>The agent adds one here at a Unit’s plan approval and at its unit-end approval, and gives you its link, which ends in # and the page’s id.</p></div>';
-    var groups = {};
+    var groups = {}, current = {};
+    var verOf = function (r) { return int(((r.bundle || {}).header || {}).revision || 1); };
+    rows.forEach(function (r) { var k = (r.unit || "") + "|" + (r.page || ""), c = current[k]; if (!c || verOf(r) > verOf(c) || (verOf(r) === verOf(c) && String(r.createdAt || "") > String(c.createdAt || ""))) current[k] = r; });
     rows.forEach(function (r) { var k = (r.intent || "") + " · " + (r.unit || ""); (groups[k] = groups[k] || []).push(r); });
     return '<header class="card head"><div class="crumbs"><span>AI-DLC</span></div><h1>Unit approvals</h1><p class="lede">One page at each Unit’s plan approval and one at its end. Read here; answer in chat.</p></header>' +
       Object.keys(groups).map(function (k) {
         return '<section class="card list"><h2>' + esc(k) + "</h2>" + groups[k].map(function (r) {
-          var b = r.bundle || {}, h = b.header || {};
-          return '<a class="lrow" href="#' + esc(r.id) + '" data-nav="' + esc(r.id) + '"><b>' + esc(pageTitle(r.unit || h.unit, r.page, r.title || h.title) || r.id) + "</b><small>" + esc(r.page === "plan" ? "Plan approval" : "Unit end") + " · v" + int(h.revision || 1) + " · " + esc(String(r.createdAt || "").replace("T", " ").replace(/:\d\d(\.\d+)?Z$/, " UTC")) + '</small><span class="end lc" style="' + tone(r.status === "open" ? "warn" : "low") + '">' + esc(r.status || "") + "</span></a>";
+          var b = r.bundle || {}, h = b.header || {}, cur = current[(r.unit || "") + "|" + (r.page || "")] === r, n = itemsOf(b).length;
+          return '<a class="lrow' + (cur ? "" : " old") + '" href="#' + esc(r.id) + '" data-nav="' + esc(r.id) + '"><b>' + esc(pageTitle(r.unit || h.unit, r.page, r.title || h.title) || r.id) + "</b><small>" + esc(r.page === "plan" ? "Plan approval" : "Unit end") + " · round " + verOf(r) + " · " + esc(listDate(r.createdAt)) + (n ? " · " + plural(n, "row") : "") + '</small><span class="end">' +
+            (cur ? '<span class="lc" style="' + tone("ok") + '" title="The newest page of this ' + (r.page === "plan" ? "plan" : "Unit end") + '">current</span><span class="lc" style="' + tone(r.status === "open" ? "warn" : "low") + '">' + esc(r.status || "") + "</span>" : '<span class="lc" style="' + tone("low") + '" title="A later round replaced this page">replaced by round ' + verOf(current[(r.unit || "") + "|" + (r.page || "")]) + "</span>") + "</span></a>";
         }).join("") + "</section>";
       }).join("");
   }
@@ -2103,7 +2255,7 @@ var GateView = (function () {
     var s2 = Object.assign({}, st); s2.needsNow = {}; needs(bundle, st).forEach(function (n) { s2.needsNow[n.key] = 1; });
     return passes(s2, x.item, x.key, x.isStep);
   }
-  return { passesFilter: passesFilter, needs: needs, walk: walk, render: render, listHtml: listHtml, pageTitle: pageTitle, order: order, sortRows: sortRows, anchor: anchor, itemsOf: itemsOf, itemsOfSection: itemsOfSection, sectionsOf: sectionsOf, rowKey: rowKey, isRead: isRead, applyTestPick: applyTestPick, esc: esc, idMap: idMap };
+  return { answerHtml: answerHtml, passesFilter: passesFilter, needs: needs, walk: walk, render: render, listHtml: listHtml, pageTitle: pageTitle, order: order, sortRows: sortRows, anchor: anchor, itemsOf: itemsOf, itemsOfSection: itemsOfSection, sectionsOf: sectionsOf, rowKey: rowKey, isRead: isRead, applyTestPick: applyTestPick, esc: esc, idMap: idMap };
 })();
 if (typeof module !== "undefined") module.exports = GateView;
 /* RENDER-END */
@@ -2115,7 +2267,7 @@ if (typeof module !== "undefined") module.exports = GateView;
   var db = null, user = null, uid = null;
   var view = { nav: {}, id: "", row: null, bundle: null, ids: {}, unsub: [], st: null, readKey: "", saving: false, unsaved: false, timer: 0, rounds: [], base: null, rvAt: -1, rvOnly: 0 };
 
-  function freshState() { return { mode: "full", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {}, vstate: {} }; }
+  function freshState() { return { mode: "summary", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {}, vstate: {}, menu: "" }; }
   function toast(text) { toastEl.textContent = text; toastEl.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(function () { toastEl.hidden = true; }, 2400); }
   function teardown() {
     if (view.unsaved) flush();  /* sends the pending note of the page being left; flush reads the id before it awaits */
@@ -2131,6 +2283,10 @@ if (typeof module !== "undefined") module.exports = GateView;
     hideTip();
     var y = window.scrollY, active = document.activeElement, focusKey = active && (active.dataset.note || null);
     rvKeys();
+    var D = rvDelta(), st = view.st;
+    st.rv = rvInfo(D); st.rvRemoved = rvGhosts(D); st.rvShow = RevDiff.pref() === "show"; st.rvTimeline = rvTimeline();
+    st.rvPos = view.rvAt >= 0 ? (view.rvAt + 1) + " / " + (rvStops().length || 0) : "–";
+    st.rvPick = view.rounds.map(function (r) { var h = r.row.bundle.header || {}; return { id: r.id, label: "Round " + (h.revision || 1) + " · " + fmtDate(r.row.createdAt), on: !!(view.base && view.base.id === r.id) }; });
     app.innerHTML = GateView.render(view.bundle, view.st);
     rvMark();
     barHeight();
@@ -2243,8 +2399,10 @@ if (typeof module !== "undefined") module.exports = GateView;
       paint(); return;
     }
     var btn = e.target.closest("[data-act]");
-    if (!btn || !view.st) return;
+    if (!btn || !view.st) { if (view.st && view.st.menu && !e.target.closest(".bm")) { view.st.menu = ""; paint(); } return; }
     var st = view.st, act = btn.dataset.act, key = btn.dataset.key, val = btn.dataset.val, rev = view.bundle.header.revision || 1;
+    if (act !== "menu" && st.menu && !btn.closest(".bm")) st.menu = "";
+    if (act === "menu") { st.menu = st.menu === val ? "" : val; paint(); var again = document.querySelector('[data-act="menu"][data-val="' + val + '"]'); if (again) again.focus({ preventScroll: true }); return; }
     if (act === "row") {
       var twist = app.querySelector('.twist[data-act="row"][data-key="' + key + '"]');
       st.open[key] = twist ? twist.getAttribute("aria-expanded") !== "true" : !st.open[key];
@@ -2285,6 +2443,9 @@ if (typeof module !== "undefined") module.exports = GateView;
     var key = e.target.dataset && e.target.dataset.note;
     if (!key || !view.st) return;
     view.st.notes[key] = e.target.value; setStat(key, "Unsaved"); queueSave();
+    /* Your answer follows what is written the moment it is written, without redrawing the field being typed in */
+    var ans = document.getElementById("answer");
+    if (ans && view.st.filter === "all") { var tmp = document.createElement("div"); tmp.innerHTML = GateView.answerHtml(view.st, view.bundle); if (tmp.firstChild) ans.replaceWith(tmp.firstChild); }
   });
   /* the readiness counter's jumps: the next decision without a pick (n) or the next unread row (u), in the order the page shows them */
   function goNext(kind) {
@@ -2304,6 +2465,11 @@ if (typeof module !== "undefined") module.exports = GateView;
     var el = document.getElementById(next.anchor);
     if (el) { el.scrollIntoView({ block: "center", behavior: "auto" }); el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); }
   }
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && view.st && view.st.menu) { var m = view.st.menu; view.st.menu = ""; paint(); var b = document.querySelector('[data-act="menu"][data-val="' + m + '"]'); if (b) b.focus({ preventScroll: true }); } });
+  /* a press anywhere outside a menu closes it */
+  document.addEventListener("click", function (e) { if (view.st && view.st.menu && !(e.target.closest && e.target.closest(".bm"))) { view.st.menu = ""; paint(); } });
+  /* one English date everywhere, never the browser's own locale */
+  function fmtDate(iso) { try { var d = new Date(iso); return isNaN(d) ? String(iso || "") : d.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }); } catch (e) { return String(iso || ""); } }
   document.addEventListener("keydown", function (e) {
     if (e.metaKey || e.ctrlKey || e.altKey || !view.st || !view.bundle || (e.target.closest && e.target.closest("textarea, input, select, [contenteditable]"))) return;
     if (e.key === "n" || e.key === "u") { e.preventDefault(); goNext(e.key); }
@@ -2325,83 +2491,97 @@ if (typeof module !== "undefined") module.exports = GateView;
       view.rounds = snap.docs.map(function (d) { return { id: d.id, row: d.data() }; }).filter(function (x) {
         var xb = x.row.bundle; return x.id !== id && xb && xb.header && (x.row.unit || xb.header.unit) === unit && xb.page === b.page && String(x.row.createdAt || xb.createdAt || "") < at;
       }).sort(function (x, y) { return String(y.row.createdAt || "").localeCompare(String(x.row.createdAt || "")); });
-      view.base = view.rounds[0] || null; view.rvAt = -1; paint();
+      /* rows carry the round that last changed them, so Changed compares with the first round: everything any round touched, each with its tag.
+         The Rounds menu picks a later one. */
+      view.base = view.rounds[view.rounds.length - 1] || null; view.rvAt = -1; paint();
     }).catch(function () { /* no comparison: the page reads as it is */ });
   }
   /* what the server counts as a change (unit_bundle.py ROW_FIELDS and a step's fields): a row changed in any of them is tagged, so none is unread without a mark */
   function rvSig(it) { return JSON.stringify([it.title || "", it.body || "", (it.subs || []).map(function (s) { return s.text; }), it.label || "", it.layer || "", (it.refs || []).map(function (r) { return [r.label, r.tip, r.target]; }), it.coveredBy || null, it.suggestion || "", it.where || "", !!it.lookFirst, it.files || 0, (it.implements || []).map(function (r) { return [r.label, r.target]; })]); }
-  function rvDelta() {
-    var base = view.base && view.base.row.bundle; if (!base) return null;
-    var old = {}; GateView.itemsOf(base).forEach(function (x) { old[x.key] = x; });
+  /* THE diff of the page: what bundle b did to the rows and steps of bundle a. The Changed pill, the banner, the timeline, the row marks and the
+     struck rows all read it, so they cannot disagree. items: new and changed ones of b; removed: the ones of a that b no longer has. */
+  function rvDiffBundles(a, b) {
+    var old = {}; GateView.itemsOf(a).forEach(function (x) { old[x.key] = x; });
     var seen = {}, out = { items: [], removed: [] };
-    GateView.itemsOf(view.bundle).forEach(function (x) {
+    GateView.itemsOf(b).forEach(function (x) {
       seen[x.key] = 1; var o = old[x.key] && old[x.key].item;
       var t = !o ? "new" : rvSig(o) === rvSig(x.item) ? "" : "changed";
-      if (t) out.items.push({ key: x.key, anchor: x.anchor, item: x.item, old: o, t: t });
+      if (t) out.items.push({ key: x.key, anchor: x.anchor, item: x.item, old: o, t: t, sec: x.sec });
     });
-    GateView.itemsOf(base).forEach(function (x) { if (!seen[x.key]) out.removed.push(x.item); });
+    GateView.itemsOf(a).forEach(function (x) { if (!seen[x.key]) out.removed.push(x); });
+    return out;
+  }
+  function rvDelta() { var base = view.base && view.base.row.bundle; return base ? rvDiffBundles(base, view.bundle) : null; }
+  function rvCounts(D) { var c = D.items.filter(function (x) { return x.t === "changed"; }).length, n = D.items.length - c; return { changed: c, added: n, removed: D.removed.length, n: D.items.length + D.removed.length }; }
+  function rvInfo(D) {
+    if (!D) return null;
+    var base = view.base.row.bundle, c = rvCounts(D);
+    return Object.assign({ cur: (view.bundle.header || {}).revision || 1, since: (base.header || {}).revision || 1 }, c);
+  }
+  /* the removed ones, each where it stood: after the row before it that is still there, in its own section */
+  function rvGhosts(D) {
+    var base = view.base && view.base.row.bundle; if (!D || !base || !D.removed.length) return null;
+    var cur = (view.bundle.header || {}).revision || 1, here = {}, secs = {};
+    GateView.itemsOf(view.bundle).forEach(function (x) { here[x.key] = 1; secs[x.sec] = 1; });
+    var out = {}, orphan = [], last = {};
+    GateView.itemsOf(base).forEach(function (x) {
+      if (here[x.key]) { last[x.sec] = x.anchor; return; }
+      var g = { id: x.item.id || ("Step " + (x.item.n || "?")), title: x.item.title || "", after: last[x.sec] || "", tag: "v" + cur + " removed" };
+      if (secs[x.sec]) (out[x.sec] = out[x.sec] || []).push(g); else orphan.push(g);
+    });
+    if (orphan.length) out._orphan = orphan;
     return out;
   }
   function rvKeys() { var D = rvDelta(); view.st.rvKeys = {}; if (D) D.items.forEach(function (x) { view.st.rvKeys[x.key] = 1; }); if (!D && view.st.filter === "changed") view.st.filter = "all"; }
   function wordsOf(a, b) { var c = { ins: 0, del: 0 }; RevDiff.words(a || "", b || "").forEach(function (s) { if (s.t === "+") c.ins += RevDiff.countWords(s.s); if (s.t === "-") c.del += RevDiff.countWords(s.s); }); return c; }
-  function itemName(it) { return (it.id || ("Step " + (it.n || "?"))) + " · " + (it.title || ""); }
   function rvCount(c) { return c && (c.ins || c.del) ? '<span class="rv-n">' + (c.ins ? '<span class="p">+' + c.ins + "</span>" : "") + (c.ins && c.del ? " " : "") + (c.del ? '<span class="m">−' + c.del + "</span>" : "") + "</span>" : ""; }
-  function rvTagHtml(t) { return '<span class="rv-tag ' + (t === "new" ? "new" : t === "gone" ? "gone" : "chg") + '">' + (t === "new" ? "new" : t === "gone" ? "removed" : "changed") + "</span>"; }
+  function rvTagHtml(t, round) { return '<span class="rv-tag ' + (t === "new" ? "new" : t === "gone" ? "gone" : "chg") + '">' + (round ? "v" + round + " " : "") + (t === "new" ? "new" : t === "gone" ? "removed" : "changed") + "</span>"; }
+  /* the marks of the round on show, in both views: a row the server tagged ("v3 changed") keeps that one tag and gains its word counts under Changes;
+     a row it did not tag gets the tag here. Under Changes the words that changed are marked inside the row; Clean colours each round's words. */
   function rvMark() {
-    var D = rvDelta(), main = app.querySelector("main"), esc = GateView.esc;
+    var D = rvDelta(), main = app.querySelector("main");
     app.dataset.rv = RevDiff.pref();
     if (!D || !main) return;
-    if (RevDiff.pref() === "clean") { rvClean(main, D); return; }
-    var baseV = (view.base.row.bundle.header || {}).revision || 1, show = RevDiff.pref() === "show";
-    var total = { ins: 0, del: 0 };
+    var show = RevDiff.pref() === "show", cur = (view.bundle.header || {}).revision || 1;
+    app.classList.remove("rv-t2", "rv-t3", "rv-t4", "rv-t5"); app.classList.add("rv-t" + RevDiff.tone(cur));  /* --rvc: the round on show */
     D.items.forEach(function (x) {
       var o = x.old || {}, it = x.item;
       var c = x.t === "new" ? { ins: RevDiff.countWords([it.title, it.body].concat((it.subs || []).map(function (s) { return s.text; })).join(" ")), del: 0 }
         : (function () { var a = wordsOf(o.title, it.title), b = wordsOf(o.body, it.body), s = wordsOf((o.subs || []).map(function (q) { return q.text; }).join("\n"), (it.subs || []).map(function (q) { return q.text; }).join("\n")); return { ins: a.ins + b.ins + s.ins, del: a.del + b.del + s.del }; })();
-      x.c = c; total.ins += c.ins; total.del += c.del;
+      x.c = c;
       var node = document.getElementById(x.anchor); if (!node) return;
       node.classList.add(x.t === "new" ? "rv-new" : "rv-chg", "rv-stop");
-      var head = node.querySelector(".rowhead"), span = document.createElement("span");
-      span.className = "rv-tags"; span.setAttribute("data-rv-skip", ""); span.innerHTML = rvTagHtml(x.t) + rvCount(c);
-      if (head) head.insertBefore(span, head.querySelector(".lab, .layer, .dot"));
-      if (x.t !== "changed") return;
+      var head = node.querySelector(".rowhead"), span = document.createElement("span"), tagged = head && head.querySelector(".rvb");
+      span.className = "rv-tags"; span.setAttribute("data-rv-skip", ""); span.innerHTML = (tagged ? "" : rvTagHtml(x.t, cur)) + (show ? rvCount(c) : "");
+      if (head && span.innerHTML) head.insertBefore(span, head.querySelector(".lab, .layer, .dot"));
+      if (!show || x.t !== "changed") return;
       var tt = node.querySelector(".rtitle"); if (tt && (o.title || "") !== (it.title || "")) RevDiff.markText(tt, o.title || "");
       var p = node.querySelector(".rowbody > p:not(.revnote)"); if (p && (o.body || "") !== (it.body || "")) RevDiff.markText(p, o.body || "");
       var subs = node.querySelector(".rowbody > ol.subs");
       if (subs) { var was = document.createElement("ol"); (o.subs || []).forEach(function (q) { var li = document.createElement("li"); li.textContent = q.text; was.appendChild(li); }); RevDiff.markTree(subs, was, { skip: ".sv" }); }
     });
-    var pick = view.rounds.map(function (r) { var h = r.row.bundle.header || {}; return '<option value="' + esc(r.id) + '"' + (view.base && view.base.id === r.id ? " selected" : "") + ">v" + (h.revision || 1) + " · " + esc(String(r.row.createdAt || "").replace("T", " ").replace(/:\d\d(\.\d+)?Z$/, " UTC")) + "</option>"; }).join("");
-    var n = D.items.length + D.removed.length;
-    var strip = document.createElement("section");
-    strip.className = "card rvstrip"; strip.id = "rvstrip"; strip.setAttribute("data-rv-skip", ""); strip.setAttribute("aria-label", "What changed since v" + baseV);
-    strip.innerHTML = '<div class="rvtop"><h2>What changed since v' + baseV + '</h2><span class="hint">' + (n ? n + (n === 1 ? " change" : " changes") + " · " + (rvCount(total) || "no words") : "Nothing differs from v" + baseV) + "</span>" +
-      '<label class="rvpick"><span>Compared with</span><select data-rvbase aria-label="The earlier version to compare with">' + pick + "</select></label>" +
-      '<span class="seg rvseg" role="group" aria-label="Changes"><button type="button" data-rvview="show" aria-pressed="' + show + '">Changes</button><button type="button" data-rvview="clean" aria-pressed="' + !show + '">Clean</button></span>' +
-      (show ? '<span class="rvnav"><button type="button" class="btn" data-rvstep="-1" aria-label="Previous change" title="Previous change (k)">↑</button><span class="num" id="rvpos">' + (view.rvAt >= 0 ? view.rvAt + 1 : "–") + " / " + rvStops().length + '</span><button type="button" class="btn" data-rvstep="1" aria-label="Next change" title="Next change (j)">↓</button></span>' : "") + "</div>" +
-      (n ? '<ul class="rvlist">' + D.items.map(function (x) { return '<li><a href="#' + esc(x.anchor) + '" data-jump="' + esc(x.anchor) + '">' + rvTagHtml(x.t) + '<span class="rvt">' + esc(itemName(x.item)) + "</span>" + rvCount(x.c) + "</a></li>"; }).join("") +
-        D.removed.map(function (it) { return '<li class="gone"><span>' + rvTagHtml("gone") + '<span class="rvt">' + esc(itemName(it)) + "</span></span></li>"; }).join("") + "</ul>" : "");
-    main.insertBefore(strip, main.firstChild);
+    if (!show) rvClean(main, D);
     var pos = document.getElementById("rvpos"); if (pos) pos.textContent = (view.rvAt >= 0 ? view.rvAt + 1 : "–") + " / " + rvStops().length;
   }
-  /* Clean view: every version's changes in that version's colour, the latest version winning where they clash. The
-     versions of the Unit page, oldest first, are folded forward onto this one (RevDiff.attributeTree): a word keeps the
-     colour of the version that last wrote it, a row that first appeared in a later version carries that version's edge.
-     Computed once per paint from the bundles already loaded. */
-  /* what each version did to the page's rows: changed (it says something else), added, removed; the words are the colour's own */
-  function unitRoundStats(chain, nos, maps, counts) {
-    var sig = function (it) { return JSON.stringify([it.title, it.body, it.subs || [], it.label || "", it.refs || [], it.coveredBy || null]); };
-    var out = [{ k: nos[0], tone: RevDiff.tone(nos[0]), base: true, changed: 0, added: 0, removed: 0 }];
-    for (var i = 1; i < chain.length; i++) {
-      var a = maps[i - 1], b = maps[i], c = 0, n = 0, g = 0;
-      Object.keys(b).forEach(function (k) { if (!a[k]) n++; else if (sig(a[k]) !== sig(b[k])) c++; });
-      Object.keys(a).forEach(function (k) { if (!b[k]) g++; });
-      out.push({ k: nos[i], tone: RevDiff.tone(nos[i]), changed: c, added: n, removed: g, words: counts[nos[i]] || 0 });
-    }
-    return out;
-  }
-  function rvClean(main, D) {
+  /* The chain of versions of this page, oldest first, with each version's number */
+  function rvChain() {
     var chain = view.rounds.slice().reverse().map(function (r) { return r.row.bundle; }).concat([view.bundle]), nos = [];
     chain.forEach(function (b, i) { var no = (b.header || {}).revision || i + 1; nos.push(i && no <= nos[i - 1] ? nos[i - 1] + 1 : no); });
+    return { chain: chain, nos: nos };
+  }
+  /* what each version did to the page's rows, from the one diff: changed, added, removed; the words are the colour's own */
+  function unitRoundStats(chain, nos, counts) {
+    var out = [{ k: nos[0], tone: RevDiff.tone(nos[0]), base: true, changed: 0, added: 0, removed: 0 }];
+    for (var i = 1; i < chain.length; i++) { var c = rvCounts(rvDiffBundles(chain[i - 1], chain[i])); out.push({ k: nos[i], tone: RevDiff.tone(nos[i]), changed: c.changed, added: c.added, removed: c.removed, words: (counts || {})[nos[i]] || 0 }); }
+    return out;
+  }
+  function rvTimeline() { if (!view.base) return ""; var c = rvChain(); return GateViz.timeline(unitRoundStats(c.chain, c.nos, null), view.rvOnly); }
+  /* Clean view: every version's changes in that version's colour, the latest version winning where they clash. The
+     versions of the Unit page, oldest first, are folded forward onto this one (RevDiff.attributeTree): a word keeps the
+     colour of the version that last wrote it, a row that first appeared in a later version carries that version's edge and tag.
+     Computed once per paint from the bundles already loaded. */
+  function rvClean(main, D) {
+    var ch = rvChain(), chain = ch.chain, nos = ch.nos;
     var maps = chain.map(function (b) { var m = {}; GateView.itemsOf(b).forEach(function (x) { m[x.key] = x.item; }); return m; });
     var counts = {}, add = function (c) { Object.keys(c.words).forEach(function (k) { counts[k] = (counts[k] || 0) + c.words[k]; }); };
     var plain = function (text) { var p = document.createElement("p"); p.textContent = text || ""; return p; };
@@ -2409,7 +2589,11 @@ if (typeof module !== "undefined") module.exports = GateView;
       var node = document.getElementById(x.anchor); if (!node) return;
       var its = maps.map(function (m) { return m[x.key] || null; }), last = chain.length - 1, start = 0;
       for (var i = last; i > 0; i--) if (its[i] && !its[i - 1]) { start = i; break; }
-      if (start) node.classList.add("rv-rb", "rv-t" + RevDiff.tone(nos[start]), "rv-r" + nos[start]);
+      if (start) {
+        node.classList.add("rv-rb", "rv-t" + RevDiff.tone(nos[start]), "rv-r" + nos[start]);
+        var head = node.querySelector(".rowhead");
+        if (head && !head.querySelector(".rvb, .rv-tags")) { var sp = document.createElement("span"); sp.className = "rv-tags"; sp.setAttribute("data-rv-skip", ""); sp.innerHTML = '<span class="rv-tag new rv-t' + RevDiff.tone(nos[start]) + '">v' + nos[start] + " new</span>"; head.insertBefore(sp, head.querySelector(".lab, .layer, .dot")); }
+      }
       if (start) counts[nos[start]] = counts[nos[start]] || 0;
       var rounds = nos.slice(start), field = function (sel, make) {
         var target = node.querySelector(sel); if (!target) return;
@@ -2419,13 +2603,7 @@ if (typeof module !== "undefined") module.exports = GateView;
       field(".rowbody > p:not(.revnote)", function (it) { return plain(it.body); });
       field(".rowbody > ol.subs", function (it) { var ol = document.createElement("ol"); (it.subs || []).forEach(function (q) { var li = document.createElement("li"); li.textContent = q.text; ol.appendChild(li); }); return ol; });
     });
-    var strip = document.createElement("section");
-    strip.className = "card rvstrip"; strip.id = "rvstrip"; strip.setAttribute("data-rv-skip", ""); strip.setAttribute("aria-label", "What changed, by version");
-    strip.innerHTML = '<div class="rvtop"><h2>What changed, by version</h2>' + GateViz.timeline(unitRoundStats(chain, nos, maps, counts), view.rvOnly) +
-      '<span class="hint">Each colour is the version that last changed the text</span>' +
-      '<span class="seg rvseg" role="group" aria-label="Changes"><button type="button" data-rvview="show" aria-pressed="false">Changes</button><button type="button" data-rvview="clean" aria-pressed="true">Clean</button></span></div>' +
-      (D.removed.length ? '<ul class="rvlist rvgoneList">' + D.removed.map(function (it) { return '<li class="gone"><span>' + rvTagHtml("gone") + '<span class="rvt">' + GateView.esc(itemName(it)) + "</span></span></li>"; }).join("") + "</ul>" : "");
-    main.insertBefore(strip, main.firstChild);
+    var slot = document.getElementById("rvlegend"); if (slot) slot.innerHTML = GateViz.timeline(unitRoundStats(chain, nos, counts), view.rvOnly);
     RevDiff.only(main, view.rvOnly);
   }
   function rvStops() { return RevDiff.stops(app).filter(function (n) { return !n.closest("#rvstrip"); }); }

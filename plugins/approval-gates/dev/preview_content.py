@@ -159,6 +159,20 @@ def components(rnd):
     return "# Components\n\nThe pieces of the pre-order app and what each one depends on.\n\n```yaml\ncomponents:\n" + "\n".join(rows) + "\n```\n"
 
 
+def unit_of_work(rnd):
+    """unit-of-work.md: one `### U<n> Name` heading per Unit, what it owns under it. Units Generation's items are these."""
+    units = [("U1", "Core ordering"), ("U2", "Pick-up slots"), ("U3", "The baker's list"), ("U4", "Reminders"), ("U5", "Stock"), ("U6", "Payments"), ("U7", "Allergens"), ("U8", "Loyalty stamps")]
+    if rnd >= 2:
+        units.append(("U9", "Saturday bake"))
+    if rnd >= 3:
+        units.pop(7)
+    out = ["# Units of work", "", "How the pre-order app is cut into Units a team can build and ship one at a time.", "", "## Units", ""]
+    for uid, name in units:
+        out += [f"### {uid} {name}", "", sentence(("unit", uid)) + " " + sentence(("unit2", uid, rnd if uid == "U9" else 0)), "",
+                f"- Owns: {pick(TOPICS, 'own', uid)}, {pick(TOPICS, 'own2', uid)}", f"- Depends on: {'none' if uid == 'U1' else 'U1'}", ""]
+    return "\n".join(out)
+
+
 def units_deps(rnd):
     u = [("U1", "Core ordering", []), ("U2", "Pick-up slots", ["U1"]), ("U3", "The baker's list", ["U1", "U2"]), ("U4", "Reminders", ["U2"]), ("U5", "Stock", ["U1"]),
          ("U6", "Payments", ["U1"]), ("U7", "Allergens", ["U5"]), ("U8", "Loyalty stamps", ["U6"])]
@@ -255,6 +269,8 @@ def documents(slug, produces, rnd, unit=False):
             out[key] = stories(rnd)
         elif key == "components":
             out[key] = components(rnd)
+        elif key == "unit-of-work":
+            out[key] = unit_of_work(rnd)
         elif key == "unit-of-work-dependency":
             out[key] = units_deps(rnd)
         elif key == "functional-spec":

@@ -17,7 +17,7 @@ function tools(w) {
   const shown = (n) => !!n && !n.hidden && !n.closest("[hidden]") && !n.closest(".eh");
   const filter = (name) => all("#bar .fpill").find((b) => b.firstChild.textContent === name).click();
   const pill = (name) => text(all("#bar .fpill").find((b) => b.firstChild.textContent === name));
-  const ready = () => ({ text: text($("#ready")), decisions: +$("#ready").dataset.decisions, unread: +$("#ready").dataset.unread });
+  const ready = () => ({ text: text($("#ready")), decisions: +$("#ready").dataset.decisions, looks: +$("#ready").dataset.looks, unread: +$("#ready").dataset.unread });
   const press = (key, target) => (target || d).dispatchEvent(new w.KeyboardEvent("keydown", { key, bubbles: true }));
   const clearFlash = () => all(".flash").forEach((n) => n.classList.remove("flash"));
   const flashed = () => all(".flash").map((n) => n.dataset.item || n.dataset.ekey || n.id).filter(Boolean);
@@ -126,6 +126,9 @@ const scenarios = {
     out.afterPicks = t.ready();
     $("[data-allread]").click();
     out.afterRead = t.ready();
+    /* what is tagged not handled or failing stays until it is acknowledged: reading it did not settle it */
+    out.acks = all("[data-ack]").length; all("[data-ack]").forEach((b) => b.click());
+    out.afterAck = t.ready();
     $('[data-rdy="a"]').click();
     out.answerOpen = $("#b-answer").open; out.answerShown = t.shown($("#b-answer"));
     out.flashAnswer = $("#b-answer").classList.contains("flash");
@@ -167,7 +170,7 @@ const scenarios = {
       rows: all("#b-records details.doc").map(row),
       docsOutside: all("#col details.block.doc").filter((b) => !b.closest("#b-records")).map((b) => b.id),
       oldBlocks: [!!$("#b-reference"), !!$("#b-aswritten")],
-      chips: all("#bar .jchip").map(text),
+      chips: all("#col > details.block:not([hidden])").map((b) => text(b.querySelector(":scope > summary"))),
       readyBefore: t.ready(),
     };
   },
@@ -183,7 +186,7 @@ const scenarios = {
     out.hasSource = !!src;
     t.clearFlash(); src.click();
     out.afterGo = { records: $("#b-records").open, doc: $("#d-build-and-test-summary").open, flashed: $("#d-build-and-test-summary").classList.contains("flash") };
-    const link = all("#bar .jchip").find((c) => /Records/.test(c.textContent));
+    const link = all("#rail [data-go=\"b-records\"]")[0];
     $("#b-records").open = false; link.click();
     out.afterChip = { records: $("#b-records").open, hasChip: !!link };
     $("#b-records").open = false;

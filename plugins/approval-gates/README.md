@@ -56,11 +56,14 @@ validates the bundle.
 The page lives in a second private artifact, **AI-DLC unit approvals** (`unit-gate.html`, with the `db` and `user`
 capabilities):
 
-- Everything starts open: every section and every row (the Summary view folds rows to one line). Pressing a
-  row's read dot marks it read and folds it; marking it unread opens it again. Mark all read folds every row.
-- A sticky bar holds Summary/Full, the filters (All, Look first, Unread, High and critical), Expand all and Collapse
-  all, your read progress, and a chip per section.
-- Revisions v2, v3 and so on each have their own colour, down to the sub-step, with one filter per revision.
+- The page opens in Summary: one line per row, a row opens on demand (Full opens every row with its note field). Pressing a
+  row's read dot marks it read and folds it; marking it unread opens it again. Mark all read folds every row. A suggestion's
+  Do it / Leave it sit on the row's own line.
+- One sticky bar, one row (the same bar as the per-stage page): the filters (All, Needs you, Unread, Changed) and the readiness
+  counter, then Rounds (the timeline, and the round to compare with), Sections (jump to a block) and View (Summary | Full,
+  Changes | Clean, Look first, High and critical, Expand all, Collapse all, Mark all read), each a menu.
+- Rounds v2, v3 and so on each have their own colour, down to the sub-step. A row carries its round's tag ("v3 changed") in both
+  views, removed rows are listed where they were, struck, and Changed (compared with the first round by default) shows all of it.
 - Read marks are yours. On a new revision, only the changed rows turn unread.
 - Every reviewer finding, requirement and NFR row says where it is handled (a plan step, a document section, a code or
   test file, a later Unit: a green chip that opens it) or why it is not (the reason in a line under the row, with your
@@ -83,10 +86,10 @@ At the `build-and-test` gate `gate_bundle.py` also reads the stage's tables into
     in `unit-gate.html`) defines it: a target with no pick, a finding not sorted, a suggestion with no Do / Leave, a
     not-verified point with no Test now / Later (decisions: they leave when picked, never when read), and an item nothing
     handles, a criterion that fails or is not judged, a failed command, a target the sources disagree on (no decision to make:
-    they leave when read). A row picked while the filter shows stays, greyed, until the bar is pressed again; pressing the pick
-    again undoes it.
-  - **Readiness counter** in the bar: "4 decisions left · 12 unread" (a part at zero is hidden, both zero says "Ready to
-    answer" and goes to Your answer). Each part jumps to the next such row; keys `n` (next decision) and `u` (next unread), silent
+    reading one does not settle it; it leaves when you press "Seen, will answer in chat" on it). A row picked while the filter
+    shows stays, greyed, until the bar is pressed again; pressing the pick again undoes it.
+  - **Readiness counter** in the bar: "4 decisions left · 2 to look at · 12 unread" (a part at zero is hidden, all zero says
+    "Ready to answer" and goes to Your answer; "to look at" are the not-handled, not-met and failing things not yet acknowledged). Each part jumps to the next such row; keys `n` (next decision) and `u` (next unread), silent
     inside fields. The change stepper's keys are now `j` / `k` (they were `n` / `p`).
   - **Your answer**, the last block: target picks, finding sort, suggestion and test picks, notes, each linking back; it says
     the decision itself is given in chat. Read-only, stores nothing.
@@ -121,10 +124,10 @@ A page per gate, newest first in a list grouped by intent. A gate looks and work
 
 - A header card with the stage, the intent and phase, and its facts: the round (and why), the documents, the open
   findings and your notes.
-- A sticky bar: filters (All, Unread, Changed, With notes, each with its count), your read progress, Expand all,
-  Collapse all, Mark all read, whether your notes are saved, and a chip per block (summary, review, every document)
-  that jumps to it. On wide screens an outline of every document's sections sits beside the blocks; on a phone it
-  opens from the bar.
+- A sticky bar, one row (two to three short ones on a phone): the filters (All, Needs you, Unread, Changed, each with its count)
+  and the readiness counter, then Rounds (the timeline and the round to compare with), View (Changes | Clean, Expand all,
+  Collapse all, Mark all read, With notes) and, on a narrow screen, Outline. On wide screens an outline of every document's
+  sections sits beside the blocks; on a phone it opens from the bar. Every control has a tooltip.
 - Read marks are yours: a block is marked read with its dot. On a new round only the blocks whose text changed turn
   unread.
 - From the second presentation of a stage on, the page compares itself with the previous one: changed and new

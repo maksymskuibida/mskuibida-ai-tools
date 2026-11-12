@@ -57,20 +57,34 @@
 * { box-sizing: border-box; }
 html { scroll-padding-top: 16px; }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.55 var(--body); -webkit-font-smoothing: antialiased; }
-#app { max-width: 820px; margin: 0 auto; padding: 24px 16px 96px; }
+#app { max-width: 1180px; margin: 0 auto; padding: 24px 16px 64px; display: flex; flex-direction: column; gap: 16px; }
 button { font: inherit; color: inherit; cursor: pointer; }
 button:focus-visible, textarea:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
 .msg { padding: 20px; } .msg p { margin: 6px 0 0; color: var(--muted); }
 a { color: var(--accent); }
+.mono { font: 500 12px var(--mono); }
 
-.head { padding: 22px 24px; margin-bottom: 16px; }
-.crumbs { font-size: 12.5px; color: var(--muted); letter-spacing: .02em; margin-bottom: 6px; }
+.head { padding: 20px 24px; margin-bottom: 0; }
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+.crumbs a { color: inherit; text-decoration: none; } .crumbs a:hover { text-decoration: underline; }
+.status { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 2px 10px; border-radius: 13px; background: var(--warn-bg); color: var(--warn-fg); font-weight: 500; }
+.status i { width: 7px; height: 7px; border-radius: 4px; background: currentColor; }
+.status.done { background: var(--ok-bg); color: var(--ok-fg); }
 h1 { margin: 0; font-size: 22px; line-height: 1.25; font-weight: 600; }
 .lede { margin: 6px 0 0; color: var(--fg-2); }
 .covers { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; align-items: center; }
 .covers > span:first-child { font-size: 12.5px; color: var(--muted); margin-right: 2px; }
 .vchip { font: 500 12px var(--mono); padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-strong); cursor: help; }
+/* the sticky strip: progress and the next step to do, always in view while answering, like the bar of the other approval pages */
+.pbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 8; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 8px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 2px 8px rgba(23, 26, 33, .06); }
+.pbar .meter { flex: 1 1 240px; margin-top: 0; }
+.pbar .next { height: 30px; padding: 0 14px; border-radius: 15px; border: 1px solid var(--control); background: var(--surface); font-weight: 500; font-size: 13px; }
+.pbar .next:hover { border-color: var(--accent); }
+.band { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 14px 18px; border-radius: 12px; background: #171A21; color: #FFFFFF; border: 1px solid #171A21; }
+.band span { color: #C9CDD6; } .band b { font-weight: 500; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .band { background: #252A34; border-color: #3A3F4B; color: #E6E8EE; } :root:not([data-theme="light"]) .band span { color: #C3C8D2; } }
+:root[data-theme="dark"] .band { background: #252A34; border-color: #3A3F4B; color: #E6E8EE; } :root[data-theme="dark"] .band span { color: #C3C8D2; }
 .meter { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
 .meter .bar { flex: 1; height: 8px; border-radius: 999px; background: var(--line-soft); overflow: hidden; display: flex; }
 .meter .bar i { display: block; height: 100%; }
@@ -109,6 +123,10 @@ h1 { margin: 0; font-size: 22px; line-height: 1.25; font-weight: 600; }
 .verifies { margin: 8px 0 0 42px; display: flex; gap: 6px; flex-wrap: wrap; }
 .act { margin: 12px 0 0 42px; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
 .rb { display: inline-flex; border: 1px solid var(--control); border-radius: 9px; overflow: hidden; background: var(--surface); }
+.rb button:focus-visible { outline-offset: -3px; }
+.vchip:focus-visible, .lrow:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.stephead p, .expect, .crit, .agent p { max-width: 78ch; }
+.lrow.old b, .lrow.old small { color: var(--muted); font-weight: 400; }
 .rb button { height: 36px; padding: 0 18px; border: 0; background: transparent; font-weight: 500; }
 .rb button + button { border-left: 1px solid var(--control); }
 .rb button:hover:not(:disabled) { background: var(--hover); }
@@ -133,6 +151,7 @@ h1 { margin: 0; font-size: 22px; line-height: 1.25; font-weight: 600; }
   .head { padding: 18px 16px; } .sechead { padding: 12px 14px; } .agent { margin: 0 14px 12px; } .step { padding: 14px; }
   .expect, .crit, .verifies, .act { margin-left: 0; }
   .rb { width: 100%; } .rb button { flex: 1; }
+  .pbar { padding: 6px 10px; } .pbar .meter { flex-basis: 100%; }
 }
 @media (prefers-reduced-motion: no-preference) { .sec, .step, .rb button { transition: background .15s, border-color .15s, box-shadow .15s; } }
 </style>
@@ -144,6 +163,8 @@ var PlanView = (function () {
   "use strict";
   function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
   function blank(s) { return !s || !String(s).trim(); }
+  /* one English date, in UTC, the same on every approval page */
+  function dateOf(iso) { try { var d = new Date(iso); return isNaN(d) ? String(iso || "") : d.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" }) + " UTC"; } catch (e) { return String(iso || ""); } }
 
   /* The saved result of a step, with what the viewer typed and has not saved: {result, note, saved}. */
   function stepResult(row, local, id) {
@@ -256,22 +277,26 @@ var PlanView = (function () {
     var pp = t.total ? (t.pass / t.total * 100) : 0, ff = t.total ? (t.fail / t.total * 100) : 0;
     var covers = (plan.now || []).map(function (v) { return vChip(plan, v); }).join("");
     var allMsg = plan.allByDefault ? "No point was picked Test now, so the plan covers all of them." : "";
-    var head = '<header class="card head"><div class="crumbs">AI-DLC · ' + esc(row.unit || plan.unit || "") + ' · Test plan</div><h1>' + esc(row.title || plan.title || "Test plan") + "</h1>" +
+    var done = row.status === "done";
+    var head = '<header class="card head"><div class="crumbs"><a href="#" data-nav="">All plans</a><span aria-hidden="true">/</span><span>' + esc(row.intent || plan.intent || "") + '</span><span aria-hidden="true">/</span><span class="mono">' + esc(row.unit || plan.unit || "") + '</span><span aria-hidden="true">/</span><span>Test plan</span>' +
+      '<span class="status' + (done ? " done" : "") + '"><i aria-hidden="true"></i>' + (done ? "Done" : "Open · answer in chat") + "</span></div><h1>" + esc(row.title || plan.title || "Test plan") + "</h1>" +
       (allMsg ? '<p class="lede">' + esc(allMsg) + "</p>" : "") +
-      '<div class="covers"><span>Verifies</span>' + covers + "</div>" +
-      '<div class="meter" role="img" aria-label="' + t.pass + " passed, " + t.fail + " failed, of " + t.total + ' steps"><div class="bar"><i class="p" style="width:' + pp + '%"></i><i class="f" style="width:' + ff + '%"></i></div><b>' + (t.pass + t.fail) + "/" + t.total + "</b><small>" + t.pass + " pass · " + t.fail + " fail</small></div></header>";
-    return head + (plan.sections || []).map(function (sec) { return sectionHtml(row, sec, st8, local); }).join("");
+      '<div class="covers"><span>Verifies</span>' + covers + "</div></header>";
+    var bar = '<div class="pbar" id="pbar"><div class="meter" role="img" aria-label="' + t.pass + " passed, " + t.fail + " failed, of " + t.total + ' steps"><div class="bar"><i class="p" style="width:' + pp + '%"></i><i class="f" style="width:' + ff + '%"></i></div><b>' + (t.pass + t.fail) + "/" + t.total + "</b><small>" + t.pass + " pass · " + t.fail + " fail</small></div>" +
+      (t.pass + t.fail < t.total ? '<button type="button" class="next" data-next="1" title="Go to the next step you have not answered">Next step to do</button>' : "") + "</div>";
+    var band = '<footer class="band"><b>Mark each step Pass or Fail here.</b><span>The agent reads your results from chat when you say a section is completed.</span></footer>';
+    return head + bar + (plan.sections || []).map(function (sec) { return sectionHtml(row, sec, st8, local); }).join("") + band;
   }
 
   function listHtml(rows) {
     if (!rows.length) return '<div class="card msg"><b>No test plans yet.</b><p>The agent adds one here when you pick Test first at a Unit’s end, or ask for a test plan, and gives you its link.</p></div>';
     var groups = {};
     rows.forEach(function (r) { var k = (r.intent || "") + " · " + (r.unit || ""); (groups[k] = groups[k] || []).push(r); });
-    return '<header class="card head"><div class="crumbs">AI-DLC</div><h1>Test plans</h1><p class="lede">Steps to check a Unit’s not-verified points. Mark each Pass or Fail here; the agent reads them from chat.</p></header>' +
+    return '<header class="card head"><div class="crumbs"><span>AI-DLC</span></div><h1>Test plans</h1><p class="lede">Steps to check a Unit’s not-verified points. Mark each Pass or Fail here; the agent reads them from chat.</p></header>' +
       Object.keys(groups).map(function (k) {
         return '<section class="card list"><h2>' + esc(k) + "</h2>" + groups[k].map(function (r) {
           var t = tally(r, null);
-          return '<a class="lrow" href="#' + esc(r.id) + '" data-nav="' + esc(r.id) + '"><b>' + esc(r.title || r.id) + "</b><small>" + esc(String(r.createdAt || "").replace("T", " ").replace(/:\d\d(\.\d+)?Z$/, " UTC")) + '</small><span class="chip' + (r.status === "done" ? " ok" : "") + '">' + (t.pass + t.fail) + "/" + t.total + "</span></a>";
+          return '<a class="lrow" href="#' + esc(r.id) + '" data-nav="' + esc(r.id) + '"><b>' + esc(r.title || r.id) + "</b><small>" + esc(dateOf(r.createdAt)) + '</small><span class="chip' + (r.status === "done" ? " ok" : "") + '">' + (t.pass + t.fail) + "/" + t.total + "</span></a>";
         }).join("") + "</section>";
       }).join("");
   }
@@ -333,7 +358,14 @@ if (typeof module !== "undefined") module.exports = PlanView;
 
   app.addEventListener("click", function (e) {
     var nav = e.target.closest("[data-nav]");
-    if (nav) { e.preventDefault(); location.hash = nav.dataset.nav; return; }
+    if (nav) { e.preventDefault(); if (nav.dataset.nav) location.hash = nav.dataset.nav; else { history.pushState(null, "", location.pathname + location.search); route(); } return; }
+    if (e.target.closest("[data-next]")) {
+      var open = [].slice.call(document.querySelectorAll(".step")).filter(function (s) { var b = s.querySelector("button[data-act]"); return b && !b.disabled && !s.classList.contains("pass") && !(s.classList.contains("fail") && !s.querySelector(".note.need")); })[0];
+      var bar = document.getElementById("pbar");
+      if (open) { var r = open.getBoundingClientRect(), off = (bar ? bar.offsetHeight : 0) + 24; window.scrollBy({ top: r.top - off, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); var bt = open.querySelector("button[data-act]"); if (bt) bt.focus({ preventScroll: true }); }
+      else toast("No step is open for you yet: the agent has to finish its step first.");
+      return;
+    }
     var b = e.target.closest("button[data-act]");
     if (!b || !view.row || b.disabled) return;
     var step = b.dataset.step, cur = PlanView.stepResult(view.row, view.local, step), next = b.dataset.act;
@@ -378,7 +410,7 @@ if (typeof module !== "undefined") module.exports = PlanView;
       document.title = (row.title || "Test plan") + " · AI-DLC test plans";
       paint();
       var cur = PlanView.states(row, view.local).current, el = cur && document.getElementById("sec-" + cur);
-      if (!view.scrolled && el) { view.scrolled = true; el.scrollIntoView({ block: "start" }); }
+      /* no jump on load: the page opens at its top, with the header and the progress in view; "Next step to do" goes to the step */
     }, function () { app.innerHTML = '<div class="card msg"><b>Couldn’t load this plan.</b><p>Reload the page.</p></div>'; }));
   }
   function route() { view.scrolled = false; var id = pageId(); if (id) showPlan(id); else showList(); }

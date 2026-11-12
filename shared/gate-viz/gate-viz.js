@@ -169,22 +169,37 @@ var GateViz = (function () {
   }
 
   /* ---------- a trace ribbon: columns left to right, a curve for every link ---------- */
-  function trace(d, c) {
-    var cols = d.cols || [], per = {}, W = 150, H = 38, GX = 70, GY = 12, top = 30;
+  /* natural order: US2.1 before US10.1, FR9 before FR10 */
+  function natKey(s) { return String(s).split(/(\d+)/).map(function (p, i) { return i % 2 ? +p : p.toLowerCase(); }); }
+  function natCmp(a, b) {
+    var x = natKey(a), y = natKey(b), n = Math.min(x.length, y.length);
+    for (var i = 0; i < n; i++) if (x[i] !== y[i]) return typeof x[i] === "number" && typeof y[i] === "number" ? x[i] - y[i] : (String(x[i]) < String(y[i]) ? -1 : 1);
+    return x.length - y.length;
+  }
+  var TRACE_MAX_COL = 10, TRACE_MAX_EDGES = 36, chosen = {};  /* above this size a trace is a tangle: it is offered per requirement */
+  /* the ribbon of one set of nodes: each column in natural order, then swept back and forth so that a box sits near the boxes it links to */
+  function drawTrace(d, c) {
+    var cols = d.cols || [], per = {}, W = 150, H = 38, GX = 70, GY = 12, top = 30, edges = d.edges || [];
     (d.nodes || []).forEach(function (n) { (per[n.col] = per[n.col] || []).push(n); });
-    cols.forEach(function (k, ci) {  /* fewer crossings: a box sits near the boxes it is linked to in the column before */
-      if (!ci) return;
-      var at = {}; (per[cols[ci - 1].key] || []).forEach(function (n, i) { at[n.id] = i; });
-      var mean = function (n) { var xs = (d.edges || []).map(function (e) { return e[1] === n.id && at.hasOwnProperty(e[0]) ? at[e[0]] : e[0] === n.id && at.hasOwnProperty(e[1]) ? at[e[1]] : null; }).filter(function (x) { return x !== null; }); return xs.length ? xs.reduce(function (a, b) { return a + b; }, 0) / xs.length : 1e9; };
-      (per[k.key] || []).sort(function (a, b) { return mean(a) - mean(b); });
-    });
+    cols.forEach(function (k) { (per[k.key] || []).sort(function (a, b) { return natCmp(a.id, b.id); }); });
+    var pos = function (key) { var at = {}; (per[key] || []).forEach(function (n, i) { at[n.id] = i; }); return at; };
+    var sweep = function (ci, from) {
+      var at = pos(cols[from].key);
+      var mean = function (n) { var xs = edges.map(function (e) { return e[1] === n.id && at.hasOwnProperty(e[0]) ? at[e[0]] : e[0] === n.id && at.hasOwnProperty(e[1]) ? at[e[1]] : null; }).filter(function (x) { return x !== null; }); return xs.length ? xs.reduce(function (a, b) { return a + b; }, 0) / xs.length : 1e9; };
+      var arr = per[cols[ci].key] || [], idx = {}; arr.forEach(function (n, i) { idx[n.id] = i; });
+      arr.sort(function (a, b) { return (mean(a) - mean(b)) || (idx[a.id] - idx[b.id]); });
+    };
+    for (var pass = 0; pass < 3; pass++) {
+      for (var ci = 1; ci < cols.length; ci++) sweep(ci, ci - 1);
+      for (var cj = cols.length - 2; cj >= 0; cj--) sweep(cj, cj + 1);
+    }
     var rows = Math.max.apply(null, cols.map(function (k) { return (per[k.key] || []).length; }).concat([1]));
     var at = {}, width = cols.length * W + (cols.length - 1) * GX + 16, height = top + rows * (H + GY) + 8;
     cols.forEach(function (k, ci) { (per[k.key] || []).forEach(function (n, ri) { at[n.id] = { x: 8 + ci * (W + GX), y: top + ri * (H + GY) }; }); });
     var mk = mark();
     var svg = '<svg class="vz-svg" xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + " " + height + '" role="img" aria-label="' + esc(d.alt || "") + '">' + mk.defs;
     cols.forEach(function (k, ci) { svg += '<text class="vz-colh" x="' + (8 + ci * (W + GX)) + '" y="16">' + esc(k.label) + "</text>"; });
-    (d.edges || []).forEach(function (e) {
+    edges.forEach(function (e) {
       var a = at[e[0]], b = at[e[1]]; if (!a || !b) return;
       var ax = a.x + W, ay = a.y + H / 2, bx = b.x, by = b.y + H / 2, m = (ax + bx) / 2;
       svg += '<g class="vz-edge" data-from="' + esc(e[0]) + '" data-to="' + esc(e[1]) + '"><path d="M' + ax + " " + ay + " C" + m + " " + ay + " " + m + " " + by + " " + bx + " " + by + '" marker-end="url(#' + mk.id + ')"/></g>';
@@ -197,7 +212,23 @@ var GateViz = (function () {
     });
     return svg + "</svg>";
   }
-
+  /* The trace: all at once while it reads (a few boxes a column); above that it is a tangle, so it is offered per requirement: pick one, see its chain. */
+  function trace(d, c) {
+    var cols = d.cols || [], nodes = d.nodes || [], edges = d.edges || [];
+    var big = Math.max.apply(null, cols.map(function (k) { return nodes.filter(function (n) { return n.col === k.key; }).length; }).concat([0])) > TRACE_MAX_COL || edges.length > TRACE_MAX_EDGES;
+    if (!big || !cols.length) return drawTrace(d, c);
+    var first = nodes.filter(function (n) { return n.col === cols[0].key; }).sort(function (a, b) { return natCmp(a.id, b.id); });
+    var sel = chosen[d.id || "trace"]; if (!first.some(function (n) { return n.id === sel; })) sel = first.length ? first[0].id : "";
+    var chain = function (id) {  /* what it leads to and what leads to it, through every column */
+      var keep = {}, out = {}, back = {}; keep[id] = 1;
+      var go = function (fromIdx, toIdx) { var q = [id], seen = {}; seen[id] = 1; while (q.length) { var x = q.shift(); edges.forEach(function (e) { var nx = e[fromIdx] === x ? e[toIdx] : null; if (nx && !seen[nx]) { seen[nx] = 1; keep[nx] = 1; q.push(nx); } }); } };
+      go(0, 1); go(1, 0);
+      return { cols: cols, nodes: nodes.filter(function (n) { return keep[n.id]; }), edges: edges.filter(function (e) { return keep[e[0]] && keep[e[1]]; }), alt: d.alt, id: d.id };
+    };
+    return '<div class="vz-pickrow"><label>' + esc(cols[0].label) + ' <select class="vz-pick" data-vz-pick="' + esc(d.id || "trace") + '" aria-label="Pick one to see its chain">' + first.map(function (n) { return '<option value="' + esc(n.id) + '"' + (n.id === sel ? " selected" : "") + ">" + esc(n.label ? n.id + " " + clip(n.label, 40) : n.id) + "</option>"; }).join("") + "</select></label>" +
+      '<span class="hint">' + plural(first.length, cols[0].label.toLowerCase().replace(/s$/, "")) + ", " + plural(edges.length, "link") + ": too many to draw at once, so pick one and see what it leads to</span></div>" +
+      first.map(function (n) { return '<div class="vz-chain" data-for="' + esc(n.id) + '"' + (n.id === sel ? "" : " hidden") + ">" + drawTrace(chain(n.id), c) + "</div>"; }).join("");
+  }
   /* ---------- layers: a band per layer, the components in it, what they depend on one hover away ---------- */
   function layers(d, c, opts) {
     var uses = {};
@@ -308,7 +339,7 @@ var GateViz = (function () {
       return '<button type="button" class="vz-seg ' + s.k + '" style="flex:' + pct.toFixed(2) + ' 1 0" data-vz-set="verif:' + s.k + '" aria-pressed="' + (on === s.k) + '" aria-label="' + lab + '" data-tip="' + tip + '">' + inner + "</button>";
     }).join("");
     var line = segs.map(function (s) { return s.label + " " + s.n; }).join(", ");
-    return '<figure class="vz vz-funnel" data-aidlc-noids role="group" aria-label="' + esc("Verification funnel: " + total + " points; " + line) + '"><figcaption class="vz-title">Where the ' + plural(total, "point") + ' stand<span class="hint">press a part to filter the points below</span></figcaption><div class="vz-bar">' + bar + "</div>" +
+    return '<figure class="vz vz-funnel" data-aidlc-noids role="group" aria-label="' + esc("Verification funnel: " + total + " points; " + line) + '"><figcaption class="vz-title">Where the ' + plural(total, "point") + ' stand<span class="hint">press a part to show only its points; the tests&#39; part is not one of the rows below</span></figcaption><div class="vz-bar">' + bar + "</div>" +
       (on ? '<button type="button" class="vz-clear" data-vz-set="verif:">Show all points</button>' : "") + '<ul class="vz-sr">' + segs.map(function (s) { return "<li>" + esc(s.label + ": " + s.n) + "</li>"; }).join("") + "</ul></figure>";
   }
 
@@ -383,6 +414,12 @@ var GateViz = (function () {
     root.addEventListener("mouseout", off); root.addEventListener("focusout", off);
     root.addEventListener("keydown", function (e) {
       var n = e.target.closest && e.target.closest(".vz-node[data-vz-go], .vz-msg"); if (n && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); n.dispatchEvent(new MouseEvent("click", { bubbles: true })); }
+    });
+    /* a trace too big to draw at once: the picked requirement's chain shows, the others are hidden; the choice is kept */
+    root.addEventListener("change", function (e) {
+      var s = e.target.closest && e.target.closest("select.vz-pick"); if (!s) return;
+      chosen[s.getAttribute("data-vz-pick") || "trace"] = s.value;
+      [].forEach.call((s.closest(".vz") || root).querySelectorAll(".vz-chain"), function (c) { c.hidden = c.getAttribute("data-for") !== s.value; });
     });
   }
 

@@ -114,7 +114,7 @@ class TestOneNodeOneKey(unittest.TestCase):
         self.assertTrue(r["underAll"]["read"] and r["underAll"]["dot"])
 
     def test_a_mark_set_under_all_shows_under_needs_you(self):
-        self.assertFalse(self.r["itemAfterReadUnderAll"], "an unhandled item has nothing to decide: reading it resolves it")
+        self.assertTrue(self.r["itemAfterReadUnderAll"], "an unhandled item has nothing to decide, but reading it does not settle it: it stays until acknowledged")
 
     def test_a_note_written_under_needs_you_is_the_note_under_all(self):
         self.assertEqual(self.r["noteUnderAll"], "check on a 3G phone")
@@ -160,12 +160,16 @@ class TestReadiness(unittest.TestCase):
     def test_it_says_decisions_left_and_unread_and_hides_a_part_at_zero(self):
         r = self.r
         self.assertEqual(r["initial"]["decisions"], 5)
-        self.assertRegex(r["initial"]["text"], r"^5 decisions left · \d+ unread$")
-        self.assertRegex(r["afterPicks"]["text"], r"^\d+ unread$", "no decisions part at zero")
+        self.assertRegex(r["initial"]["text"], r"^5 decisions left(?: · \d+ to look at)? · \d+ unread$")
+        self.assertRegex(r["afterPicks"]["text"], r"^(?:\d+ to look at · )?\d+ unread$", "no decisions part at zero")
 
     def test_ready_to_answer_when_both_are_zero_and_it_goes_to_your_answer(self):
         r = self.r
-        self.assertEqual(r["afterRead"]["text"], "Ready to answer")
+        self.assertNotEqual(r["afterRead"]["text"], "Ready to answer", "reading what is tagged not handled or failing does not settle it")
+        self.assertGreater(r["afterRead"]["looks"], 0)
+        self.assertEqual(r["afterRead"]["text"], f'{r["afterRead"]["looks"]} to look at')
+        self.assertGreater(r["acks"], 0, "each such thing carries its own Seen, will answer in chat")
+        self.assertEqual(r["afterAck"]["text"], "Ready to answer")
         self.assertTrue(r["answerOpen"] and r["answerShown"] and r["flashAnswer"])
 
     def test_the_next_decision_button_walks_the_decisions_in_page_order_and_wraps(self):
@@ -236,7 +240,8 @@ class TestRecords(unittest.TestCase):
 
     def test_an_uncovered_file_counts_as_unread_until_read_and_gets_a_chip(self):
         r = self.r
-        self.assertTrue(any(c.startswith("Records") and "unread" in c for c in r["chips"]), r["chips"])
+        self.assertTrue(any(c.startswith("Records") for c in r["chips"]), r["chips"])
+        self.assertGreater(r["readyBefore"]["unread"], 0, "the file nothing covers is one of the unread things in the counter")
         m = drive(gate(), "marks")
         self.assertEqual(m["unreadAfter"], m["unreadBefore"], "reading it in the first page and drawing it again in the second: still read")
         self.assertTrue(m["secondRead"])
@@ -291,7 +296,7 @@ def end_page():
 class TestUnitNeedsYou(unittest.TestCase):
     def test_the_filter_has_a_count_and_the_rows_that_wait_are_decisions_or_unhandled(self):
         out = render(plan_page(), {"all": {}, "needs": {"filter": "needs"}})
-        self.assertIn('data-val="needs" aria-pressed="false">Needs you<b class="n">2</b>', out["all"], "A-2 has no Do/Leave, FD R-03 is not handled; FD R-04 has a reason, A-1 has no suggestion")
+        self.assertRegex(out["all"], r'data-val="needs" aria-pressed="false" title="[^"]*">Needs you<b class="n">2</b>', "A-2 has no Do/Leave, FD R-03 is not handled; FD R-04 has a reason, A-1 has no suggestion")
         page = out["needs"]
         self.assertEqual(rows_of(page), ["A-2", "FD-R-03"], "FD R-02 is linked, FD R-04 has a reason, A-1 and T-1 decide nothing")
         self.assertNotIn('data-sec="plan"', page, "no plan steps wait")

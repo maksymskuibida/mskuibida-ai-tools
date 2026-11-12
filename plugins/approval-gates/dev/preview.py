@@ -46,6 +46,8 @@ import preview_content as pc  # noqa: E402
 import preview_units  # noqa: E402
 
 INTENT = "260101-bakery-preorder"
+MAPS_STAGES = ("domain-design", "units-generation", "code-generation")
+MAPS = [{"kind": "units", "url": "https://example.com/preview/maps-units#260101-bakery-preorder-units", "title": "Unit map"}, {"kind": "components", "url": "https://example.com/preview/maps-components#260101-bakery-preorder-components", "title": "Component map"}]
 UNIT = "u1-core"
 TEMPLATES = {"gate": "approval-gate.html", "unit": "unit-gate.html", "plan": "test-plan.html", "maps": "maps.html"}
 
@@ -186,6 +188,10 @@ class Bakery:
         for key, text in docs.items():
             write(os.path.join(folder, key + (".json" if key.endswith("traceability") and text.lstrip().startswith("{") else ".md")), text)
 
+    def fresh_audit(self):
+        """Forget every earlier rejection: a scenario that starts at round 1 must not inherit the rounds of the one before it."""
+        write(os.path.join(self.root, "audit", "session-a.md"), "# Audit\n")
+
     def reject(self, stage, unit, n):
         block = (f"\n## Gate Rejected\n**Timestamp**: 2026-01-0{n + 1}T08:00:00Z\n**Event**: GATE_REJECTED\n**Stage**: {stage['slug']}\n"
                  + (f"**Unit**: {unit}\n" if unit else "") +
@@ -230,6 +236,21 @@ class Bakery:
         return row, docs
 
 
+def plain_summary(written):
+    """One plain sentence for an item, the way an agent writes one: the title, then the first sentence of what it says, never the two run together."""
+    lines = [re.sub(r"\s+", " ", re.sub(r"[`*#|]", "", x)).strip() for x in str(written).split("\n")]
+    lines = [x for x in lines if x]
+    title = lines[0] if lines else ""
+    body = [x for x in lines[1:] if not re.match(r"^(?:[-*]\s*)?(?:AC\d|Status:|Context\b|Decision\b|Consequences\b|Priority\b)", x, re.I)]
+    sentence = re.split(r"(?<=[.!?])\s", " ".join(body))[0][:170].rstrip(" …,;:") if body else ""
+    if sentence and title and not sentence.lower().startswith(title.lower()):
+        text = f"{title}: {sentence[0].lower() + sentence[1:]}" if not re.match(r"^[A-Z]{2,}", sentence) else f"{title}: {sentence}"
+    else:
+        text = sentence or title
+    text = text.strip() or "A thing this stage settles."
+    return text if text.endswith((".", "!", "?")) else text + "."
+
+
 def judge(path, rnd, clean=False):
     """What an agent writes into judgment.json, mechanically but with variety: most criteria hold, one fails (named in a risk),
     a few are not relevant, every item has a plain sentence and a label, the critical and high ones are looked at first."""
@@ -244,9 +265,7 @@ def judge(path, rnd, clean=False):
     looked = 0
     for i, (k, it) in enumerate(j["items"].items()):
         lab = labels[i % len(labels)]
-        text = re.sub(r"\s+", " ", re.sub(r"[`*#|]", "", it.get("_asWritten") or k)).strip()
-        text = re.split(r"(?<=[.!?])\s", text)[0][:200].rstrip(" …,;:") or "A thing this stage settles."
-        it.update(summary=text if text.endswith((".", "!", "?")) else text + ".", label=lab)
+        it.update(summary=plain_summary(it.get("_asWritten") or k), label=lab)
         if lab in ("critical", "high") and looked < 3:
             it["lookFirst"] = True
             looked += 1
@@ -274,6 +293,7 @@ def judge(path, rnd, clean=False):
 def sample_of(bakery, stage, unit, rounds, tmp, **kw):
     """The rows of `rounds` presentations of one stage: {id, row, documents, others[]}."""
     made = []
+    bakery.fresh_audit()
     for rnd in range(1, rounds + 1):
         docs = pc.documents(stage["slug"], stage.get("produces") or [], rnd)
         bakery.write_docs(stage, unit, docs)
@@ -308,6 +328,9 @@ def stage_scenarios(bakery, graph, tmp, only):
             s = sample_of(bakery, st, unit, rounds, tmp)
             what = ("Round 1: the evaluation, the items, the records, the diagrams a record's structure gives." if rounds == 1 else
                     "Round 3, after two Request Changes: What changed block, round colours, the timeline, additions and removals in the records.")
+            if st["slug"] in MAPS_STAGES:  # gate rows that carry links to the maps, to check the header's "Maps:" links
+                s["row"]["maps"] = MAPS
+                what += " The header links to the maps."
             out.append(Scenario(f"stage-{st['number'].replace('.', '-')}-{st['slug']}-r{rounds}", "Per-stage gates, " + st["phase"], f"{label}. {what}", "gate", gate_rows(s), s["id"]))
     return out
 
@@ -317,6 +340,7 @@ def build_test_scenarios(bakery, graph, tmp):
     out = []
     for rounds in (1, 3):
         made = []
+        bakery.fresh_audit()
         for rnd in range(1, rounds + 1):
             summary, results = pc.build_and_test(rnd)
             docs = {"build-instructions": pc.build_instructions(), "build-and-test-summary": summary, "build-test-results": results}
@@ -350,6 +374,15 @@ def special_scenarios(bakery, graph, tmp):
     for it in s["row"]["digest"]["items"][:4]:
         it["coveredBy"] = {"text": "No stage covers it", "settled": False}
     out.append(Scenario("gate-unhandled-items", "Per-stage gates, special", "User Stories where four items are handled nowhere: they sit in Needs you with the reason missing.", "gate", gate_rows(s), s["id"]))
+    # a gate of the ideation phase (phase 1) with open decisions: findings to sort, and an item nothing handles
+    ft = next((g for g in graph if g["slug"] == "feasibility"), None)
+    if ft:
+        early = {"source": "aidlc", "stage": "feasibility", "stage_name": "Feasibility & Constraints", "artifact": "reviews/review-01.md",
+                 "findings": [{"id": f"R-0{i}", "severity": sev, "where": "feasibility-assessment.md", "finding": f"{pc.sentence(('ef', i))} {pc.sentence(('ef2', i))}",
+                               "action": pc.sentence(("eact", i))[:110], "status": "New", "blocking": sev in ("Critical", "Major"), "title": pc.sentence(("et", i))[:70].rstrip(".")}
+                              for i, sev in enumerate(["Major", "Minor", "Minor"], 1)], "carried": []}
+        s = sample_of(bakery, ft, None, 1, tmp, findings=early)
+        out.append(Scenario("gate-ideation-open-decisions", "Per-stage gates, special", "Feasibility (phase 1, Ideation) with three review findings to sort: a gate before Construction that still waits on decisions.", "gate", gate_rows(s), s["id"]))
     s = sample_of(bakery, st, None, 1, tmp, clean=True)
     out.append(Scenario("gate-nothing-pending", "Per-stage gates, special", "User Stories with every criterion holding and nothing to decide: the Needs you filter is empty, the readiness counter says so.", "gate", gate_rows(s), s["id"]))
     return out
@@ -386,12 +419,15 @@ def map_scenarios(tmp):
 def list_scenarios(by_name):
     out = []
     for kind, name, desc, source in (("gate", "list-gates", "The list of gates, no hash: every stage and round, newest first.", "stage-2-4-user-stories-r3"),
-                                     ("unit", "list-unit-pages", "The list of Unit pages (plan and unit-end), no hash.", "unit-plan-r3"),
+                                     ("unit", "list-unit-pages", "The list of Unit pages, no hash: the plan page in three rounds and the unit-end page in three, after a test plan in four; the newest of each marked current.", "unit-plan-r3+unit-end-r3+unit-end-after-test-plan"),
                                      ("plan", "list-test-plans", "The list of test plans, no hash.", "test-plan"),
                                      ("maps", "list-maps", "The list of maps, no hash.", "maps-units")):
-        src = by_name.get(source)
-        if src:
-            out.append(Scenario(name, "List views", desc, kind, src.rows, ""))
+        parts = [by_name.get(x) for x in source.split("+")]
+        if all(parts):
+            rows = {}
+            for part in parts:
+                rows.update(part.rows)
+            out.append(Scenario(name, "List views", desc, kind, rows, ""))
     return out
 
 
