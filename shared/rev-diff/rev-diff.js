@@ -443,7 +443,7 @@ var RevDiff = (function () {
   function toggleOnly(root, btn, current) {
     var k = +btn.getAttribute("data-rvonly"); k = k === current ? 0 : k;
     only(root, k);
-    [].slice.call(btn.parentElement.querySelectorAll("[data-rvonly]")).forEach(function (b) { b.setAttribute("aria-pressed", String(+b.getAttribute("data-rvonly") === k)); });
+    [].slice.call((btn.closest(".rv-legend") || btn.parentElement).querySelectorAll("[data-rvonly]")).forEach(function (b) { b.setAttribute("aria-pressed", String(+b.getAttribute("data-rvonly") === k)); });
     return k;
   }
 

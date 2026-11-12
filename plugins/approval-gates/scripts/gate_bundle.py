@@ -41,6 +41,10 @@ other *.md and *.json of the folder by name. `memory.md`, hidden files and *.loc
 newest `reviews/review-NN.md` is added as kind `review`. A document over 200 000 bytes is cut and ends with
 a line that says how much is missing.
 
+Diagrams: the gate row's `diagrams` are derived from the records (scripts/diagrams.py): a trace ribbon, a layered diagram of
+components, sequences, state changes and flows, and every ```mermaid block as a drawing. Offered only where the structure is
+there; the page draws them next to the text and never reads them back.
+
 Round: 1 plus the number of `GATE_REJECTED` entries of this stage in <R>/audit/*.md (an entry is the block
 that holds `**Event**: GATE_REJECTED` and `**Stage**: <slug>`). With --unit an entry counts only when it also
 has a `**Unit**: <u>` line; without --unit only an entry with no Unit line counts.
@@ -80,6 +84,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import aidlc_ids  # noqa: E402  (the shared copy, next to this file)
 import criteria as criteria_mod  # noqa: E402  (what the stage is judged against)
+import diagrams  # noqa: E402  (the diagrams of the records, a second view the page draws)
 import digest  # noqa: E402  (the stage's items, for the page's digest)
 import findings  # noqa: E402  (the review findings that go on the page as cards)
 import map_bundle  # noqa: E402  (the project maps; the gate page links them)
@@ -89,7 +94,7 @@ import validate_bundle  # noqa: E402
 MAX_DOC_BYTES = 200_000
 MAX_BATCH_WRITES = 50
 MAX_BATCH_BYTES = 1_000_000  # the limit is 1 MiB; stay under it
-PHASES = ("ideation", "inception", "construction", "operation")
+PHASES = ("initialization", "ideation", "inception", "construction", "operation")
 SKIPPED = {"memory.md"}
 ACRONYMS = {"nfr": "NFR", "ci": "CI"}
 BRIEF_TIMEOUT = 20
@@ -746,6 +751,13 @@ def build(args):
             "--handling <that file>. It worked when: the draft prints its id and todo list") from None
     if found["items"] or found["trace"]:
         gate["digest"] = found
+    try:
+        drawn = diagrams.build([row for row, _index, _path in docs], ids or {})
+    except Exception as why_not:  # a page without its diagrams is still a page
+        drawn = []
+        print("approval-gates: the diagrams were left out (" + str(why_not) + ")", file=sys.stderr)
+    if drawn:
+        gate["diagrams"] = drawn
     gate["documents"] = [index for _row, index, _path in docs if index]
     crit = criteria_mod.gather(project, root, space, phase, args.stage, name, folder, graph, graph_stage)
     return gate_id, gate, [row for row, _index, _path in docs], crit

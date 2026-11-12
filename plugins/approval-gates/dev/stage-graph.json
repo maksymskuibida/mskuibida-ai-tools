@@ -1,0 +1,419 @@
+[
+ {
+  "slug": "workspace-scaffold",
+  "number": "0.1",
+  "name": "Workspace Scaffold",
+  "phase": "initialization",
+  "produces": []
+ },
+ {
+  "slug": "workspace-detection",
+  "number": "0.2",
+  "name": "Workspace Detection",
+  "phase": "initialization",
+  "produces": []
+ },
+ {
+  "slug": "state-init",
+  "number": "0.3",
+  "name": "State Initialization",
+  "phase": "initialization",
+  "produces": []
+ },
+ {
+  "slug": "intent-capture",
+  "number": "1.1",
+  "name": "Intent Capture & Framing",
+  "phase": "ideation",
+  "produces": [
+   "intent-statement",
+   "stakeholder-map",
+   "intent-capture-questions"
+  ],
+  "reviewer": "aidlc-product-lead-agent",
+  "review_class": "advisory"
+ },
+ {
+  "slug": "market-research",
+  "number": "1.2",
+  "name": "Market Research",
+  "phase": "ideation",
+  "produces": [
+   "competitive-analysis",
+   "market-trends",
+   "build-vs-buy",
+   "market-research-questions"
+  ]
+ },
+ {
+  "slug": "feasibility",
+  "number": "1.3",
+  "name": "Feasibility & Constraints",
+  "phase": "ideation",
+  "produces": [
+   "feasibility-assessment",
+   "constraint-register",
+   "raid-log",
+   "feasibility-questions"
+  ]
+ },
+ {
+  "slug": "scope-definition",
+  "number": "1.4",
+  "name": "Scope Definition",
+  "phase": "ideation",
+  "produces": [
+   "scope-document",
+   "intent-backlog",
+   "scope-definition-questions"
+  ]
+ },
+ {
+  "slug": "team-formation",
+  "number": "1.5",
+  "name": "Team Formation",
+  "phase": "ideation",
+  "produces": [
+   "team-assessment",
+   "skill-matrix",
+   "mob-composition",
+   "team-formation-questions"
+  ]
+ },
+ {
+  "slug": "rough-mockups",
+  "number": "1.6",
+  "name": "Rough Mockups",
+  "phase": "ideation",
+  "produces": [
+   "wireframes",
+   "user-flow",
+   "rough-mockups-questions"
+  ],
+  "reviewer": "aidlc-product-lead-agent",
+  "review_class": "advisory"
+ },
+ {
+  "slug": "approval-handoff",
+  "number": "1.7",
+  "name": "Approval & Handoff",
+  "phase": "ideation",
+  "produces": [
+   "initiative-brief",
+   "decision-log",
+   "approval-handoff-questions"
+  ]
+ },
+ {
+  "slug": "reverse-engineering",
+  "number": "2.1",
+  "name": "Reverse Engineering",
+  "phase": "inception",
+  "produces": [
+   "business-overview",
+   "architecture",
+   "code-structure",
+   "api-documentation",
+   "component-inventory",
+   "technology-stack",
+   "dependencies",
+   "code-quality-assessment",
+   "reverse-engineering-timestamp"
+  ]
+ },
+ {
+  "slug": "practices-discovery",
+  "number": "2.2",
+  "name": "Practices Discovery",
+  "phase": "inception",
+  "produces": [
+   "team-practices",
+   "discovered-rules",
+   "evidence",
+   "practices-discovery-timestamp"
+  ]
+ },
+ {
+  "slug": "requirements-analysis",
+  "number": "2.3",
+  "name": "Requirements Analysis",
+  "phase": "inception",
+  "produces": [
+   "requirements",
+   "requirements-analysis-questions"
+  ],
+  "reviewer": "aidlc-product-lead-agent",
+  "review_class": "advisory"
+ },
+ {
+  "slug": "user-stories",
+  "number": "2.4",
+  "name": "User Stories",
+  "phase": "inception",
+  "produces": [
+   "stories",
+   "personas",
+   "user-stories-assessment",
+   "traceability"
+  ],
+  "reviewer": "aidlc-product-lead-agent",
+  "review_class": "advisory"
+ },
+ {
+  "slug": "refined-mockups",
+  "number": "2.5",
+  "name": "Refined Mockups",
+  "phase": "inception",
+  "produces": [
+   "mockups",
+   "interaction-spec",
+   "design-system-mapping",
+   "accessibility-checklist",
+   "refined-mockups-questions"
+  ],
+  "reviewer": "aidlc-product-lead-agent",
+  "review_class": "advisory"
+ },
+ {
+  "slug": "domain-design",
+  "number": "2.6",
+  "name": "Domain Design",
+  "phase": "inception",
+  "produces": [
+   "components",
+   "decisions",
+   "traceability"
+  ],
+  "reviewer": "aidlc-architecture-reviewer-agent",
+  "review_class": "advisory"
+ },
+ {
+  "slug": "units-generation",
+  "number": "2.7",
+  "name": "Units Generation",
+  "phase": "inception",
+  "produces": [
+   "unit-of-work",
+   "unit-of-work-dependency",
+   "unit-of-work-story-map",
+   "traceability"
+  ],
+  "reviewer": "aidlc-architecture-reviewer-agent",
+  "review_class": "advisory"
+ },
+ {
+  "slug": "contract-design",
+  "number": "2.8",
+  "name": "Contract Design",
+  "phase": "inception",
+  "produces": [
+   "contract-summary"
+  ],
+  "reviewer": "aidlc-architecture-reviewer-agent",
+  "review_class": "advisory"
+ },
+ {
+  "slug": "delivery-planning",
+  "number": "2.9",
+  "name": "Delivery Planning",
+  "phase": "inception",
+  "produces": [
+   "bolt-plan",
+   "team-allocation",
+   "risk-and-sequencing-rationale",
+   "external-dependency-map",
+   "delivery-planning-questions"
+  ]
+ },
+ {
+  "slug": "functional-design",
+  "number": "3.1",
+  "name": "Functional Design",
+  "phase": "construction",
+  "for_each": "unit-of-work",
+  "produces": [
+   "entities",
+   "rules",
+   "functional-spec",
+   "traceability"
+  ],
+  "reviewer": "aidlc-architecture-reviewer-agent",
+  "review_class": "adversarial"
+ },
+ {
+  "slug": "nfr-requirements",
+  "number": "3.2",
+  "name": "NFR Requirements",
+  "phase": "construction",
+  "for_each": "unit-of-work",
+  "produces": [
+   "performance-requirements",
+   "security-requirements",
+   "scalability-requirements",
+   "reliability-requirements",
+   "observability-requirements",
+   "tech-stack-decisions",
+   "traceability"
+  ],
+  "reviewer": "aidlc-architecture-reviewer-agent",
+  "review_class": "adversarial"
+ },
+ {
+  "slug": "nfr-design",
+  "number": "3.3",
+  "name": "NFR Design",
+  "phase": "construction",
+  "for_each": "unit-of-work",
+  "produces": [
+   "performance-design",
+   "security-design",
+   "scalability-design",
+   "reliability-design",
+   "observability-design",
+   "logical-components",
+   "traceability"
+  ],
+  "reviewer": "aidlc-architecture-reviewer-agent",
+  "review_class": "adversarial"
+ },
+ {
+  "slug": "infrastructure-design",
+  "number": "3.4",
+  "name": "Infrastructure Design",
+  "phase": "construction",
+  "for_each": "unit-of-work",
+  "produces": [
+   "infrastructure-specification",
+   "monitoring-design",
+   "cicd-pipeline",
+   "traceability"
+  ],
+  "reviewer": "aidlc-architecture-reviewer-agent",
+  "review_class": "adversarial"
+ },
+ {
+  "slug": "code-generation",
+  "number": "3.5",
+  "name": "Code Generation",
+  "phase": "construction",
+  "for_each": "unit-of-work",
+  "produces": [
+   "code-generation-plan",
+   "unit-test-instructions",
+   "code-summary",
+   "traceability"
+  ],
+  "reviewer": "aidlc-architecture-reviewer-agent",
+  "review_class": "adversarial"
+ },
+ {
+  "slug": "build-and-test",
+  "number": "3.6",
+  "name": "Build and Test",
+  "phase": "construction",
+  "produces": [
+   "build-instructions",
+   "build-and-test-summary",
+   "build-test-results",
+   "cross-unit-traceability"
+  ]
+ },
+ {
+  "slug": "ci-pipeline",
+  "number": "3.7",
+  "name": "CI Pipeline",
+  "phase": "construction",
+  "produces": [
+   "ci-config",
+   "quality-gates",
+   "ci-pipeline-questions"
+  ]
+ },
+ {
+  "slug": "deployment-pipeline",
+  "number": "4.1",
+  "name": "Deployment Pipeline",
+  "phase": "operation",
+  "produces": [
+   "cd-config",
+   "deployment-strategy",
+   "rollback-runbook",
+   "deployment-pipeline-questions"
+  ]
+ },
+ {
+  "slug": "environment-provisioning",
+  "number": "4.2",
+  "name": "Environment Provisioning",
+  "phase": "operation",
+  "produces": [
+   "environment-inventory",
+   "validation-report",
+   "environment-provisioning-questions"
+  ]
+ },
+ {
+  "slug": "deployment-execution",
+  "number": "4.3",
+  "name": "Deployment Execution",
+  "phase": "operation",
+  "produces": [
+   "deployment-log",
+   "smoke-test-results",
+   "health-check-report",
+   "deployment-execution-questions"
+  ]
+ },
+ {
+  "slug": "observability-setup",
+  "number": "4.4",
+  "name": "Observability Setup",
+  "phase": "operation",
+  "produces": [
+   "dashboards",
+   "alarms",
+   "slo-config",
+   "log-queries",
+   "tracing-config",
+   "anomaly-config",
+   "observability-setup-questions"
+  ]
+ },
+ {
+  "slug": "incident-response",
+  "number": "4.5",
+  "name": "Incident Response",
+  "phase": "operation",
+  "produces": [
+   "runbooks",
+   "incident-plan",
+   "escalation-matrix",
+   "incident-response-questions"
+  ]
+ },
+ {
+  "slug": "performance-validation",
+  "number": "4.6",
+  "name": "Performance Validation",
+  "phase": "operation",
+  "produces": [
+   "load-test-plan",
+   "load-test-results",
+   "nfr-validation-matrix",
+   "performance-validation-questions"
+  ]
+ },
+ {
+  "slug": "feedback-optimization",
+  "number": "4.7",
+  "name": "Feedback & Optimization",
+  "phase": "operation",
+  "produces": [
+   "slo-report",
+   "cost-analysis",
+   "drift-report",
+   "feedback-loop",
+   "feedback-optimization-questions"
+  ]
+ }
+]

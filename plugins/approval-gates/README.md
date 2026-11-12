@@ -14,6 +14,8 @@ skills/approval-gates/approval-gate.html  the per-stage template — the data co
 skills/approval-gates/unit-gate.html      the unit-end template: a Unit's plan page and unit-end page
 skills/approval-gates/test-plan.html      the test-plan template (artifact "AI-DLC test plans")
 skills/approval-gates/maps.html           the project-maps template (artifact "AI-DLC maps")
+scripts/diagrams.py                       derives a record's diagrams for the gate row (called by gate_bundle.py)
+dev/preview.py                            writes every page and scenario with synthetic data, to look at without an account
 scripts/map_bundle.py                     builds a map's row from the intent's records (draft, finalize, check)
 skills/test-plan/SKILL.md                 /approval-gates:test-plan
 scripts/test_plan.py                      validates, publishes and finishes a test plan
@@ -272,6 +274,42 @@ After `aidlc engine orchestrate report --result awaiting-approval` (or `revised`
 `gate_bundle.py`, writes the rows with one `ArtifactData` batch, sends you `<artifact url>#<gate id>` in a
 message of its own, and then asks the Approval question. After Request Changes it reads `gates/<id>` and quotes your notes in
 the `--reason` of the rejected report. It never writes your notes, and never updates a row.
+
+## Visuals (1.33.0)
+
+The pages draw a second view of data they already have. Every visual is inline SVG or HTML with the page's own tokens (light and
+dark), no chart library, readable at phone width, with an `aria-label` and a visually hidden list of what it shows. None has a read
+key of its own, and pressing a mark in it filters or jumps to the real row. The drawing code is one shared file
+(`shared/gate-viz`), copied into the pages by `scripts/sync-shared.py`.
+
+- **Diagram of a record** (per-stage pages). A record with structure gets a Text / Diagram switch on its block, remembered per viewer.
+  `scripts/diagrams.py` derives it from the records the same way every time and `gate_bundle.py` stores it in the row (`diagrams`):
+  a trace ribbon (requirement, rule, story, Unit, step, test), a layered diagram of the components or the Units' build order (with a
+  link to the full map when the row has `maps`), a sequence or a state diagram from a table with from / to columns or from steps
+  written `A -> B: text`, a numbered flow, and every ```mermaid block, drawn where it stands (a kind outside what is drawn is a list,
+  never the source). A new box in a round is marked in the round's colour; a removed one is listed.
+- **Target heat grid** (Build and Test, from 12 targets): Units across, groups down, each cell its worst verdict; a cell filters the list.
+- **Verification funnel** (unit-end): the points the tests cover, verified by you, not verified, failed; a part sets the state chip.
+- **Round timeline** (both kinds of page): v1 to vN with what each round changed, added and removed; it replaces the legend chips and
+  keeps their behaviour (one round only; the same chip again shows all).
+- **Plan steps as lanes** (plan page, two layers or more), **criteria at a glance** (one dot each, above the evaluation), and a file's
+  **outline** (beside a long file on wide screens, a strip on narrow ones); tables scroll in their own frame with a sticky first column,
+  prose keeps a measure of about 76 characters, and code never widens the page.
+
+## Looking at the pages without an account
+
+`dev/preview.py` (not a skill; standard library only) writes one self-contained HTML file per page and scenario, each the real template
+with a small stand-in for `window.claude`, so a page runs from `file://` with no account. All data is synthetic (a made-up bakery),
+built with the plugin's own scripts: every stage of every phase of the engine's stage list in round 1 and in round 3, Build and Test with
+48 targets, gates with findings, unhandled items and nothing pending, both Unit pages in several versions, the test plan, the maps, and
+every list view.
+
+```bash
+python3 plugins/approval-gates/dev/preview.py --out /tmp/gates-preview     # then open /tmp/gates-preview/index.html
+python3 plugins/approval-gates/dev/preview.py --only user-stories,maps      # a few pages only
+```
+
+Add `?theme=dark` to a page's address for the dark theme. A write stays in memory; reload to start over.
 
 ## Project maps (1.32.0)
 
