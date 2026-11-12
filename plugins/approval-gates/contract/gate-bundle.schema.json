@@ -16,6 +16,7 @@
     "plan": { "$ref": "#/$defs/plan" },
     "answers": { "type": "array", "items": { "$ref": "#/$defs/answerGroup" } },
     "design": { "$ref": "#/$defs/design" },
+    "maps": { "type": "array", "items": { "$ref": "#/$defs/mapLink" }, "description": "The project maps published for the intent, [{kind, url, title}]: the page's header links them. unit_bundle.py finalize writes it from what map_bundle.py published." },
     "ids": {
       "type": "object",
       "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9._-]*$" },
@@ -25,6 +26,16 @@
     "provenance": { "$ref": "#/$defs/provenance" }
   },
   "$defs": {
+    "mapLink": {
+      "type": "object",
+      "required": ["kind", "url"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["components", "units", "stories", "entities"] },
+        "url": { "type": "string", "pattern": "^https?://[^\\s]+#[^\\s]+$", "description": "<maps artifact url>#<map row id>" },
+        "title": { "type": "string" }
+      }
+    },
     "idDefinition": {
       "type": "object",
       "required": ["title"],

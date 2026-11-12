@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/maksymskuibida/mskuibida-ai-tools/plugins/approval-gates/contract/map.schema.json",
+  "title": "AI-DLC map row",
+  "description": "A row of the `maps` collection of the \"AI-DLC maps\" artifact (maps.html). One row per intent and map kind, id <intent>-<kind>, written whole with `set` by map_bundle.py finalize. The page renders it; it writes nothing back. README.md next to this file is the documented contract.",
+  "type": "object",
+  "required": ["schema", "id", "intent", "kind", "title", "view", "revision", "builtAt", "digest"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "aidlc-map/1" },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*-(components|units|stories|entities)$" },
+    "intent": { "type": "string", "minLength": 1 },
+    "kind": { "enum": ["components", "units", "stories", "entities"] },
+    "title": { "type": "string", "minLength": 1 },
+    "view": { "enum": ["graph", "matrix"], "description": "graph: components and units (blocks, edges, layers). matrix: stories by Units and entities by components." },
+    "revision": { "type": "integer", "minimum": 1, "description": "1 at the first publication, +1 whenever something a viewer sees changed." },
+    "builtAt": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}" },
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{16}$", "description": "A hash of the records the row was built from (not of the judgment). The guard compares it with the records now: a different digest means the map is stale." },
+    "sources": { "type": "array", "items": { "type": "string" }, "description": "The record files it was built from, relative to the intent folder." },
+    "layerName": { "enum": ["Wave", "Layer"] },
+    "groups": { "type": "array", "items": { "$ref": "#/$defs/group" } },
+    "blocks": { "type": "array", "items": { "$ref": "#/$defs/block" } },
+    "waves": { "type": "array", "items": { "$ref": "#/$defs/wave" } },
+    "rowsTitle": { "type": "string" },
+    "colsTitle": { "type": "string" },
+    "rows": { "type": "array", "items": { "$ref": "#/$defs/matrixRow" } },
+    "cols": { "type": "array", "items": { "$ref": "#/$defs/matrixCol" } },
+    "cells": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string" } }, "description": "{row id: [column ids]}. A row with an empty list is a gap." },
+    "previous": {
+      "type": "object",
+      "required": ["revision"],
+      "additionalProperties": false,
+      "description": "The revision before this one, so the page marks what is new, changed and removed. A graph carries `blocks`, a matrix `rows`, `cols` and `cells`.",
+      "properties": {
+        "revision": { "type": "integer", "minimum": 1 },
+        "builtAt": { "type": "string" },
+        "blocks": { "type": "object", "additionalProperties": { "$ref": "#/$defs/blockSnapshot" } },
+        "rows": { "type": "object" },
+        "cols": { "type": "object" },
+        "cells": { "type": "array", "items": { "type": "string", "pattern": "^.+\\|.+$" } }
+      }
+    },
+    "ids": {
+      "type": "object",
+      "additionalProperties": { "type": "object", "required": ["title"], "properties": { "kind": { "type": "string" }, "title": { "type": "string" }, "text": { "type": "string" }, "doc": { "type": "string" }, "line": { "type": "integer" } } },
+      "description": "What each id the map shows is, from aidlc_ids.py refs; the page makes every id a link with this as its tooltip."
+    }
+  },
+  "$defs": {
+    "group": { "type": "object", "required": ["key", "label"], "additionalProperties": false, "properties": { "key": { "type": "string", "minLength": 1 }, "label": { "type": "string", "minLength": 1 } } },
+    "need": { "type": "object", "required": ["id"], "additionalProperties": false, "properties": { "id": { "type": "string" }, "why": { "type": "string" } } },
+    "block": {
+      "type": "object",
+      "required": ["id", "label", "title", "group", "summary", "layer", "needs", "usedBy"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "description": "The Unit's slug, or the component's name." },
+        "label": { "type": "string", "description": "The short name shown beside it (U3); the id again when there is none." },
+        "title": { "type": "string" },
+        "group": { "type": "string", "description": "A key of `groups`." },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 240, "description": "One plain sentence, written by the agent in judgment.json." },
+        "layer": { "type": "integer", "minimum": 1, "description": "The wave of a Unit; one more than the longest path below a component." },
+        "needs": { "type": "array", "items": { "$ref": "#/$defs/need" }, "description": "What it needs first." },
+        "usedBy": { "type": "array", "items": { "type": "string" }, "description": "What waits for it (the inverse of needs)." },
+        "status": { "enum": ["landed", "building", "planned"] },
+        "points": { "type": "integer", "minimum": 0 },
+        "pointsSource": { "type": "string" },
+        "stories": { "type": "array", "items": { "type": "string" } },
+        "detail": { "type": "string" },
+        "responsibilities": { "type": "array", "items": { "type": "string" } },
+        "external": { "type": "array", "items": { "type": "string" } },
+        "entities": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "blockSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string" }, "title": { "type": "string" }, "summary": { "type": "string" }, "group": { "type": "string" },
+        "status": { "type": "string" }, "points": { "type": ["integer", "null"] }, "layer": { "type": "integer" },
+        "needs": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "wave": {
+      "type": "object",
+      "required": ["n", "units"],
+      "properties": { "n": { "type": "integer" }, "title": { "type": "string" }, "units": { "type": "array", "items": { "type": "string" } }, "points": { "type": "integer" }, "landed": { "type": "integer" } }
+    },
+    "matrixRow": { "type": "object", "required": ["id", "label"], "properties": { "id": { "type": "string" }, "label": { "type": "string" }, "title": { "type": "string" }, "uncovered": { "type": "boolean" } } },
+    "matrixCol": { "type": "object", "required": ["id", "label"], "properties": { "id": { "type": "string" }, "label": { "type": "string" }, "title": { "type": "string" }, "layer": { "type": "integer" }, "status": { "type": "string" } } }
+  }
+}

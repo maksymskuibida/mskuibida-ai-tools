@@ -56,7 +56,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import aidlc_ids  # noqa: E402  (the shared copy: the id map of the bundle's `ids`)
-import gate_bundle  # noqa: E402  (same folder: record_root, load_graph, state_field, slugify)
+import gate_bundle
+import map_bundle  # noqa: E402  (same folder: record_root, load_graph, state_field, slugify)
 import handling  # noqa: E402
 import validate_bundle  # noqa: E402
 
@@ -931,6 +932,16 @@ def default_facts(bundle):
     head["facts"] = facts
 
 
+def map_links(args):
+    """[{kind, url, title}] of the maps published for the intent (map_bundle.py), for the page's header; [] when none."""
+    try:
+        project = os.path.abspath(args.project_dir or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+        _space, intent, _root = gate_bundle.record_root(project)
+        return map_bundle.links(project, intent)
+    except Exception:  # a page without its map links is still a page; the guard holds the map itself
+        return []
+
+
 def bundle_texts(value, skip=("provenance", "source", "ids")):
     """Every string the page may show, in order."""
     if isinstance(value, dict):
@@ -980,6 +991,10 @@ def finalize(args):
     ids = id_map(bundle, os.path.abspath(args.project_dir or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()))
     if ids:
         bundle["ids"] = ids
+    bundle.pop("maps", None)
+    found = map_links(args)
+    if found:
+        bundle["maps"] = found
     problems = validate_bundle.validate(bundle)
     if missing:
         problems.append(f"say what changed in v{head.get('revision')} (revNote) for: {', '.join(missing)}")

@@ -40,6 +40,14 @@ an empty state): the link is then found again, as the newest page for the intent
 any session of this machine and in the bundles and gates rows written in the transcript; with no exact link, a link to
 one of the artifacts that names the Unit or stage is needed. The refusal is three numbered steps to follow word for word.
 
+Maps (1.32.0): the gate of the stage that settles the components (domain-design, application-design), the gate of the stage
+that settles the Units (units-generation), and the gate that ends a Unit (the unit-end page, or a per-stage Unit's code-generation
+gate) each need the project map built from the records (scripts/map_bundle.py, a `maps/<id>` row in the "AI-DLC maps"
+artifact). The Approval question is refused, and so is the write of the gate's own row, until that map was written from the
+records as they are now: the row carries a digest of the records it was built from and the guard compares it with the
+records, so a Unit that landed, a redo of Units Generation or a new component makes the last map stale. A project whose
+records hold no components or no Units is not held to the map.
+
 The state lives in ~/.claude/approval-gates/<session>.json (APPROVAL_GATES_DIR overrides the folder) and is
 changed by this hook only. The developer clears it by typing /approval-gates:release.
 
@@ -71,6 +79,7 @@ import findings_round  # noqa: E402  (review findings at the gate: cards on the 
 sys.path.insert(0, os.path.join(PLUGIN_ROOT, "scripts"))
 import judgment  # noqa: E402  (the agent's evaluation of the stage: a gates/ row without it is refused)
 import aidlc_links  # noqa: E402  (the registry of the pages published for each stage: the project panel lists them)
+import map_bundle  # noqa: E402  (the project maps a gate needs: the guard asks the records whether the map is current)
 STALE_DAYS = 14  # another session's state file untouched for this long is removed when a state is saved
 GATE_LABELS = {"approve", "approve plan", "accept as-is"}
 CLOSING = {"approved", "rejected", "accepted"}
@@ -727,6 +736,55 @@ def require_published(state, project, stage, unit, opened, call="the Approval qu
     return pub
 
 
+MAP_ARTIFACT = "AI-DLC maps"
+
+
+def map_steps(kind, stale):
+    script = os.path.join(PLUGIN_ROOT, "scripts", "map_bundle.py")
+    folder = f"{SCRATCH}/map-{kind}"
+    return [f"Run `python3 \"{script}\" draft --kind {kind} --out {folder}`; it reads the records and writes records.json and judgment.json.",
+            f"Do every item of its `todo` in {folder}/judgment.json: a one-sentence plain summary and a group for every block "
+            "(what the records give is filled in as a start).",
+            f"Run `python3 \"{script}\" finalize --kind {kind} --out {folder}`; when it prints Refused, fix what it lists and run it again.",
+            f"Send the `writes` array of {folder}/writes.json, as it is, with one ArtifactData batch to the \"{MAP_ARTIFACT}\" artifact "
+            f"(its URL: Artifact `action: \"list\"`; if the developer has none, publish `maps.html` from the approval-gates skill's "
+            "directory once with `capabilities: {db: {}, user: {}}`, `icon: \"map\"`, title \"AI-DLC maps\").",
+            "If this stage's gate page was written before the map, build it again (the page's header links the map), then "
+            + LINK_THEN_ASK]
+
+
+def maps_check(project, kinds):
+    """[(kind, freshness)] of the maps this gate needs that are missing or stale; the project's records decide. A project
+    with no components or no Units, and a project with no active intent, has none."""
+    out = []
+    for kind in kinds:
+        try:
+            fr = map_bundle.freshness(project, kind)
+        except map_bundle.MapError:
+            continue
+        if fr["subject"] and not fr["fresh"]:
+            out.append((kind, fr))
+    return out
+
+
+def require_maps(project, stage, unit, pub=None, call="the Approval question"):
+    """Refuse a gate whose project map is missing or built from older records than the ones there now."""
+    page = (pub or {}).get("page") if isinstance(pub, dict) else None
+    stale = maps_check(project, map_bundle.required_kinds(stage, page))
+    if not stale:
+        return
+    kind, fr = stale[0]
+    name = map_bundle.TITLES[kind].lower()
+    why = ("no " + name + " was published for this intent" if not fr["published"] else
+           f"the {name} (revision {fr['revision']}) was built from records that have changed since: a Unit landed, or Units, "
+           "components or dependencies were redone")
+    raise Refusal(f"{call} for {stage}{(' (' + unit + ')') if unit else ''}, because the developer reads the {name} at this gate "
+                  f"and {why}. Build it first (to do: {', '.join(k for k, _ in stale)}).",
+                  [step for k, _ in stale[:1] for step in map_steps(k, fr["published"])]
+                  + ([f"Do the same for the {map_bundle.TITLES[k].lower()} (`--kind {k}`)." for k, _ in stale[1:]]),
+                  f"the hook answers your batch with `maps/<id> is published`, and {call} goes through after the page's link.")
+
+
 def unit_end_flow_for(state, project, doc_id):
     """(stage, unit) when a `gates/<doc_id>` row is the per-stage page of a gate that a unit-end Unit has as a bundle
     page (its Code Generation plan approval or unit-end gate), else None."""
@@ -1043,6 +1101,7 @@ def guard_question(event, state, project, questions):
                 if state["pending"] or not recoverable(event, state, project, q):
                     raise
                 continue
+        require_maps(project, stage, unit, pub)
         tested_first(pub, stage, unit)  # only the question: the rejected report (fixes picked after the test) still goes
         text = str(q.get("question", ""))
         url = str(pub.get("url", "")).strip()
@@ -1365,6 +1424,13 @@ def pre(event, project):
         intent, _root = intent_root(project)
         rnd = state["findings"]
         for op, collection, doc_id, data, _url in writes_of(ti):
+            if op == "set" and isinstance(data, dict) and collection in ("gates", "bundles"):
+                made = BUNDLE_ID.match(doc_id or "") if collection == "bundles" else None
+                row_stage = data.get("stage") if collection == "gates" else (UNIT_END_STAGE if made else None)
+                if isinstance(row_stage, str):
+                    unit = data.get("unit") if isinstance(data.get("unit"), str) else None
+                    require_maps(project, row_stage, unit, {"page": made.group("page")} if made else None,
+                                 f"the write of {collection}/{doc_id}")
             if collection == "gates" and doc_id:
                 wrong = unit_end_flow_for(state, project, doc_id)
                 if wrong:
@@ -1529,6 +1595,22 @@ def register_link(project, kind, url, doc_id, stage, unit=None, rhythm=None, rev
         pass
 
 
+def record_map(project, intent, op, doc_id, data, url):
+    """A `maps` row written into the AI-DLC maps artifact: remember which records it was built from (its digest) and
+    where it lives, so the gates that need it can be held to it and link it. Tells the assistant the link."""
+    if op != "set" or not isinstance(data, dict) or data.get("schema") != map_bundle.SCHEMA or not intent:
+        return
+    kind = data.get("kind")
+    if kind not in map_bundle.KINDS or data.get("intent") != intent:
+        return
+    try:
+        pub = map_bundle.record_published(project, intent, kind, doc_id, url, data.get("digest"), data.get("revision"))
+    except OSError:
+        return
+    say("PostToolUse", f"maps/{doc_id} is published (revision {pub['revision']}). The gate pages link it from their header when "
+                       f"they are built after it: `{pub['url']}#{doc_id}`.")
+
+
 def record_artifact(project, state, tool_input, response):
     if failed(response):
         return False
@@ -1541,6 +1623,9 @@ def record_artifact(project, state, tool_input, response):
     changed = False
     plan_ids, bundle_ids = [], []
     for op, collection, doc_id, _data, url in writes_of(tool_input):
+        if collection == "maps":
+            record_map(project, intent, op, doc_id, _data, url)
+            continue
         if collection == "plans":
             if op == "set" and doc_id:
                 state["plans"][doc_id] = {"id": doc_id, "url": str(url or "").rstrip("/"), "at": time.time()}

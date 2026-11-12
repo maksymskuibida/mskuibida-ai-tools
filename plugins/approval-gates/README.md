@@ -13,6 +13,8 @@ skills/approval-gates/SKILL.md            the procedure the agent follows at eve
 skills/approval-gates/approval-gate.html  the per-stage template — the data contract is in its header
 skills/approval-gates/unit-gate.html      the unit-end template: a Unit's plan page and unit-end page
 skills/approval-gates/test-plan.html      the test-plan template (artifact "AI-DLC test plans")
+skills/approval-gates/maps.html           the project-maps template (artifact "AI-DLC maps")
+scripts/map_bundle.py                     builds a map's row from the intent's records (draft, finalize, check)
 skills/test-plan/SKILL.md                 /approval-gates:test-plan
 scripts/test_plan.py                      validates, publishes and finishes a test plan
 skills/release/SKILL.md                   /approval-gates:release
@@ -271,6 +273,34 @@ After `aidlc engine orchestrate report --result awaiting-approval` (or `revised`
 message of its own, and then asks the Approval question. After Request Changes it reads `gates/<id>` and quotes your notes in
 the `--reason` of the rejected report. It never writes your notes, and never updates a row.
 
+## Project maps (1.32.0)
+
+A fourth private artifact, **AI-DLC maps** (`maps.html`, `db` and `user` capabilities, icon `map`), holds one map per intent
+and kind. Pick a block and the side panel says what it needs first and what waits for it; only that block's edges are drawn
+(Show every edge draws them all). The four maps, each there because a table does not show what it shows:
+
+- **Components**: the design's components as a layered graph, in groups, with their responsibilities and the outside systems and entities they touch.
+- **Units**: the Units as waves, with points, stories and what has landed (a tick). Readable at 50+ blocks: wave columns, group chips, search, keyboard arrows between blocks.
+- **Stories**: stories by Units. A story no Unit builds is a row with no dot, flagged.
+- **Entities**: entities by components (only when the components name entities), an entity nobody owns is a gap.
+
+Each row carries a revision. From the second revision on, the page marks every block that is **new**, **changed** (what moved: the
+sentence, the group, the points, what it needs, its wave, its status; a Unit that landed says so) or **removed** since the
+previous one, in the same colours as a gate page's rounds, with a button for only the changes. At phone width the graph is a list
+(per wave) with the same panel under the picked row; the matrix scrolls. Every id is a link with a tooltip.
+
+`scripts/map_bundle.py` builds the rows from the records: Units from `unit-of-work.md`, dependencies and waves from
+`unit-of-work-dependency.md`, stories from the story map, points from `unit-points.csv`, status from the `## Unit Progress`
+table and the `UNIT_*` receipts (a `UNIT_MERGED`, or a code-generation `UNIT_COMPLETED`, receipt means landed even when the
+table cell is empty), components from `components.md`. The agent writes only what the records cannot give: a plain sentence per
+block and its group, in a small `judgment.json` that is kept from one revision to the next.
+
+**The hook requires them**: the Approval question (and the write of the gate row) is refused at the stage that settles the
+components (`domain-design`, `application-design`), at `units-generation` (again when it is redone), and at a Unit's end, until
+the map was written from the records as they are now (the row holds a digest of them). A project with no components or no
+Units is not held to a map. The gate pages link their maps in the header (`maps` on the row). SKILL.md § 8 is the procedure;
+`contract/map.schema.json` the row.
+
 ## What the hook refuses
 
 - The Approval question (header `Approval`, an option such as Approve, Approve Plan or Accept as-is, no
@@ -286,6 +316,7 @@ the `--reason` of the rejected report. It never writes your notes, and never upd
 - The same question with the page's link in its text: the link goes in a message of its own, so the dialog stays readable.
 - `aidlc engine orchestrate report … --result approved|rejected|accepted` before that row exists.
 - A write to `gates/<id>` that carries `notes` (or a decision field: the page records none).
+- The Approval question, and the write of the gate's row, at a gate that needs a project map (above) when the map is missing or was built from older records (1.32.0).
 
 Every refusal (1.20.0) has one shape: a first line `Refused: <what>, because <why>`, then `Do this:` with numbered
 steps the agent can follow word for word (exact commands, script paths and links where they are known), then `It worked
@@ -332,7 +363,7 @@ python3 -m unittest discover -s plugins/approval-gates/tests
 
 Python 3 standard library only. The tests use a fake project under `tests/fixtures/project` and a
 stand-in for `aidlc` (`$APPROVAL_GATES_AIDLC`). The unit page's renderer runs under Node when `node` is installed,
-and those tests are skipped without it.
+and those tests are skipped without it. The maps page and the gate pages run under jsdom (`jsdom` on `NODE_PATH`, as CI installs it); those tests skip without it.
 
 `test_unit_bundle.TestRealU4Records` builds, validates and renders both pages from Dayboard's real U4 records. It
 reads them from that checkout's git branch into a temporary folder: `APPROVAL_GATES_U4_REPO`, default `~/dayboard`;

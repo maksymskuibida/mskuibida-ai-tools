@@ -1,0 +1,923 @@
+<title>AI-DLC maps</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<!--
+  AI-DLC maps — the one template for the project maps of an AI-DLC intent: the component map, the Unit map, the story map
+  and the entity map.
+
+  Published ONCE per developer as a private Artifact with the `db` and `user` capabilities
+  (capabilities: {db: {}, user: {}}, title "AI-DLC maps", icon "map"); never regenerated per intent. Every map is a row
+  INSIDE this artifact, written by the agent with the ArtifactData tool (SKILL.md next to this file, § 8;
+  scripts/map_bundle.py builds the row). The page renders whatever the row says, live. Link to a map:
+  <artifact url>#<row id>; to a block of it: <artifact url>#<row id>/<block id>. No hash: the list of intents and their maps.
+
+  Data contract (contract/map.schema.json is the same in JSON Schema):
+
+    maps/<id>   id = <intent>-<kind>, one row per intent and map kind, written again (set) whenever the records change
+      schema    "aidlc-map/1"
+      intent, kind ("components"|"units"|"stories"|"entities"), title, view ("graph"|"matrix"),
+      revision  integer, 1 for the first publication; +1 whenever something a viewer sees changed
+      builtAt   ISO time;  digest  hash of the records it was built from (the guard compares it with the records)
+      sources   the record files it was built from, relative to the intent folder
+      ids       {"U3": {kind, title, text, doc, line}}  the tooltips of the ids the map shows (aidlc_ids.py refs)
+      previous  {revision, builtAt, blocks: {id: {label, title, summary, group, status, points, layer, needs: [id]}}}
+                or, for a matrix, {revision, builtAt, rows: {id: {title, uncovered}}, cols: {...}, cells: ["row|col"]}:
+                the revision before this one, so the page marks what is new, changed or removed since
+      graph:  groups [{key, label}], layerName ("Wave"|"Layer"), waves [{n, title, units, points, landed}] (Unit map),
+              blocks [{id, label, title, group, summary, layer, needs: [{id, why}], usedBy: [id], status ("landed"|
+              "building"|"planned"), points, pointsSource, stories: [US..], detail, responsibilities: [..],
+              external: [..], entities: [..]}]
+      matrix: rowsTitle, colsTitle, rows [{id, label, title, uncovered}], cols [{id, label, title, layer, status}],
+              cells {row id: [col id, ...]}
+
+  The page writes nothing to the row. Per-viewer conveniences (the last view, a hidden group) stay in this browser.
+  The render functions between RENDER-START and RENDER-END use no DOM, so tests render a map under Node.
+  Stable hooks for tests and checks: #map-bar, #map-canvas, #map-panel, [data-block=<id>], [data-row=<id>],
+  [data-col=<id>], [data-kind-tab=<kind>], [data-group-chip=<key>], #map-search, [data-act="edges"|"changes"|"gaps"],
+  [data-view="graph"|"list"], .rv-tag.new|chg|gone, .landed.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root {
+  --bg: #F5F6F8; --surface: #FFFFFF; --raised: #F8F9FB; --fg: #171A21; --fg-2: #3D4350; --muted: #5A6170;
+  --line: #E4E7EC; --line-soft: #EEF0F3; --control: #D5D9E0; --hover: #F7F8FA;
+  --accent: #2F49C4; --accent-strong: #1E3399; --accent-soft: #EEF1FB; --accent-tint: #F4F6FE; --on-accent: #FFFFFF;
+  --ok-bg: #E6F4EA; --ok-fg: #1F6B36; --ok-line: #9FD2AF; --bad-bg: #FDE4E4; --bad-fg: #9B1C1C;
+  --warn-bg: #FFF4DB; --warn-fg: #7A4B00; --low-bg: #EEF0F3; --low-fg: #4A5160;
+  --tip-bg: #171A21; --tip-fg: #FFFFFF; --tip-line: #171A21; --edge: #B4BAC6; --edge-out: #2F49C4; --edge-in: #B4570B;
+  --g0: #2F49C4; --g1: #0F7A6B; --g2: #B4570B; --g3: #8A3FB8; --g4: #B3263E; --g5: #4F7A12;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #111318; --surface: #1A1D24; --raised: #20232B; --fg: #E6E8EE; --fg-2: #C3C8D2; --muted: #9AA1AF;
+  --line: #2A2E38; --line-soft: #22262F; --control: #3A3F4B; --hover: #20242C;
+  --accent: #8FA2FF; --accent-strong: #B5C2FF; --accent-soft: #222B4D; --accent-tint: #1B2035; --on-accent: #111318;
+  --ok-bg: #183024; --ok-fg: #8FD3A6; --ok-line: #2F6A47; --bad-bg: #3D1D1D; --bad-fg: #F4A4A4;
+  --warn-bg: #3A2C12; --warn-fg: #F0C36B; --low-bg: #262A33; --low-fg: #AEB4C0;
+  --tip-bg: #2B303B; --tip-fg: #E6E8EE; --tip-line: #3A3F4B; --edge: #4A5060; --edge-out: #8FA2FF; --edge-in: #F0A25B;
+  --g0: #8FA2FF; --g1: #62D0BF; --g2: #F0A25B; --g3: #C99BF0; --g4: #F28BA0; --g5: #A6D56B;
+  color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #111318; --surface: #1A1D24; --raised: #20232B; --fg: #E6E8EE; --fg-2: #C3C8D2; --muted: #9AA1AF;
+  --line: #2A2E38; --line-soft: #22262F; --control: #3A3F4B; --hover: #20242C;
+  --accent: #8FA2FF; --accent-strong: #B5C2FF; --accent-soft: #222B4D; --accent-tint: #1B2035; --on-accent: #111318;
+  --ok-bg: #183024; --ok-fg: #8FD3A6; --ok-line: #2F6A47; --bad-bg: #3D1D1D; --bad-fg: #F4A4A4;
+  --warn-bg: #3A2C12; --warn-fg: #F0C36B; --low-bg: #262A33; --low-fg: #AEB4C0;
+  --tip-bg: #2B303B; --tip-fg: #E6E8EE; --tip-line: #3A3F4B; --edge: #4A5060; --edge-out: #8FA2FF; --edge-in: #F0A25B;
+  --g0: #8FA2FF; --g1: #62D0BF; --g2: #F0A25B; --g3: #C99BF0; --g4: #F28BA0; --g5: #A6D56B;
+  color-scheme: dark }
+* { box-sizing: border-box; }
+html { scroll-padding-top: 16px; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.55 var(--body); -webkit-font-smoothing: antialiased; }
+#app { max-width: 1480px; margin: 0 auto; padding: 0 16px 80px; }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, input:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+a { color: var(--accent); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.msg { padding: 20px; margin-top: 24px; } .msg p { margin: 6px 0 0; color: var(--muted); }
+.crumbs { font-size: 12.5px; color: var(--muted); letter-spacing: .02em; }
+h1 { margin: 0; font-size: 22px; line-height: 1.25; font-weight: 600; }
+.lede { margin: 4px 0 0; color: var(--fg-2); font-size: 14px; }
+
+/* the sticky bar */
+#map-bar { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(6px);
+  padding: 14px 0 10px; margin: 0 0 12px; border-bottom: 1px solid var(--line); }
+.bar-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; }
+.bar-top .grow { flex: 1; min-width: 0; }
+.tabs { display: inline-flex; gap: 4px; flex-wrap: wrap; margin-top: 10px; }
+.tab { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border-radius: 9px; border: 1px solid var(--control);
+  background: var(--surface); color: var(--fg); text-decoration: none; font-weight: 500; font-size: 14px; }
+.tab[aria-current="page"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.tab small { font: 500 11px var(--mono); opacity: .8; }
+.stats { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 10px 0 0; color: var(--fg-2); font-size: 13.5px; }
+.stats b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 11px 0 9px; border-radius: 999px; border: 1px solid var(--control);
+  background: var(--surface); font-size: 13px; font-weight: 500; }
+.chip i { width: 10px; height: 10px; border-radius: 3px; background: var(--c, var(--accent)); }
+.chip[aria-pressed="false"] { color: var(--muted); background: transparent; } .chip[aria-pressed="false"] i { opacity: .35; }
+.tog { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 11px; border-radius: 8px; border: 1px solid var(--control); background: var(--surface); font-size: 13px; }
+.tog[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); }
+.seg { display: inline-flex; border: 1px solid var(--control); border-radius: 8px; overflow: hidden; }
+.seg button { min-height: 30px; padding: 0 12px; border: 0; background: var(--surface); font-size: 13px; }
+.seg button + button { border-left: 1px solid var(--control); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+#map-search { min-height: 30px; width: 220px; max-width: 100%; padding: 0 10px; border: 1px solid var(--control); border-radius: 8px; background: var(--surface); color: var(--fg); font: inherit; font-size: 13.5px; }
+.hint { color: var(--muted); font-size: 12.5px; }
+
+/* the revision strip */
+.rvbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 0 12px; padding: 10px 14px; font-size: 13.5px;
+  border-color: color-mix(in srgb, var(--rv-chg) 40%, var(--line)); }
+.rvbar b { font-weight: 600; }
+.rvbar .gone { display: flex; flex-wrap: wrap; gap: 4px 8px; width: 100%; }
+.rvbar .ghost { font: 500 12px var(--mono); text-decoration: line-through; color: var(--rv-del-fg); padding: 1px 6px; border-radius: 4px; background: var(--rv-del-bg); cursor: help; }
+.rv-tag.landed { background: var(--ok-bg); color: var(--ok-fg); }
+
+/* body: canvas and panel */
+.body { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; align-items: start; }
+.canvas { overflow: auto; max-height: calc(100vh - 230px); min-height: 320px; padding: 8px; position: relative; }
+.plane { position: relative; }
+.plane svg { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.collabel { position: absolute; top: 6px; font: 600 11.5px var(--body); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.collabel small { font-weight: 500; letter-spacing: 0; text-transform: none; margin-left: 6px; }
+.edge { fill: none; stroke: var(--edge); stroke-width: 1.2; opacity: 0; transition: opacity .12s; }
+.canvas.all .edge { opacity: .45; }
+.edge.on { opacity: 1; stroke-width: 2; }
+.edge.out { stroke: var(--edge-out); } .edge.in { stroke: var(--edge-in); }
+.node { position: absolute; display: block; padding: 7px 10px 7px 15px; border-radius: 9px; border: 1px solid var(--control); background: var(--surface);
+  cursor: pointer; overflow: hidden; text-align: left; transition: opacity .12s, box-shadow .12s, border-color .12s; }
+.node::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--c, var(--accent)); }
+.node:hover { border-color: var(--c, var(--accent)); }
+.node .n1 { display: block; font: 600 13px/1.3 var(--body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node .n2 { display: flex; gap: 6px; align-items: center; font: 500 11.5px/1.3 var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; }
+.node .mark { margin-left: auto; flex: none; }
+.node.landed { background: color-mix(in srgb, var(--ok-bg) 55%, var(--surface)); border-color: var(--ok-line); }
+.node.landed .tick { color: var(--ok-fg); font-weight: 700; }
+.node.building .st { color: var(--warn-fg); }
+.node.sel { box-shadow: 0 0 0 3px var(--accent-soft); border-color: var(--accent); border-width: 2px; padding: 6px 9px 6px 14px; }
+.node.dep { border-color: var(--edge-out); border-width: 2px; padding: 6px 9px 6px 14px; }
+.node.user { border-color: var(--edge-in); border-width: 2px; padding: 6px 9px 6px 14px; }
+.node.dim { opacity: .28; }
+.node.off { opacity: .12; pointer-events: none; }
+.node.rv-new { box-shadow: inset 0 0 0 1px var(--rv-new); }
+.node.rv-chg { box-shadow: inset 0 0 0 1px var(--rv-chg); }
+.node .rv-tag { position: absolute; top: 0; right: 0; border-radius: 0 8px 0 6px; padding: 1px 6px; font-size: 10px; }
+
+.panel { padding: 16px 18px; position: sticky; top: 168px; max-height: calc(100vh - 190px); overflow: auto; }
+.panel h2 { margin: 0 0 4px; font-size: 18px; line-height: 1.3; font-weight: 600; overflow-wrap: anywhere; }
+.panel h3 { margin: 16px 0 6px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.panel p { margin: 4px 0; }
+.panel .sum { color: var(--fg-2); }
+.pill { display: inline-flex; align-items: center; gap: 5px; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 500; background: var(--low-bg); color: var(--low-fg); vertical-align: middle; }
+.pill.landed { background: var(--ok-bg); color: var(--ok-fg); } .pill.building { background: var(--warn-bg); color: var(--warn-fg); }
+.pill i { width: 8px; height: 8px; border-radius: 2px; background: var(--c, var(--accent)); }
+.links { display: flex; flex-wrap: wrap; gap: 6px; }
+.lnk { display: inline-flex; align-items: center; min-height: 28px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--control); background: var(--surface); font: 500 12.5px var(--mono); }
+.lnk.out { border-color: var(--edge-out); color: var(--accent-strong); } .lnk.in { border-color: var(--edge-in); }
+.why { color: var(--muted); font-size: 13px; margin: 2px 0 8px; }
+.panel ul { margin: 4px 0; padding-left: 18px; } .panel li { margin: 2px 0; }
+.chg { border-left: 3px solid var(--rv-chg); padding: 2px 0 2px 10px; margin: 8px 0; font-size: 13.5px; }
+.chg.new { border-color: var(--rv-new); } .chg.gone { border-color: var(--rv-gone); }
+.chg del { color: var(--rv-del-fg); } .chg ins { background: var(--rv-ins-bg); text-decoration: none; border-radius: 3px; padding: 0 2px; }
+details.beh summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.empty { color: var(--muted); font-size: 14px; }
+
+/* the list (phone width, or by choice) */
+.list { padding: 8px 12px 16px; }
+.list h2 { margin: 14px 0 6px; font-size: 13px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.lrow { display: block; width: 100%; padding: 10px 12px; margin: 4px 0; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); text-align: left; position: relative; cursor: pointer; }
+.lrow::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 4px; border-radius: 0 3px 3px 0; background: var(--c, var(--accent)); }
+.lrow.sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.lrow.landed { background: color-mix(in srgb, var(--ok-bg) 45%, var(--surface)); }
+.lrow.dim { opacity: .35; } .lrow.off { display: none; }
+.lrow .l1 { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.lrow .l1 b { font-weight: 600; overflow-wrap: anywhere; } .lrow .l1 small { font: 500 12px var(--mono); color: var(--muted); }
+.lrow .l2 { color: var(--fg-2); font-size: 14px; margin-top: 2px; }
+.inline-panel { margin: 0 0 8px; border-top: 0; }
+
+/* the matrix */
+.mwrap { overflow: auto; max-height: calc(100vh - 230px); padding: 0; }
+table.matrix { border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.matrix th, .matrix td { border-bottom: 1px solid var(--line-soft); padding: 0; text-align: center; background: var(--surface); }
+.matrix thead th { position: sticky; top: 0; z-index: 2; border-bottom: 1px solid var(--line); }
+.matrix th.rh { position: sticky; left: 0; z-index: 1; text-align: left; min-width: 220px; max-width: 280px; border-right: 1px solid var(--line); }
+.matrix thead th.rh { z-index: 3; padding: 8px 12px; font-size: 12px; color: var(--muted); }
+.matrix .ch { min-width: 54px; padding: 6px 4px; }
+.matrix button.hd { display: block; width: 100%; border: 0; background: transparent; text-align: left; padding: 6px 12px; font-size: 13px; }
+.matrix button.hd b { font-weight: 600; margin-right: 6px; font: 600 12.5px var(--mono); } .matrix button.hd span { color: var(--fg-2); }
+.matrix .ch button { border: 0; background: transparent; font: 600 12px var(--mono); padding: 2px; width: 100%; }
+.matrix td.on { background: color-mix(in srgb, var(--c, var(--accent)) 22%, var(--surface)); color: var(--accent-strong); font-weight: 700; }
+.matrix tr.sel th, .matrix tr.sel td { background: var(--accent-soft); } .matrix td.colsel, .matrix th.colsel { background: var(--accent-soft); }
+.matrix tr.gap th.rh { box-shadow: inset 3px 0 0 var(--warn-fg); }
+.matrix .ch.landed button { color: var(--ok-fg); }
+.matrix tr.rv-new th.rh { box-shadow: inset 3px 0 0 var(--rv-new); } .matrix td.rv-new { outline: 2px solid var(--rv-new); outline-offset: -2px; }
+.gapchip { display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 999px; background: var(--warn-bg); color: var(--warn-fg); font: 600 11px var(--body); }
+
+.rows-list { margin: 0; padding: 0; list-style: none; }
+.idx { padding: 16px 18px; margin: 12px 0; }
+.idx h2 { margin: 0 0 8px; font-size: 16px; }
+.irow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 10px 8px; border-radius: 8px; color: inherit; text-decoration: none; }
+.irow:hover { background: var(--hover); } .irow b { font-weight: 500; flex: 1; min-width: 160px; } .irow small { color: var(--muted); }
+
+#tip { position: fixed; z-index: 30; max-width: min(360px, calc(100vw - 24px)); padding: 8px 10px; border-radius: 6px; background: var(--tip-bg); color: var(--tip-fg); border: 1px solid var(--tip-line); font: 12px/1.45 var(--body); pointer-events: none; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
+#toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--tip-bg); color: var(--tip-fg); border: 1px solid var(--tip-line); padding: 8px 14px; border-radius: 8px; font-size: 13px; z-index: 20; }
+@media (max-width: 960px) { .body { grid-template-columns: minmax(0, 1fr); } .panel { position: static; max-height: none; } .canvas { max-height: 70vh; } }
+@media (max-width: 720px) {
+  #app { padding: 0 12px 64px; } h1 { font-size: 19px; } #map-search { width: 100%; } .stats { gap: 4px 12px; }
+  #map-bar { padding-top: 10px; } .canvas, .mwrap { max-height: none; }
+}
+@media (prefers-reduced-motion: reduce) { .node, .edge { transition: none; } }
+/* rev-diff.css:begin */
+/* Shared: the canonical copy is shared/rev-diff/rev-diff.css; scripts/sync-shared.py copies it into every page that
+   carries the block. What changed since an earlier round: inserted words on a soft green wash with a thin underline,
+   removed words struck and muted, a new block with a green edge, a changed one with an amber edge, a gone one as a struck
+   ghost. [data-rv="clean"] on any ancestor hides every mark and shows the page as it is now, with each round's own changes tinted in
+   that round's colour (rv-r*): no strikethrough, no ghosts; the latest round wins where rounds clash. The round colours are
+   the pages' own --r2..--r5 tokens (light and dark), so a round reads the same here as on its "revised" note. */
+:root { --rv-ins-bg: #DDF3E4; --rv-ins-line: #2F8F55; --rv-del-fg: #9A4A43; --rv-del-bg: #FBEDEB; --rv-new: #2F8F55; --rv-chg: #C98A1B; --rv-gone: #B5544B; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --rv-ins-bg: #173A26; --rv-ins-line: #6FCB93; --rv-del-fg: #E3A39C; --rv-del-bg: #3A1F1D; --rv-new: #6FCB93; --rv-chg: #E9B65A; --rv-gone: #E3897F; } }
+:root[data-theme="dark"] { --rv-ins-bg: #173A26; --rv-ins-line: #6FCB93; --rv-del-fg: #E3A39C; --rv-del-bg: #3A1F1D; --rv-new: #6FCB93; --rv-chg: #E9B65A; --rv-gone: #E3897F; }
+:root { --rv-r2: var(--r2-fg, #5B2FA8); --rv-r3: var(--r3-fg, #0F665F); --rv-r4: var(--r4-fg, #8A5A00); --rv-r5: var(--r5-fg, #9B2C5C); }
+.rv-t2 { --rvc: var(--rv-r2); } .rv-t3 { --rvc: var(--rv-r3); } .rv-t4 { --rvc: var(--rv-r4); } .rv-t5 { --rvc: var(--rv-r5); }
+ins.rv-r { background: color-mix(in srgb, var(--rvc) 24%, transparent); color: inherit; text-decoration: none; border-radius: 3px; padding: 0 1px; box-decoration-break: clone; -webkit-box-decoration-break: clone; transition: background-color .15s; }
+.rv-rb { box-shadow: inset 3px 0 0 var(--rvc); padding-left: 8px; }
+ins.rv-r.rv-dim { background: none; }
+.rv-rb.rv-dim { box-shadow: none; }
+.rv-legend { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.rv-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px 0 8px; border-radius: 14px; border: 1px solid color-mix(in srgb, var(--rvc) 40%, var(--line, #ccc)); background: color-mix(in srgb, var(--rvc) 12%, transparent); color: var(--fg, inherit); font: 600 12px/1 var(--body, system-ui); cursor: pointer; }
+.rv-chip i { width: 10px; height: 10px; border-radius: 3px; background: var(--rvc); }
+.rv-chip .n { font: 500 11px/1 var(--mono, ui-monospace, monospace); font-variant-numeric: tabular-nums; color: var(--muted, inherit); }
+.rv-chip[aria-pressed="true"] { background: color-mix(in srgb, var(--rvc) 28%, transparent); border-color: var(--rvc); }
+.rv-chip:focus-visible { outline: 2px solid var(--rvc); outline-offset: 2px; }
+ins.rv-ins { background: var(--rv-ins-bg); text-decoration: underline; text-decoration-color: var(--rv-ins-line); text-decoration-thickness: 1px; text-underline-offset: 3px; border-radius: 3px; padding: 0 1px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+del.rv-del { color: var(--rv-del-fg); background: var(--rv-del-bg); text-decoration: line-through; text-decoration-thickness: 1px; border-radius: 3px; padding: 0 1px; opacity: .9; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+div.rv-gone, li.rv-gone { margin: 6px 0; padding: 4px 10px; border-left: 3px solid var(--rv-gone); border-radius: 0 6px 6px 0; background: color-mix(in srgb, var(--rv-del-bg) 60%, transparent); }
+li.rv-gone { list-style: none; }
+tr.rv-gone > td { border-left: 3px solid var(--rv-gone); background: color-mix(in srgb, var(--rv-del-bg) 60%, transparent); }
+div.rv-gone del.rv-del, li.rv-gone del.rv-del, tr.rv-gone del.rv-del { background: transparent; padding: 0; }
+.rv-addblk { box-shadow: inset 3px 0 0 var(--rv-new); padding-left: 8px; }
+li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
+.rv-new { box-shadow: inset 3px 0 0 var(--rv-new); }
+.rv-chg { box-shadow: inset 3px 0 0 var(--rv-chg); }
+.rv-removed { box-shadow: inset 3px 0 0 var(--rv-gone); opacity: .78; }
+.rv-removed :is(h1, h2, h3, h4, .rv-title) { text-decoration: line-through; text-decoration-thickness: 1px; }
+.rv-tag { display: inline-flex; align-items: center; gap: 4px; flex: none; font: 600 11px/1.3 var(--body, system-ui); padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+.rv-tag.new { background: var(--rv-ins-bg); color: var(--rv-new); }
+.rv-tag.chg { background: color-mix(in srgb, var(--rv-chg) 18%, transparent); color: var(--rv-chg); }
+.rv-tag.gone { background: var(--rv-del-bg); color: var(--rv-del-fg); }
+.rv-tag.same { background: transparent; color: var(--muted, currentColor); font-weight: 500; padding-left: 0; padding-right: 0; }
+.rv-n { font: 600 11px/1 var(--mono, ui-monospace, monospace); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rv-n .p { color: var(--rv-new); } .rv-n .m { color: var(--rv-del-fg); }
+.rv-same > summary { opacity: .72; }
+@keyframes rv-flash { from { outline: 2px solid var(--rv-chg); outline-offset: 2px; } to { outline: 2px solid transparent; outline-offset: 6px; } }
+.rv-flash { animation: rv-flash 1.4s ease-out; border-radius: 4px; }
+@media (prefers-reduced-motion: reduce) { .rv-flash { animation: none; outline: 2px solid var(--rv-chg); outline-offset: 2px; } }
+[data-rv="clean"] :is(del.rv-del, .rv-gone, .rv-removed, .rv-tag, .rv-n, .rv-only) { display: none !important; }
+[data-rv="clean"] ins.rv-ins { background: none; text-decoration: none; padding: 0; }
+[data-rv="clean"] :is(.rv-addblk, .rv-new, .rv-chg) { box-shadow: none; }
+[data-rv="clean"] .rv-same > summary { opacity: 1; }
+/* rev-diff.css:end */
+/* aidlc-ids.css:begin */
+/* Shared: the canonical copy is shared/aidlc-ids/aidlc-ids.css; scripts/sync-shared.py copies it into every page.
+   It uses the page's own tokens: --accent, --muted, --tip-bg (each page defines them). */
+a.aidlc-id { color: var(--accent, currentColor); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; cursor: pointer; white-space: nowrap; font-variant-numeric: tabular-nums; }
+a.aidlc-id:hover, a.aidlc-id:focus-visible { text-decoration-thickness: 2px; }
+a.aidlc-id.aidlc-id-out { text-decoration-style: dotted; }
+a.aidlc-id.aidlc-id-unknown { color: var(--muted, currentColor); text-decoration-style: dashed; }
+a.aidlc-id:focus-visible { outline: 2px solid var(--accent, currentColor); outline-offset: 2px; border-radius: 3px; }
+[data-aidlc-id] { scroll-margin-top: 96px; }
+@keyframes aidlc-flash { from { box-shadow: 0 0 0 3px var(--accent, #3b82f6); } to { box-shadow: 0 0 0 3px transparent; } }
+.aidlc-flash { animation: aidlc-flash 1.6s ease-out; border-radius: 6px; }
+@media (prefers-reduced-motion: reduce) { .aidlc-flash { animation: none; outline: 2px solid var(--accent, #3b82f6); } }
+/* aidlc-ids.css:end */
+</style>
+<div id="app"><div class="card msg"><b>Loading…</b></div></div>
+<div id="tip" role="tooltip" hidden></div>
+<div id="toast" role="status" hidden></div>
+<script>
+/* aidlc-ids.js:begin */
+/* The ids an AI-DLC page shows (US1.1, AC1.1.2, FR1.4, NFR3, BR1.2, Q4, U31, C2, ADR-009, R-01, ...), each a link with
+   a tooltip saying what it is. Shared: the canonical copy is shared/aidlc-ids/aidlc-ids.js in mskuibida-ai-tools,
+   copied into every page by scripts/sync-shared.py. Edit it there.
+
+   The page gives it a map of what each id is, `ids` = {"FR1.4": {kind, title, text, doc}}, the output of
+   `aidlc_ids.py refs` written with the page's data, and marks each element that shows an id's own definition with
+   data-aidlc-id="<id>". Then:
+
+     AidlcIds.linkify(root, ids, { toast: fn })   turn every id in root's text into a link; run after each render
+     AidlcIds.observe(root, getIds, { toast: fn }) the same, again whenever root's content changes
+
+   A link whose id is shown in the page jumps there and flashes it. One that is not shown still looks like a link: its
+   tooltip says what it is, and a click shows a toast that it is not in this page. An id no document defines says so.
+   The tooltip is the page's own: the link carries data-tip and aria-label, which every page's tooltip reads. */
+var AidlcIds = (function () {
+  "use strict";
+  var ID = /(^|[^\w-])([A-Z][A-Z]{0,4}-?\d+[a-z]?(?:[.-]\d+[a-z]?)*(?:-[A-Z]{1,4}\d+[a-z]?)?)(?![\w-])/g;
+  var NOT_IDS = /^(UTF-?\d+|SHA-?\d+|ISO-?\d+|RFC-?\d+|HTTP-?\d+|TLS-?\d|H[1-6]|V\d+|X\d+|P\d|ES\d+|ID\d*)$/;
+  var KINDS = { US: "Story", AC: "Acceptance criterion", FR: "Functional requirement", NFR: "Non-functional requirement",
+    BR: "Business rule", Q: "Question", U: "Unit", C: "Contract", E: "External interface", ADR: "Decision record",
+    R: "Review finding", D: "Decision", DR: "Design rule", S: "Screen", M: "Mockup", T: "Task" };
+  var SKIP = "a, button, code, pre, script, style, textarea, input, select, option, [data-aidlc-noids]";
+
+  function prefix(id) { return (/^[A-Z]+/.exec(id) || [""])[0]; }
+  function docName(doc) { return String(doc || "").split("/").pop(); }
+
+  function anchorOf(id) {
+    var css = window.CSS && CSS.escape ? CSS.escape(id) : id.replace(/["\\]/g, "\\$&");
+    return document.querySelector('[data-aidlc-id="' + css + '"]');
+  }
+
+  /** The tooltip of an id: what it is, in plain words, and where it is written. */
+  function tip(id, def) {
+    if (!def) return id + ": not found in this project's documents.";
+    var kind = def.kind || KINDS[prefix(id)] || "";
+    var head = (kind ? kind + " " : "") + id + (def.title ? ": " + def.title : "");
+    var body = def.text && def.text !== def.title ? " " + def.text : "";
+    return head + (/[.!?…]$/.test(head) || !body ? "" : ".") + body + (def.doc ? " (" + docName(def.doc) + ")" : "");
+  }
+
+  /** Whether a word is an id this page knows of, or looks like one of a kind it knows. */
+  function isId(word, ids, prefixes) {
+    if (NOT_IDS.test(word)) return false;
+    return Object.prototype.hasOwnProperty.call(ids, word) || prefixes[prefix(word)] === true;
+  }
+
+  function linkify(root, ids, opts) {
+    if (!root) return;
+    ids = ids || {};
+    opts = opts || {};
+    var prefixes = {};
+    Object.keys(ids).forEach(function (k) { prefixes[prefix(k)] = true; });
+    Object.keys(KINDS).forEach(function (k) { prefixes[k] = true; });
+    // Keys of the page's own map that are not id-shaped (a form's q1, a card's f-3) are linked by their exact text.
+    var own = Object.keys(ids).filter(function (k) { return !/^[A-Z]/.test(k) && /^[\w.-]+$/.test(k); })
+      .sort(function (a, b) { return b.length - a.length; })
+      .map(function (k) { return k.replace(/[.-]/g, "\\$&"); });
+    var OWN = own.length ? new RegExp("(^|[^\\w-])(" + own.join("|") + ")(?![\\w-])", "g") : null;
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (n) {
+        if (!n.nodeValue || !(OWN ? /\d/ : /[A-Z]-?\d/).test(n.nodeValue)) return NodeFilter.FILTER_REJECT;
+        var p = n.parentElement;
+        return p && !p.closest(SKIP) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      }
+    });
+    var nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(function (node) {
+      var text = node.nodeValue, last = 0, frag = null, m;
+      var self = node.parentElement.closest("[data-aidlc-id]");
+      var found = [];
+      [ID, OWN].forEach(function (re) {
+        if (!re) return;
+        re.lastIndex = 0;
+        while ((m = re.exec(text))) found.push({ word: m[2], start: m.index + m[1].length, own: re === OWN });
+      });
+      found.sort(function (a, b) { return a.start - b.start; });
+      for (var i = 0; i < found.length; i++) {
+        var word = found[i].word, start = found[i].start;
+        if (start < last) continue;
+        if (!found[i].own && !isId(word, ids, prefixes)) continue;
+        if (self && self.getAttribute("data-aidlc-id") === word) continue;
+        frag = frag || document.createDocumentFragment();
+        frag.appendChild(document.createTextNode(text.slice(last, start)));
+        var a = document.createElement("a");
+        var def = ids[word];
+        a.className = "aidlc-id" + (def ? "" : " aidlc-id-unknown");
+        a.href = "#" + encodeURIComponent(word);
+        a.textContent = word;
+        a.setAttribute("data-aidlc-ref", word);
+        a.setAttribute("data-tip", tip(word, def));
+        a.setAttribute("aria-label", tip(word, def));
+        frag.appendChild(a);
+        last = start + word.length;
+      }
+      if (frag) {
+        frag.appendChild(document.createTextNode(text.slice(last)));
+        node.parentNode.replaceChild(frag, node);
+      }
+    });
+    markLive(root);
+    bind(root, opts);
+  }
+
+  /** Links whose id is shown in the page get the live look; the rest the out-of-page one. */
+  function markLive(root) {
+    Array.prototype.forEach.call(root.querySelectorAll("a.aidlc-id"), function (a) {
+      a.classList.toggle("aidlc-id-out", !anchorOf(a.getAttribute("data-aidlc-ref")));
+    });
+  }
+
+  function bind(root, opts) {
+    if (root.__aidlcIds) { root.__aidlcIds.opts = opts; return; }
+    root.__aidlcIds = { opts: opts };
+    root.addEventListener("click", function (e) {
+      var a = e.target.closest && e.target.closest("a.aidlc-id");
+      if (!a || !root.contains(a)) return;
+      e.preventDefault();
+      var id = a.getAttribute("data-aidlc-ref"), target = anchorOf(id);
+      var say = root.__aidlcIds.opts.toast || function (t) { window.alert(t); };
+      if (target) {
+        var closed = target.closest("details:not([open])");
+        if (closed) closed.open = true;
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+        target.classList.remove("aidlc-flash");
+        void target.offsetWidth;
+        target.classList.add("aidlc-flash");
+        if (target.tabIndex < 0 && !target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+        target.focus({ preventScroll: true });
+      } else if (a.classList.contains("aidlc-id-unknown")) {
+        say(id + " isn't defined in this project's documents.");
+      } else {
+        say(id + " isn't in this page. What it is: in its tooltip.");
+      }
+    });
+  }
+
+  function observe(root, getIds, opts) {
+    if (!root) return;
+    var busy = false;
+    var run = function () {
+      if (busy) return;
+      busy = true;
+      try { linkify(root, getIds(), opts); } finally { busy = false; }
+    };
+    run();
+    new MutationObserver(function () { if (!busy) window.requestAnimationFrame(run); })
+      .observe(root, { childList: true, subtree: true, characterData: true });
+  }
+
+  return { linkify: linkify, observe: observe, tip: tip, KINDS: KINDS };
+})();
+/* aidlc-ids.js:end */
+</script>
+<script>
+/* RENDER-START — no DOM below this line until RENDER-END */
+var MapView = (function () {
+  "use strict";
+  var W = 176, H = 54, CX = 244, RY = 68, PADX = 18, PADY = 40;
+  var STATUS = { landed: "Landed", building: "Being built", planned: "Planned" };
+  var KIND_ORDER = ["components", "units", "stories", "entities"];
+  var KIND_NAME = { components: "Components", units: "Units", stories: "Stories", entities: "Entities" };
+
+  function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+  function byId(list) { var o = {}; (list || []).forEach(function (b) { o[b.id] = b; }); return o; }
+  function isGraph(row) { return row.view !== "matrix"; }
+  function groupIndex(row) { var o = {}; (row.groups || []).forEach(function (g, i) { o[g.key] = i % 6; }); return o; }
+  function groupLabel(row, key) { var g = (row.groups || []).filter(function (x) { return x.key === key; })[0]; return g ? g.label : key; }
+  function sameList(a, b) { return JSON.stringify(a || []) === JSON.stringify(b || []); }
+
+  /* ---------- what changed since the previous revision ---------- */
+  function snapOf(b) {
+    return { label: b.label, title: b.title, summary: b.summary, group: b.group, status: b.status || "", points: b.points == null ? null : b.points,
+      layer: b.layer, needs: (b.needs || []).map(function (n) { return n.id; }).sort() };
+  }
+  var FIELD_NAME = { summary: "What it is", title: "Title", group: "Group", status: "Status", points: "Points", layer: "", needs: "Needs", label: "Name" };
+  function diff(row) {
+    var out = { has: !!row.previous, rev: row.previous ? row.previous.revision : null, state: {}, fields: {}, removed: [], counts: { new: 0, changed: 0, removed: 0, landed: 0 } };
+    var p = row.previous;
+    if (!p) return out;
+    if (isGraph(row)) {
+      var before = p.blocks || {}, now = byId(row.blocks);
+      (row.blocks || []).forEach(function (b) {
+        var a = before[b.id];
+        if (!a) { out.state[b.id] = "new"; out.counts.new++; return; }
+        var s = snapOf(b), f = Object.keys(s).filter(function (k) { return JSON.stringify(s[k]) !== JSON.stringify(a[k]); });
+        if (f.length) {
+          out.state[b.id] = "chg"; out.fields[b.id] = f; out.counts.changed++;
+          if (f.indexOf("status") >= 0 && s.status === "landed") out.counts.landed++;
+        }
+      });
+      Object.keys(before).forEach(function (id) { if (!now[id]) { out.state[id] = "gone"; out.counts.removed++; out.removed.push(Object.assign({ id: id }, before[id])); } });
+    } else {
+      var rb = p.rows || {}, cb = p.cols || {}, cells = {};
+      (p.cells || []).forEach(function (c) { cells[c] = 1; });
+      (row.rows || []).forEach(function (r) { if (!rb[r.id]) { out.state["r:" + r.id] = "new"; out.counts.new++; } });
+      (row.cols || []).forEach(function (c) { if (!cb[c.id]) { out.state["c:" + c.id] = "new"; out.counts.new++; } });
+      Object.keys(rb).forEach(function (id) { if (!byId(row.rows)[id]) { out.removed.push({ id: id, title: rb[id].title }); out.counts.removed++; } });
+      Object.keys(cb).forEach(function (id) { if (!byId(row.cols)[id]) { out.removed.push({ id: id, title: cb[id].title }); out.counts.removed++; } });
+      Object.keys(row.cells || {}).forEach(function (r) { (row.cells[r] || []).forEach(function (c) { if (!cells[r + "|" + c]) { out.state["x:" + r + "|" + c] = "new"; out.counts.changed++; } }); });
+      Object.keys(cells).forEach(function (k) {
+        var i = k.indexOf("|"), r = k.slice(0, i), c = k.slice(i + 1);
+        if (!((row.cells || {})[r] || []).filter(function (x) { return x === c; }).length) out.counts.removed++;
+      });
+    }
+    return out;
+  }
+  function changeLines(row, d, id) {
+    var p = (row.previous || {}).blocks || {}, b = byId(row.blocks)[id], a = p[id], lines = [];
+    if (!b) return lines;
+    if (d.state[id] === "new") return [{ field: "new", text: "New in revision " + row.revision + "." }];
+    (d.fields[id] || []).forEach(function (k) {
+      var s = snapOf(b)[k], was = a[k];
+      if (k === "needs") {
+        var add = s.filter(function (x) { return was.indexOf(x) < 0; }), del = was.filter(function (x) { return s.indexOf(x) < 0; });
+        if (add.length) lines.push({ field: k, text: "Now needs " + add.join(", ") + "." });
+        if (del.length) lines.push({ field: k, text: "No longer needs " + del.join(", ") + "." });
+      } else if (k === "status" && s === "landed") lines.push({ field: k, text: "Landed since revision " + d.rev + ".", landed: true });
+      else if (k === "layer") lines.push({ field: k, text: "Moved from " + (row.layerName || "layer") + " " + was + " to " + s + "." });
+      else lines.push({ field: k, was: was == null || was === "" ? "nothing" : was, now: s == null || s === "" ? "nothing" : s, name: FIELD_NAME[k] || k });
+    });
+    return lines;
+  }
+
+  /* ---------- layout: layers left to right, groups together, crossings reduced ---------- */
+  function layout(row) {
+    var blocks = row.blocks || [], by = byId(blocks), gi = {}, layers = [], pos = {};
+    (row.groups || []).forEach(function (g, i) { gi[g.key] = i; });
+    blocks.forEach(function (b) { var l = b.layer || 1; (layers[l] = layers[l] || []).push(b.id); });
+    var cols = [];
+    layers.forEach(function (ids, l) { if (ids) cols.push({ layer: l, ids: ids.slice() }); });
+    cols.forEach(function (c) { c.ids.sort(function (x, y) { return (gi[by[x].group] || 0) - (gi[by[y].group] || 0) || (x < y ? -1 : x > y ? 1 : 0); }); });
+    function index() { cols.forEach(function (c) { c.ids.forEach(function (id, i) { pos[id] = i; }); }); }
+    index();
+    for (var pass = 0; pass < 3; pass++) {
+      cols.forEach(function (c) {
+        c.ids.sort(function (x, y) { return bary(x, "needs") - bary(y, "needs") || (gi[by[x].group] || 0) - (gi[by[y].group] || 0) || (x < y ? -1 : 1); });
+        index();
+      });
+      cols.slice().reverse().forEach(function (c) {
+        c.ids.sort(function (x, y) { return bary(x, "usedBy") - bary(y, "usedBy") || (gi[by[x].group] || 0) - (gi[by[y].group] || 0) || (x < y ? -1 : 1); });
+        index();
+      });
+    }
+    function bary(id, rel) {
+      var list = (by[id][rel] || []).map(function (n) { return typeof n === "string" ? n : n.id; }).filter(function (n) { return pos[n] != null; });
+      return list.length ? list.reduce(function (s, n) { return s + pos[n]; }, 0) / list.length : pos[id];
+    }
+    var maxRows = cols.reduce(function (m, c) { return Math.max(m, c.ids.length); }, 1), p = {};
+    cols.forEach(function (c, x) { c.x = PADX + x * CX; c.ids.forEach(function (id, i) { p[id] = { x: c.x, y: PADY + i * RY }; }); });
+    return { cols: cols, pos: p, width: PADX * 2 + cols.length * CX - (CX - W), height: PADY + maxRows * RY + 12 };
+  }
+  function edgePath(a, b) {
+    var x1 = a.x + W, y1 = a.y + H / 2, x2 = b.x - 2, y2 = b.y + H / 2, dx = Math.max(36, (x2 - x1) / 2);
+    return "M" + x1 + "," + y1 + " C" + (x1 + dx) + "," + y1 + " " + (x2 - dx) + "," + y2 + " " + x2 + "," + y2;
+  }
+
+  /* ---------- filters ---------- */
+  function matches(row, b, q) {
+    if (!q) return true;
+    q = q.toLowerCase();
+    return [b.id, b.label, b.title, b.summary].concat(b.stories || [], b.entities || [], b.external || []).join("\n").toLowerCase().indexOf(q) >= 0;
+  }
+  function visible(row, b, st) { return !(st.off || {})[b.group]; }
+  function connected(row, id) {
+    var b = byId(row.blocks)[id], out = { needs: {}, users: {} };
+    if (b) { (b.needs || []).forEach(function (n) { out.needs[n.id] = 1; }); (b.usedBy || []).forEach(function (u) { out.users[u] = 1; }); }
+    return out;
+  }
+  function edgeCount(row) { return (row.blocks || []).reduce(function (n, b) { return n + (b.needs || []).length; }, 0); }
+
+  /* ---------- the graph ---------- */
+  function nodeHtml(row, b, st, pos, d, gi, con) {
+    var cls = ["node"], s = st.sel;
+    if (b.status === "landed") cls.push("landed"); else if (b.status === "building") cls.push("building");
+    if (s) cls.push(s === b.id ? "sel" : con.needs[b.id] ? "dep" : con.users[b.id] ? "user" : "dim");
+    if (!visible(row, b, st)) cls.push("off");
+    else if (!matches(row, b, st.q) || (st.changed && d.has && !d.state[b.id])) cls.push("dim");
+    var ch = d.state[b.id];
+    if (ch) cls.push("rv-" + ch);
+    var tag = ch === "new" ? '<span class="rv-tag new">NEW</span>' : ch === "chg" ? '<span class="rv-tag chg">' + ((d.fields[b.id] || []).indexOf("status") >= 0 && b.status === "landed" ? "LANDED" : "CHANGED") + "</span>" : "";
+    var sub = [];
+    if (b.label && b.label !== b.id) sub.push('<span>' + esc(b.label) + "</span>");
+    if (b.points != null) sub.push("<span>" + esc(b.points) + " pt</span>");
+    var mark = b.status === "landed" ? '<span class="mark tick" title="Landed" aria-hidden="true">✓</span>' : b.status === "building" ? '<span class="mark st" title="Being built" aria-hidden="true">●</span>' : "";
+    return '<div class="' + cls.join(" ") + '" role="button" tabindex="0" data-block="' + esc(b.id) + '" data-group="' + esc(b.group) + '" data-layer="' + esc(b.layer) + '"' +
+      (b.status ? ' data-status="' + esc(b.status) + '"' : "") + (ch ? ' data-change="' + ch + '"' : "") + ' aria-pressed="' + (s === b.id) + '" aria-label="' + esc(b.id + (b.label && b.label !== b.id ? " (" + b.label + ")" : "") + ", " + groupLabel(row, b.group) + (b.status ? ", " + (STATUS[b.status] || b.status) : "") + (ch === "new" ? ", new" : ch === "chg" ? ", changed" : "")) + '"' +
+      ' style="left:' + pos.x + "px;top:" + pos.y + "px;width:" + W + "px;height:" + H + "px;--c:var(--g" + (gi[b.group] || 0) + ')" title="' + esc(b.summary) + '">' +
+      tag + '<span class="n1">' + esc(b.id) + '</span><span class="n2">' + sub.join("") + mark + "</span></div>";
+  }
+  function graphHtml(row, st, d) {
+    var L = layout(row), gi = groupIndex(row), by = byId(row.blocks), con = st.sel ? connected(row, st.sel) : { needs: {}, users: {} }, edges = [], nodes = [], labels = [];
+    L.cols.forEach(function (c) {
+      var w = (row.waves || []).filter(function (x) { return x.n === c.layer; })[0];
+      labels.push('<div class="collabel" style="left:' + c.x + 'px" data-layer-label="' + c.layer + '">' + esc((row.layerName || "Layer") + " " + c.layer) + " " +
+        (w ? "<small>" + w.units.length + " · " + w.points + " pt" + (w.landed ? " · " + w.landed + " landed" : "") + "</small>" : "<small>" + c.ids.length + "</small>") + "</div>");
+    });
+    (row.blocks || []).forEach(function (b) {
+      (b.needs || []).forEach(function (n) {
+        if (!by[n.id] || !L.pos[n.id]) return;
+        var on = st.sel && (b.id === st.sel || n.id === st.sel), kind = !st.sel ? "" : b.id === st.sel ? " out" : n.id === st.sel ? " in" : "";
+        if ((st.off || {})[b.group] || (st.off || {})[by[n.id].group]) return;
+        edges.push('<path class="edge' + (on ? " on" + kind : "") + '" d="' + edgePath(L.pos[n.id], L.pos[b.id]) + '" data-from="' + esc(n.id) + '" data-to="' + esc(b.id) + '"><title>' + esc(b.id + " needs " + n.id + (n.why ? ": " + n.why : "")) + "</title></path>");
+      });
+    });
+    (row.blocks || []).forEach(function (b) { nodes.push(nodeHtml(row, b, st, L.pos[b.id], d, gi, con)); });
+    return '<div class="card canvas' + (st.allEdges ? " all" : "") + '" id="map-canvas" aria-label="' + esc(row.title) + ' as a graph: ' + (row.blocks || []).length + ' blocks, ' + edgeCount(row) + ' dependencies, ' + L.cols.length + " columns" + '">' +
+      '<div class="plane" style="width:' + L.width + "px;height:" + L.height + 'px"><svg width="' + L.width + '" height="' + L.height + '" aria-hidden="true"><g>' + edges.join("") + "</g></svg>" + labels.join("") + nodes.join("") + "</div></div>";
+  }
+
+  /* ---------- the list: the same blocks and the same panel, for a phone ---------- */
+  function listRowHtml(row, b, st, d, gi) {
+    var cls = ["lrow"], ch = d.state[b.id];
+    if (b.status === "landed") cls.push("landed");
+    if (st.sel === b.id) cls.push("sel");
+    if (!visible(row, b, st)) cls.push("off");
+    else if (!matches(row, b, st.q) || (st.changed && d.has && !d.state[b.id])) cls.push("dim");
+    if (ch) cls.push("rv-" + ch);
+    var h = '<button type="button" class="' + cls.join(" ") + '" data-block="' + esc(b.id) + '" data-group="' + esc(b.group) + '" aria-pressed="' + (st.sel === b.id) + '" aria-expanded="' + (st.sel === b.id) + '" style="--c:var(--g' + (gi[b.group] || 0) + ')">' +
+      '<span class="l1"><b>' + esc(b.id) + "</b>" + (b.label && b.label !== b.id ? "<small>" + esc(b.label) + "</small>" : "") +
+      (b.points != null ? "<small>" + esc(b.points) + " pt</small>" : "") + (b.status ? '<span class="pill ' + esc(b.status) + '">' + esc(STATUS[b.status] || b.status) + "</span>" : "") +
+      (ch === "new" ? '<span class="rv-tag new">NEW</span>' : ch === "chg" ? '<span class="rv-tag chg">CHANGED</span>' : "") + '</span><span class="l2">' + esc(b.summary) + "</span></button>";
+    if (st.sel === b.id) h += '<div class="card panel inline-panel" id="map-panel-inline">' + panelInner(row, st, d) + "</div>";
+    return h;
+  }
+  function listHtml(row, st, d) {
+    var gi = groupIndex(row), layers = {}, out = [];
+    (row.blocks || []).forEach(function (b) { (layers[b.layer || 1] = layers[b.layer || 1] || []).push(b); });
+    Object.keys(layers).map(Number).sort(function (a, b) { return a - b; }).forEach(function (l) {
+      var w = (row.waves || []).filter(function (x) { return x.n === l; })[0];
+      out.push("<h2>" + esc((row.layerName || "Layer") + " " + l) + (w ? " · " + w.units.length + " Units · " + w.points + " pt" + (w.landed ? " · " + w.landed + " landed" : "") : "") + "</h2>");
+      layers[l].sort(function (a, b) { return (gi[a.group] || 0) - (gi[b.group] || 0) || (a.id < b.id ? -1 : 1); }).forEach(function (b) { out.push(listRowHtml(row, b, st, d, gi)); });
+    });
+    return '<div class="card list" id="map-canvas" data-map-view="list">' + out.join("") + "</div>";
+  }
+
+  /* ---------- the panel: what a block needs, what waits for it, what changed ---------- */
+  function link(id, cls, why, row) {
+    var b = byId(row.blocks)[id];
+    return '<button type="button" class="lnk ' + cls + '" data-go="' + esc(id) + '" title="' + esc((b ? b.summary : "") + (why ? " — " + why : "")) + '">' + esc(id) + "</button>";
+  }
+  function panelInner(row, st, d) {
+    var b = byId(row.blocks)[st.sel];
+    if (!b) return panelHome(row, d);
+    var gi = groupIndex(row), needs = b.needs || [], users = b.usedBy || [], by = byId(row.blocks), h = "";
+    h += '<h2>' + esc(b.id) + "</h2>";
+    h += '<p><span class="pill" style="--c:var(--g' + (gi[b.group] || 0) + ')"><i></i>' + esc(groupLabel(row, b.group)) + "</span> " +
+      (b.status ? '<span class="pill ' + esc(b.status) + '">' + esc(STATUS[b.status] || b.status) + "</span> " : "") +
+      (b.label && b.label !== b.id ? '<span class="pill">' + esc(b.label) + "</span> " : "") +
+      '<span class="pill">' + esc((row.layerName || "Layer") + " " + b.layer) + "</span>" +
+      (b.points != null ? ' <span class="pill" title="' + esc(b.pointsSource || "") + '">' + esc(b.points) + " pt</span>" : "") + "</p>";
+    h += '<p class="sum">' + esc(b.summary) + "</p>";
+    if (b.title && b.title !== b.id && b.title !== b.summary) h += '<p class="why">' + esc(b.title) + "</p>";
+    var lines = changeLines(row, d, b.id);
+    if (lines.length) {
+      h += "<h3>Since revision " + esc(d.rev) + "</h3>" + lines.map(function (l) {
+        return '<div class="chg ' + (l.field === "new" ? "new" : "") + '" data-change-field="' + esc(l.field) + '">' + (l.text ? esc(l.text) : "<b>" + esc(l.name) + "</b>: <del>" + esc(l.was) + "</del> <ins>" + esc(l.now) + "</ins>") + "</div>";
+      }).join("");
+    }
+    h += "<h3>Needs first (" + needs.length + ")</h3>" + (needs.length ? needs.map(function (n) {
+      return "<div>" + link(n.id, "out", n.why, row) + (n.why ? '<div class="why">' + esc(n.why) + "</div>" : "") + "</div>";
+    }).join("") : '<p class="empty">Nothing. It can start first.</p>');
+    h += "<h3>Waiting for it (" + users.length + ")</h3>" + (users.length ? '<div class="links">' + users.map(function (u) {
+      var why = ((by[u] || {}).needs || []).filter(function (n) { return n.id === b.id; }).map(function (n) { return n.why; })[0];
+      return link(u, "in", why, row);
+    }).join("") + "</div>" : '<p class="empty">None.</p>');
+    if ((b.stories || []).length) h += "<h3>Stories (" + b.stories.length + ")</h3><div class=\"links\">" + b.stories.map(function (s) { return '<span class="lnk">' + esc(s) + "</span>"; }).join("") + "</div>";
+    if ((b.responsibilities || []).length) h += "<h3>Responsibilities</h3><ul>" + b.responsibilities.map(function (r) { return "<li>" + esc(r) + "</li>"; }).join("") + "</ul>";
+    if ((b.entities || []).length) h += "<h3>Entities</h3><p>" + b.entities.map(esc).join(", ") + "</p>";
+    if ((b.external || []).length) h += "<h3>Outside the system</h3><p>" + b.external.map(esc).join(", ") + "</p>";
+    if (b.detail) h += '<details class="beh"><summary>Behaviour in full</summary><p>' + esc(b.detail) + "</p></details>";
+    return h;
+  }
+  function panelHome(row, d) {
+    var h = "<h2>Pick a block</h2><p class=\"sum\">Press a block (or Enter on it) to see what it needs first and what waits for it. Only the picked block's edges are drawn; “Show every edge” draws them all.</p>";
+    if (d.has) {
+      h += "<h3>Since revision " + esc(d.rev) + "</h3><p>" + d.counts.new + " new · " + d.counts.changed + " changed" + (d.counts.landed ? " (" + d.counts.landed + " landed)" : "") + " · " + d.counts.removed + " removed.</p>";
+    }
+    h += "<h3>Reading the marks</h3><p><span class=\"rv-tag new\">NEW</span> <span class=\"rv-tag chg\">CHANGED</span> since the previous revision. <span class=\"pill landed\">✓ Landed</span> the work is merged.</p>";
+    var legend = (row.groups || []).map(function (g, i) { return '<span class="pill" style="--c:var(--g' + (i % 6) + ')"><i></i>' + esc(g.label) + "</span>"; }).join(" ");
+    return h + (legend ? "<h3>Groups</h3><p>" + legend + "</p>" : "");
+  }
+
+  /* ---------- the matrix (stories × Units, entities × components) ---------- */
+  function matrixHtml(row, st, d) {
+    var cols = (row.cols || []).slice().sort(function (a, b) { return (a.layer || 0) - (b.layer || 0) || (a.id < b.id ? -1 : 1); }), cells = row.cells || {}, sel = st.sel || "";
+    var head = '<tr><th class="rh" scope="col">' + esc(row.rowsTitle) + " ↓ · " + esc(row.colsTitle) + " →</th>" + cols.map(function (c) {
+      return '<th class="ch' + (c.status === "landed" ? " landed" : "") + (sel === "c:" + c.id ? " colsel" : "") + (d.state["c:" + c.id] ? " rv-" + d.state["c:" + c.id] : "") + '" scope="col"><button type="button" data-col="' + esc(c.id) + '" aria-pressed="' + (sel === "c:" + c.id) + '" title="' + esc(c.title || c.id) + '">' + esc(c.label || c.id) + "</button></th>";
+    }).join("") + "</tr>";
+    var body = (row.rows || []).filter(function (r) { return !st.gaps || !(cells[r.id] || []).length; }).map(function (r) {
+      var mine = cells[r.id] || [], gap = !mine.length;
+      return '<tr class="' + [gap ? "gap" : "", sel === "r:" + r.id ? "sel" : "", d.state["r:" + r.id] ? "rv-" + d.state["r:" + r.id] : ""].join(" ").trim() + '" data-row-line="' + esc(r.id) + '">' +
+        '<th class="rh" scope="row"><button type="button" class="hd" data-row="' + esc(r.id) + '" aria-pressed="' + (sel === "r:" + r.id) + '"><b>' + esc(r.label || r.id) + "</b>" + (r.title ? "<span>" + esc(r.title) + "</span>" : "") +
+        (gap ? '<span class="gapchip">' + (row.kind === "stories" ? "No Unit builds it" : "No component owns it") + "</span>" : "") + "</button></th>" +
+        cols.map(function (c) {
+          var on = mine.indexOf(c.id) >= 0, fresh = d.state["x:" + r.id + "|" + c.id];
+          return '<td class="' + [on ? "on" : "", fresh ? "rv-new" : "", sel === "c:" + c.id ? "colsel" : ""].join(" ").trim() + '"' + (on ? ' data-cell="' + esc(r.id + "|" + c.id) + '" aria-label="' + esc(r.id + " is in " + c.id) + '"' : "") + ">" + (on ? "●" : "") + "</td>";
+        }).join("") + "</tr>";
+    }).join("");
+    return '<div class="card mwrap" id="map-canvas" data-map-view="matrix"><table class="matrix" aria-label="' + esc(row.title) + '"><thead>' + head + "</thead><tbody>" + body + "</tbody></table></div>";
+  }
+  function matrixPanel(row, st, d) {
+    var sel = st.sel || "", cells = row.cells || {}, h = "";
+    if (sel.indexOf("r:") === 0) {
+      var r = byId(row.rows)[sel.slice(2)];
+      if (!r) return matrixHome(row, d);
+      var mine = cells[r.id] || [], by = byId(row.cols);
+      h = "<h2>" + esc(r.label || r.id) + "</h2>" + (r.title ? '<p class="sum">' + esc(r.title) + "</p>" : "");
+      h += "<h3>" + esc(row.colsTitle) + "s that build it (" + mine.length + ")</h3>" + (mine.length ? '<div class="links">' + mine.map(function (c) {
+        return '<button type="button" class="lnk out" data-col="' + esc(c) + '" title="' + esc((by[c] || {}).title || "") + '">' + esc((by[c] || {}).label || c) + "</button>"; }).join("") + "</div>" :
+        '<p class="empty">None. ' + (row.kind === "stories" ? "No Unit is planned to build this story." : "No component owns this entity.") + "</p>");
+      return h;
+    }
+    if (sel.indexOf("c:") === 0) {
+      var c = byId(row.cols)[sel.slice(2)];
+      if (!c) return matrixHome(row, d);
+      var rs = (row.rows || []).filter(function (x) { return (cells[x.id] || []).indexOf(c.id) >= 0; });
+      h = "<h2>" + esc(c.label || c.id) + "</h2>" + (c.title && c.title !== c.label ? '<p class="sum">' + esc(c.title) + "</p>" : "") +
+        (c.status ? '<p><span class="pill ' + esc(c.status) + '">' + esc(STATUS[c.status] || c.status) + "</span></p>" : "");
+      h += "<h3>" + esc(row.rowsTitle) + "s it covers (" + rs.length + ")</h3>" + (rs.length ? '<div class="links">' + rs.map(function (x) { return '<button type="button" class="lnk in" data-row="' + esc(x.id) + '" title="' + esc(x.title || "") + '">' + esc(x.label || x.id) + "</button>"; }).join("") + "</div>" : '<p class="empty">None.</p>');
+      return h;
+    }
+    return matrixHome(row, d);
+  }
+  function matrixHome(row, d) {
+    var gaps = (row.rows || []).filter(function (r) { return !((row.cells || {})[r.id] || []).length; });
+    var h = "<h2>Pick a row or a column</h2><p class=\"sum\">A dot says the row is covered by the column. A row with no dot is a gap" + (gaps.length ? ": " + gaps.length + " here." : ": there are none.") + "</p>";
+    if (gaps.length) h += '<div class="links">' + gaps.slice(0, 40).map(function (g) { return '<button type="button" class="lnk" data-row="' + esc(g.id) + '">' + esc(g.label || g.id) + "</button>"; }).join("") + "</div>";
+    if (d.has) h += "<h3>Since revision " + esc(d.rev) + "</h3><p>" + d.counts.new + " new · " + d.counts.removed + " removed.</p>";
+    return h;
+  }
+
+  /* ---------- the page ---------- */
+  function statsHtml(row, d) {
+    var s = [];
+    if (isGraph(row)) {
+      var pts = (row.blocks || []).reduce(function (n, b) { return n + (b.points || 0); }, 0), landed = (row.blocks || []).filter(function (b) { return b.status === "landed"; }).length;
+      s.push("<span><b>" + (row.blocks || []).length + "</b> blocks</span>", "<span><b>" + edgeCount(row) + "</b> dependencies</span>");
+      if (pts) s.push("<span><b>" + pts + "</b> points</span>");
+      if (row.kind === "units") s.push("<span><b>" + landed + "</b> of " + (row.blocks || []).length + " landed</span>");
+      s.push("<span><b>" + ((row.waves || []).length || new Set((row.blocks || []).map(function (b) { return b.layer; })).size) + "</b> " + esc((row.layerName || "layer").toLowerCase()) + "s</span>");
+    } else {
+      var gaps = (row.rows || []).filter(function (r) { return !((row.cells || {})[r.id] || []).length; }).length;
+      s.push("<span><b>" + (row.rows || []).length + "</b> " + esc(row.rowsTitle || "row").toLowerCase() + "s</span>", "<span><b>" + (row.cols || []).length + "</b> " + esc(row.colsTitle || "column").toLowerCase() + "s</span>", "<span><b>" + gaps + "</b> gaps</span>");
+    }
+    return '<div class="stats" id="map-stats">' + s.join("") + "</div>";
+  }
+  function tabsHtml(rows, row) {
+    var mine = rows.filter(function (r) { return r.intent === row.intent; }).sort(function (a, b) { return KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind); });
+    return '<nav class="tabs" aria-label="Maps of this intent">' + mine.map(function (r) {
+      return '<a class="tab" href="#' + esc(r.id) + '" data-kind-tab="' + esc(r.kind) + '"' + (r.id === row.id ? ' aria-current="page"' : "") + ">" + esc(KIND_NAME[r.kind] || r.kind) + " <small>r" + esc(r.revision) + "</small></a>";
+    }).join("") + "</nav>";
+  }
+  function barHtml(rows, row, st, d, narrow) {
+    var graph = isGraph(row), chips = graph ? (row.groups || []).map(function (g, i) {
+      return '<button type="button" class="chip" data-group-chip="' + esc(g.key) + '" aria-pressed="' + !(st.off || {})[g.key] + '" style="--c:var(--g' + (i % 6) + ')"><i></i>' + esc(g.label) + "</button>";
+    }).join("") : "";
+    var view = st.view || (narrow ? "list" : "graph");
+    var tools = '<div class="tools">' + (graph ? '<input id="map-search" type="search" placeholder="Find a block, story or entity" aria-label="Find a block" value="' + esc(st.q || "") + '">' : "") +
+      (chips ? '<div class="chips" role="group" aria-label="Groups">' + chips + "</div>" : "") +
+      (graph ? '<button type="button" class="tog" data-act="edges" aria-pressed="' + !!st.allEdges + '">Show every edge</button>' : '<button type="button" class="tog" data-act="gaps" aria-pressed="' + !!st.gaps + '">Only gaps</button>') +
+      (d.has ? '<button type="button" class="tog" data-act="changes" aria-pressed="' + !!st.changed + '">Only changes since r' + esc(d.rev) + "</button>" : "") +
+      (graph ? '<span class="seg" role="group" aria-label="View"><button type="button" data-view="graph" aria-pressed="' + (view === "graph") + '">Graph</button><button type="button" data-view="list" aria-pressed="' + (view === "list") + '">List</button></span>' : "") + "</div>";
+    return '<header id="map-bar"><div class="bar-top"><div class="grow"><div class="crumbs"><a href="#" data-nav="">AI-DLC maps</a> · ' + esc(row.intent) + "</div><h1>" + esc(row.title) + "</h1></div>" +
+      '<span class="hint">revision ' + esc(row.revision) + " · built " + esc(String(row.builtAt || "").replace("T", " ").replace(/:\d\d(\.\d+)?Z?$/, "")) + (row.sources && row.sources.length ? "" : "") + "</span></div>" +
+      tabsHtml(rows, row) + statsHtml(row, d) + tools + "</header>";
+  }
+  function revisionHtml(row, d) {
+    if (!d.has) return row.revision > 1 ? "" : "";
+    var c = d.counts, ghosts = d.removed.map(function (g) {
+      return '<span class="ghost" data-removed="' + esc(g.id) + '" title="' + esc((g.summary || g.title || "") + " (removed in revision " + row.revision + ")") + '">' + esc(g.id) + "</span>";
+    }).join("");
+    return '<section class="card rvbar" id="map-changes" aria-label="What changed in revision ' + esc(row.revision) + '"><b>Revision ' + esc(row.revision) + "</b> since revision " + esc(d.rev) +
+      ': <span class="rv-tag new">' + c.new + ' new</span> <span class="rv-tag chg">' + c.changed + " changed</span>" + (c.landed ? ' <span class="rv-tag landed">' + c.landed + " landed</span>" : "") +
+      ' <span class="rv-tag gone">' + c.removed + " removed</span>" + (ghosts ? '<div class="gone">' + ghosts + "</div>" : "") + "</section>";
+  }
+  function emptyHtml() {
+    return '<div class="card msg" id="map-empty"><b>Nothing to show in this map.</b><p>The records hold no blocks for it.</p></div>';
+  }
+  function render(rows, row, st, narrow) {
+    var d = diff(row), graph = isGraph(row), view = st.view || (narrow ? "list" : "graph"), body;
+    if (graph && !(row.blocks || []).length || !graph && !(row.rows || []).length) return barHtml(rows, row, st, d, narrow) + emptyHtml();
+    if (graph) body = (view === "list" ? listHtml(row, st, d) : graphHtml(row, st, d));
+    else body = matrixHtml(row, st, d);
+    var panel = graph && view === "list" ? "" : '<aside class="card panel" id="map-panel" aria-live="polite">' + (graph ? panelInner(row, st, d) : matrixPanel(row, st, d)) + "</aside>";
+    return barHtml(rows, row, st, d, narrow) + revisionHtml(row, d) + '<div class="body" id="map-body"' + (panel ? "" : ' style="grid-template-columns:minmax(0,1fr)"') + ">" + body + panel + "</div>";
+  }
+  function indexHtml(rows) {
+    if (!rows.length) return '<div class="card msg"><b>No maps yet.</b><p>The agent adds a map here when it settles the components or the Units of an intent, and gives you its link.</p></div>';
+    var by = {};
+    rows.forEach(function (r) { (by[r.intent] = by[r.intent] || []).push(r); });
+    return '<header id="map-bar"><div class="crumbs">AI-DLC</div><h1>Maps</h1><p class="lede">How the pieces of each project connect: what a component or a Unit needs first and what waits for it.</p></header>' +
+      Object.keys(by).sort().reverse().map(function (k) {
+        return '<section class="card idx"><h2>' + esc(k) + "</h2>" + by[k].sort(function (a, b) { return KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind); }).map(function (r) {
+          var n = isGraph(r) ? (r.blocks || []).length + " blocks" : (r.rows || []).length + " × " + (r.cols || []).length;
+          return '<a class="irow" href="#' + esc(r.id) + '" data-nav="' + esc(r.id) + '"><b>' + esc(r.title) + "</b><small>" + esc(n) + " · revision " + esc(r.revision) + " · " + esc(String(r.builtAt || "").slice(0, 16).replace("T", " ")) + "</small></a>";
+        }).join("") + "</section>";
+      }).join("");
+  }
+
+  return { render: render, indexHtml: indexHtml, diff: diff, layout: layout, changeLines: changeLines, panelInner: panelInner, esc: esc, edgeCount: edgeCount, snapOf: snapOf };
+})();
+if (typeof module !== "undefined") module.exports = MapView;
+/* RENDER-END */
+</script>
+<script>
+(function () {
+  "use strict";
+  var app = document.getElementById("app"), toastEl = document.getElementById("toast"), tipEl = document.getElementById("tip");
+  var db = null, rows = [], ids = {}, tipOn = null;
+  var st = { sel: "", q: "", off: {}, allEdges: false, changed: false, gaps: false, view: "" };
+  var current = "";
+
+  function toast(text) { toastEl.textContent = text; toastEl.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(function () { toastEl.hidden = true; }, 2600); }
+  function narrow() { try { return !!(window.matchMedia && window.matchMedia("(max-width: 720px)").matches); } catch (e) { return false; } }
+  function store(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { /* no storage: the page works without */ } }
+  function load(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
+  function parse() {
+    var h = decodeURIComponent(location.hash.slice(1)), i = h.indexOf("/");
+    return i < 0 ? { id: h, block: "" } : { id: h.slice(0, i), block: h.slice(i + 1) };
+  }
+  function rowNow() { var p = parse(); return rows.filter(function (r) { return r.id === p.id; })[0] || null; }
+  function setHash(row) {
+    var h = "#" + row.id + (st.sel ? "/" + st.sel : "");
+    try { history.replaceState(null, "", location.pathname + location.search + h); } catch (e) { /* a preview without history */ }
+  }
+
+  function paint(keepFocus) {
+    var row = rowNow();
+    if (!row) { current = ""; app.innerHTML = rows.length || parse().id === "" ? MapView.indexHtml(rows) : '<div class="card msg"><b>Waiting for this map</b><p>Nothing is stored under this id yet. The agent writes the map just before it sends you the link.</p><p><a href="#" data-nav="">All maps</a></p></div>'; return; }
+    ids = row.ids || {};
+    var focus = keepFocus && document.activeElement && app.contains(document.activeElement) ? document.activeElement.getAttribute("data-block") || document.activeElement.getAttribute("data-col") || document.activeElement.getAttribute("data-row") : null;
+    var q = document.getElementById("map-search"), qFocus = q && document.activeElement === q;
+    var y = window.scrollY, canvas = document.getElementById("map-canvas"), sx = canvas ? canvas.scrollLeft : 0, sy = canvas ? canvas.scrollTop : 0;
+    app.innerHTML = MapView.render(rows, row, st, narrow());
+    document.title = row.title + " · " + row.intent;
+    var c2 = document.getElementById("map-canvas");
+    if (c2 && keepFocus) { c2.scrollLeft = sx; c2.scrollTop = sy; }
+    window.scrollTo(0, y);
+    if (qFocus) { var q2 = document.getElementById("map-search"); if (q2) { q2.focus(); q2.setSelectionRange(q2.value.length, q2.value.length); } }
+    else if (focus) { var n = app.querySelector('[data-block="' + CSS.escape(focus) + '"],[data-col="' + CSS.escape(focus) + '"],[data-row="' + CSS.escape(focus) + '"]'); if (n) n.focus(); }
+    current = row.id;
+  }
+  function select(id) {
+    var row = rowNow();
+    st.sel = st.sel === id ? "" : id;
+    if (row) setHash(row);
+    paint(true);
+    var n = st.sel ? app.querySelector('[data-block="' + CSS.escape(st.sel) + '"]') : null;
+    if (n && n.scrollIntoView) n.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+
+  app.addEventListener("click", function (e) {
+    if (e.target.closest("a.aidlc-id")) return;
+    var nav = e.target.closest("[data-nav]");
+    if (nav) { e.preventDefault(); st.sel = ""; location.hash = nav.dataset.nav; return; }
+    var tab = e.target.closest("[data-kind-tab]");
+    if (tab) { st.sel = ""; return; }
+    var go = e.target.closest("[data-go]");
+    if (go) { e.preventDefault(); var row0 = rowNow(); st.sel = go.dataset.go; if (row0) setHash(row0); paint(true); var t = app.querySelector('[data-block="' + CSS.escape(st.sel) + '"]'); if (t) { t.focus(); if (t.scrollIntoView) t.scrollIntoView({ block: "nearest", inline: "nearest" }); } return; }
+    var chip = e.target.closest("[data-group-chip]");
+    if (chip) { var k = chip.dataset.groupChip; st.off[k] = !st.off[k]; store("maps.off", JSON.stringify(st.off)); paint(true); return; }
+    var act = e.target.closest("[data-act]");
+    if (act) {
+      var a = act.dataset.act;
+      if (a === "edges") st.allEdges = !st.allEdges; else if (a === "changes") st.changed = !st.changed; else if (a === "gaps") st.gaps = !st.gaps;
+      paint(true); return;
+    }
+    var view = e.target.closest("[data-view]");
+    if (view && view.tagName === "BUTTON") { st.view = view.dataset.view; store("maps.view", st.view); paint(false); return; }
+    var col = e.target.closest("[data-col]"), rw = e.target.closest("[data-row]");
+    if (col || rw) { var key = col ? "c:" + col.dataset.col : "r:" + rw.dataset.row, r1 = rowNow(); st.sel = st.sel === key ? "" : key; if (r1) setHash(r1); paint(true); return; }
+    var node = e.target.closest("[data-block]");
+    if (node) select(node.dataset.block);
+  });
+  app.addEventListener("input", function (e) { if (e.target.id === "map-search") { st.q = e.target.value.trim(); paint(true); } });
+  app.addEventListener("mouseover", function (e) { hover(e.target.closest(".node"), true); });
+  app.addEventListener("mouseout", function (e) { hover(e.target.closest(".node"), false); });
+  app.addEventListener("focusin", function (e) { hover(e.target.closest(".node"), true); });
+  app.addEventListener("focusout", function (e) { hover(e.target.closest(".node"), false); });
+  function hover(node, on) {
+    if (!node || st.sel) return;
+    var id = node.dataset.block;
+    app.querySelectorAll(".edge").forEach(function (p) { if (p.dataset.from === id || p.dataset.to === id) p.classList.toggle("on", on); });
+  }
+
+  /* the keyboard: arrows walk the graph, Enter picks, Escape clears, / finds */
+  document.addEventListener("keydown", function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    var typing = e.target.closest && e.target.closest("input, textarea, select");
+    if (e.key === "Escape") { if (tipOn) hideTip(); if (typing) { e.target.blur(); return; } if (st.sel) { st.sel = ""; var r = rowNow(); if (r) setHash(r); paint(true); } return; }
+    if (typing) return;
+    if (e.key === "/" ) { var q = document.getElementById("map-search"); if (q) { e.preventDefault(); q.focus(); } return; }
+    var node = e.target.closest && e.target.closest(".node");
+    if (!node) return;
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(node.dataset.block); return; }
+    var dir = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    if (!dir) return;
+    e.preventDefault();
+    var here = { x: parseFloat(node.style.left), y: parseFloat(node.style.top) }, best = null, bd = 1e9;
+    app.querySelectorAll(".node:not(.off)").forEach(function (n) {
+      if (n === node) return;
+      var p = { x: parseFloat(n.style.left), y: parseFloat(n.style.top) }, dx = p.x - here.x, dy = p.y - here.y;
+      if (dir[0] && Math.sign(dx) !== dir[0]) return;
+      if (dir[1] && (Math.sign(dy) !== dir[1] || Math.abs(dx) > 1)) return;
+      var d = dir[0] ? Math.abs(dx) * 4 + Math.abs(dy) : Math.abs(dy);
+      if (d < bd) { bd = d; best = n; }
+    });
+    if (best) best.focus();
+  });
+
+  function showTip(t) {
+    if (tipOn && tipOn !== t) tipOn.removeAttribute("aria-describedby");
+    tipEl.textContent = t.dataset.tip; tipEl.hidden = false; tipOn = t; t.setAttribute("aria-describedby", "tip");
+    var r = t.getBoundingClientRect(), w = tipEl.offsetWidth, h = tipEl.offsetHeight, top = r.top - h - 6;
+    if (top < 8) top = Math.min(window.innerHeight - h - 8, r.bottom + 6);
+    tipEl.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + "px"; tipEl.style.top = top + "px";
+  }
+  function hideTip() { if (tipOn) tipOn.removeAttribute("aria-describedby"); tipOn = null; tipEl.hidden = true; }
+  function tipTarget(n) { return n && n.closest ? n.closest("a.aidlc-id[data-tip]") : null; }
+  document.addEventListener("mouseover", function (e) { var t = tipTarget(e.target); if (t) { if (t !== tipOn) showTip(t); } else if (tipOn && document.activeElement !== tipOn) hideTip(); });
+  document.addEventListener("focusin", function (e) { var t = tipTarget(e.target); if (t) showTip(t); else hideTip(); });
+  window.addEventListener("scroll", function () { if (tipOn && document.activeElement !== tipOn) hideTip(); }, { passive: true });
+  AidlcIds.observe(app, function () { return ids; }, { toast: toast });
+
+  function route() { st.sel = parse().block; paint(false); }
+  window.addEventListener("hashchange", route);
+  window.addEventListener("resize", function () { if (!st.view && current) paint(true); });
+
+  (async function boot() {
+    var use = window.claude && typeof window.claude.use === "function" ? window.claude.use : null;
+    db = use ? await use("db") : null;
+    if (!db) { app.innerHTML = '<div class="card msg"><b>Sign in to claude.ai to use this page.</b><p>The maps are stored with the artifact, and only a signed-in viewer can read them.</p></div>'; return; }
+    try { await use("user"); } catch (e) { /* no per-viewer marks are kept anyway */ }
+    st.view = load("maps.view");
+    try { st.off = JSON.parse(load("maps.off") || "{}") || {}; } catch (e) { st.off = {}; }
+    db.collection("maps").limit(200).onSnapshot(function (snap) {
+      rows = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); }).filter(function (r) { return r.schema === "aidlc-map/1"; });
+      if (current) paint(true); else route();
+    }, function () { app.innerHTML = '<div class="card msg"><b>Couldn’t load the maps.</b><p>Reload the page.</p></div>'; });
+  })();
+})();
+</script>

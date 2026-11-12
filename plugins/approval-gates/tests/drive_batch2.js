@@ -27,6 +27,11 @@ function tools(w) {
 }
 
 const scenarios = {
+  async maps() {  /* the maps a gate row links (1.32.0) show in the header */
+    const { w } = boot(pagePath, sample);
+    await wait(400);
+    return { links: [...w.document.querySelectorAll("#maplinks a")].map((a) => a.dataset.mapLink + ":" + a.textContent) };
+  },
   async view() {
     const { w } = boot(pagePath, sample, seeded());
     await wait(500);
