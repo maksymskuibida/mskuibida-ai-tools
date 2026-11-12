@@ -46,7 +46,7 @@ export type Unit = UnitEdge & {
   jira: string
 }
 
-export type UnitEventKind = 'UNIT_STARTED' | 'UNIT_PAUSED' | 'UNIT_RESUMED' | 'UNIT_COMPLETED' | 'UNIT_SKIPPED'
+export type UnitEventKind = 'UNIT_STARTED' | 'UNIT_PAUSED' | 'UNIT_RESUMED' | 'UNIT_COMPLETED' | 'UNIT_SKIPPED' | 'UNIT_MERGED'
 
 export type UnitEvent = { event: UnitEventKind; stage: string; unit: string; at: string }
 
@@ -158,7 +158,12 @@ export function parseUnitIndex(text: string, names: readonly string[]): Map<stri
   return found
 }
 
-const UNIT_EVENTS: readonly string[] = ['UNIT_STARTED', 'UNIT_PAUSED', 'UNIT_RESUMED', 'UNIT_COMPLETED', 'UNIT_SKIPPED']
+const UNIT_EVENTS: readonly string[] = ['UNIT_STARTED', 'UNIT_PAUSED', 'UNIT_RESUMED', 'UNIT_COMPLETED', 'UNIT_SKIPPED', 'UNIT_MERGED']
+
+/** A receipt that settles a stage: the work is done (UNIT_COMPLETED), or the Unit's branch landed (UNIT_MERGED). Neither starts anything. */
+function isSettled(kind: UnitEventKind | undefined): boolean {
+  return kind === 'UNIT_COMPLETED' || kind === 'UNIT_MERGED'
+}
 
 /** The UNIT_* rows of one audit shard, in file order. */
 export function parseUnitEvents(shard: string): UnitEvent[] {
@@ -168,7 +173,8 @@ export function parseUnitEvents(shard: string): UnitEvent[] {
     const field = (key: string) => new RegExp(`^\\*\\*${key}\\*\\*:[^\\S\\n]*([^\\n]*)$`, 'm').exec(block)?.[1]?.trim() ?? ''
     const event = field('Event')
     if (!UNIT_EVENTS.includes(event)) continue
-    const stage = field('Stage')
+    // A merge is the Unit's, not a stage's: a row without a Stage counts for code-generation, the stage that built it.
+    const stage = field('Stage') || (event === 'UNIT_MERGED' ? LAST_UNIT_STAGE : '')
     const unit = field('Unit')
     if (stage === '' || unit === '') continue
     events.push({ event: event as UnitEventKind, stage, unit, at: field('Timestamp') })
@@ -214,6 +220,28 @@ export function parseUnitProgress(state: string): Map<string, Map<string, UnitCe
 }
 
 /**
+ * The Units whose row of the `## Unit Progress` table has `merged` at `[x]`. The `merged` (and `gate`) columns are not
+ * per-Unit stages, so `parseUnitProgress` never reads them; this is the only place `merged` is read.
+ */
+export function parseUnitMerged(state: string): Set<string> {
+  const out = new Set<string>()
+  const start = state.search(/^## Unit Progress[^\S\n]*$/m)
+  if (start < 0) return out
+  const rest = state.slice(start).split('\n').slice(1)
+  const end = rest.findIndex(line => /^## /.test(line))
+  const lines = (end < 0 ? rest : rest.slice(0, end)).filter(line => line.trim().startsWith('|'))
+  const split = (line: string) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim())
+  const header = lines[0] === undefined ? [] : split(lines[0]).map(cell => cell.toLowerCase())
+  const at = header.indexOf('merged')
+  if (header[0] !== 'unit' || at < 0) return out
+  for (const line of lines.slice(1)) {
+    const row = split(line)
+    if ((row[0] ?? '') !== '' && /^\[x\]$/i.test(row[at] ?? '')) out.add(row[0] ?? '')
+  }
+  return out
+}
+
+/**
  * The table with what the receipts say since: the engine rewrites the table only when `/aidlc` routes, so a stage that
  * started after (`UNIT_STARTED`, `UNIT_RESUMED`, `UNIT_PAUSED` as its latest receipt) can still read `[ ]` there. Such
  * a cell becomes `[-]`. So does a `[x]` one: a stage re-opened after its approval (`aidlc engine jump reopen`) starts
@@ -237,7 +265,10 @@ export function withReceipts(table: Map<string, Map<string, UnitCell>>, events: 
         if (stage !== LAST_UNIT_STAGE) next.set(stage, 'S')
         continue
       }
-      if ((cell === ' ' || cell === 'x') && kind !== undefined && kind !== 'UNIT_COMPLETED') next.set(stage, '-')
+      // The engine can rebuild the table with empty cells though the receipts say the stage is done: a `[ ]` whose latest
+      // receipt settles it is `[x]`. `[?]` and `[R]` are approval gates only the table knows, and stay.
+      if (cell === ' ' && isSettled(kind)) next.set(stage, 'x')
+      else if ((cell === ' ' || cell === 'x') && kind !== undefined && !isSettled(kind)) next.set(stage, '-')
     }
     out.set(unit, next)
   }
@@ -290,6 +321,7 @@ export function progressOf(
   parsed: ParsedState,
   facts: UnitFacts,
   table: Map<string, Map<string, UnitCell>> = new Map(),
+  merged: ReadonlySet<string> = new Set(),
 ): Map<string, UnitProgress> {
   const stageDone = parsed.phases
     .flatMap(phase => phase.stages)
@@ -314,12 +346,22 @@ export function progressOf(
   for (const unit of units) {
     // The engine's own Unit Progress row, where the state has one, decides: it knows the approval gates.
     const row = table.get(unit.name)
-    if (row !== undefined) {
-      out.set(unit.name, stageDone ? progressWith({ phase: 'done', stage: '' }, skippedRow(row)) : progressFromRow(row, unit.name === activeUnit && isPaused))
+    if (row !== undefined || merged.has(unit.name)) {
+      const stages = row ?? new Map<string, UnitCell>()
+      // Merged, by the table's `merged` column or by a UNIT_MERGED receipt, or built by a code-generation receipt that
+      // the table has not caught up with (not while the table holds that stage at an approval gate): done.
+      const lastReceipt = latest.get(`${LAST_UNIT_STAGE}\n${unit.name}`)?.event
+      const gate = stages.get(LAST_UNIT_STAGE)
+      const isBuilt = lastReceipt === 'UNIT_MERGED' || (lastReceipt === 'UNIT_COMPLETED' && gate !== '?' && gate !== 'R')
+      if (stageDone || merged.has(unit.name) || isBuilt) {
+        out.set(unit.name, progressWith({ phase: 'done', stage: '' }, skippedRow(stages)))
+        continue
+      }
+      out.set(unit.name, progressFromRow(stages, unit.name === activeUnit && isPaused))
       continue
     }
     const built = isLedger
-      ? latest.get(`${LAST_UNIT_STAGE}\n${unit.name}`)?.event === 'UNIT_COMPLETED'
+      ? isSettled(latest.get(`${LAST_UNIT_STAGE}\n${unit.name}`)?.event)
       : facts.builtByFiles.has(unit.name)
     const skipped = skippedOf(unit.name)
     if (stageDone || built) {
@@ -327,7 +369,7 @@ export function progressOf(
       continue
     }
     const last = lastOf.get(unit.name)
-    if (unit.name === activeUnit || (last && last.event !== 'UNIT_COMPLETED')) {
+    if (unit.name === activeUnit || (last && !isSettled(last.event))) {
       const paused = unit.name === activeUnit ? isPaused : last?.event === 'UNIT_PAUSED'
       out.set(unit.name, progressWith({ phase: paused ? 'paused' : 'active', stage: last?.stage ?? '' }, skipped))
       continue

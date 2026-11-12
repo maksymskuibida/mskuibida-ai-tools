@@ -1,8 +1,8 @@
 // Construction by Unit of work: the Units, their story points and their receipts in, one row per Unit out.
 import { test, expect, describe } from 'claude-code/testing'
 import { aidlc } from '../src/providers/aidlc'
-import { buildOrder, parseClaimRegistry, parseUnitDag, parseUnitEvents, parseUnitIndex, parseUnitProgress, parseUnitScope, progressOf, startOf, unitStageStatuses, withReceipts } from '../src/providers/aidlc/units'
-import type { Unit, UnitCell, UnitFacts, UnitProgress } from '../src/providers/aidlc/units'
+import { buildOrder, parseClaimRegistry, parseUnitDag, parseUnitEvents, parseUnitIndex, parseUnitMerged, parseUnitProgress, parseUnitScope, progressOf, startOf, unitStageStatuses, withReceipts } from '../src/providers/aidlc/units'
+import type { Unit, UnitCell, UnitEvent, UnitFacts, UnitProgress } from '../src/providers/aidlc/units'
 import { cloudIdsOf, jiraServerOf, parsePointsCsv, storyPointsOf, withRows } from '../src/providers/aidlc/points'
 import { isResumedAfter } from '../src/providers/aidlc/park'
 import { parseState } from '../src/providers/aidlc/parse-state'
@@ -272,6 +272,72 @@ describe('a plan that skips per-Unit stages (no column in the table)', () => {
   test('a table with no per-Unit stage columns does not count as done', () => {
     const bare = ['## Unit Progress', '', '| unit | owner | gate | merged |', '| --- | --- | --- | --- |', '| u1-skeleton | A | [x] | [x] |', '', '## Current Status'].join('\n')
     expect(parseUnitProgress(bare).size).toBe(0)
+  })
+})
+
+const PER_UNIT_STAGES_FOR_TEST = ['functional-design', 'nfr-requirements', 'nfr-design', 'infrastructure-design', 'code-generation']
+
+describe('a table rebuilt with empty stage cells (receipts say built and merged)', () => {
+  const table = [
+    '## Unit Progress',
+    '',
+    '| unit | owner | functional-design | nfr-requirements | nfr-design | infrastructure-design | code-generation | gate | merged |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| bake-dough | A | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [x] |',
+    '| bake-oven | B | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |',
+    '| bake-shop | C | [ ] | [ ] | [ ] | [ ] | [?] | [ ] | [ ] |',
+    '| bake-menu | D | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |',
+    '',
+    '## Current Status',
+  ].join('\n')
+  const names = ['bake-dough', 'bake-oven', 'bake-shop', 'bake-menu']
+  const units: Unit[] = names.map((name, at) => ({ name, kind: '', dependsOn: [], id: `U${at + 1}`, jira: '' }))
+  const ev = (event: UnitEvent['event'], stage: string, unit: string, at: string): UnitEvent => ({ event, stage, unit, at })
+  const events: UnitEvent[] = [
+    ev('UNIT_COMPLETED', 'functional-design', 'bake-oven', '2026-01-01T01'),
+    ev('UNIT_SKIPPED', 'nfr-design', 'bake-oven', '2026-01-01T02'),
+    ev('UNIT_COMPLETED', 'code-generation', 'bake-oven', '2026-01-01T03'),
+    ev('UNIT_MERGED', 'code-generation', 'bake-oven', '2026-01-01T04'),
+    ev('UNIT_COMPLETED', 'code-generation', 'bake-shop', '2026-01-01T05'),
+    ev('UNIT_STARTED', 'functional-design', 'bake-menu', '2026-01-01T06'),
+  ]
+  const facts: UnitFacts = { events, builtByFiles: new Set(), startedByFiles: new Map() }
+
+  test('parseUnitMerged reads the merged column; it never becomes a stage row', () => {
+    expect([...parseUnitMerged(table)]).toEqual(['bake-dough'])
+    expect([...(parseUnitProgress(table).get('bake-dough')?.keys() ?? [])]).toEqual(PER_UNIT_STAGES_FOR_TEST)
+  })
+
+  test('a [ ] cell whose latest receipt is UNIT_COMPLETED becomes [x]; [?] stays; a later start wins', () => {
+    const got = withReceipts(parseUnitProgress(table), events)
+    expect(got.get('bake-oven')?.get('functional-design')).toBe('x')
+    expect(got.get('bake-oven')?.get('nfr-design')).toBe('S')
+    expect(got.get('bake-oven')?.get('code-generation')).toBe('x')
+    expect(got.get('bake-shop')?.get('code-generation')).toBe('?')
+    expect(got.get('bake-menu')?.get('functional-design')).toBe('-')
+  })
+
+  test('UNIT_MERGED parses (a row without a Stage counts for code-generation) and is not a start', () => {
+    const shard = ['**Event**: UNIT_MERGED', '**Unit**: bake-oven', '**Timestamp**: 2026-01-01T04'].join('\n')
+    expect(parseUnitEvents(shard)).toEqual([ev('UNIT_MERGED', 'code-generation', 'bake-oven', '2026-01-01T04')])
+    const got = withReceipts(new Map([['u', new Map<string, UnitCell>([['code-generation', ' ']])]]), [ev('UNIT_MERGED', 'code-generation', 'u', 'a')])
+    expect(got.get('u')?.get('code-generation')).toBe('x')
+  })
+
+  test('merged column, UNIT_MERGED and a completed code-generation receipt all read as done; gates and starts do not', () => {
+    const got = progressOf(units, parseState(stateText()), facts, withReceipts(parseUnitProgress(table), events), parseUnitMerged(table))
+    expect(got.get('bake-dough')?.phase).toBe('done')
+    expect(got.get('bake-oven')).toEqual({ phase: 'done', stage: '', skipped: ['nfr-design'] })
+    expect(got.get('bake-shop')).toEqual({ phase: 'awaiting', stage: 'code-generation' })
+    expect(got.get('bake-menu')?.phase).toBe('active')
+  })
+
+  test('a merged Unit is done even when the table has no per-Unit stage columns', () => {
+    const bare = ['## Unit Progress', '', '| unit | owner | gate | merged |', '| --- | --- | --- | --- |', '| bake-dough | A | [ ] | [x] |', '| bake-oven | B | [ ] | [ ] |', '', '## Current Status'].join('\n')
+    const none: UnitFacts = { events: [], builtByFiles: new Set(), startedByFiles: new Map() }
+    const got = progressOf(units, parseState(stateText()), none, parseUnitProgress(bare), parseUnitMerged(bare))
+    expect(got.get('bake-dough')?.phase).toBe('done')
+    expect(got.get('bake-oven')?.phase).toBe('planned')
   })
 })
 
@@ -840,12 +906,12 @@ describe("the engine's Unit Progress table", () => {
     expect(table.get('u')?.get('code-generation')).toBe('x')
   })
 
-  test('the table wins over a receipt for what it knows: a [?] stays waiting on approval', () => {
+  test('a [?] stays waiting on approval, though its receipt is written; an empty cell with a completion receipt is done', () => {
     const table = withReceipts(new Map([['u', new Map<string, UnitCell>([['functional-design', '?'], ['nfr-requirements', ' ']])]]), [
       { event: 'UNIT_COMPLETED', stage: 'functional-design', unit: 'u', at: '1' },
       { event: 'UNIT_COMPLETED', stage: 'nfr-requirements', unit: 'u', at: '2' },
     ])
-    expect([...(table.get('u') ?? new Map())]).toEqual([['functional-design', '?'], ['nfr-requirements', ' ']])
+    expect([...(table.get('u') ?? new Map())]).toEqual([['functional-design', '?'], ['nfr-requirements', 'x']])
   })
 
   // The engine's stage file: functional-design's artifacts are all for service Units, so a ui Unit does not owe it, and
@@ -891,13 +957,13 @@ describe("the engine's Unit Progress table", () => {
     expect(construction(model).counts).toEqual({ done: 0, total: 4 })
   })
 
-  test('the table decides built, between and planned too', async () => {
+  test('the table decides built, between and planned; an empty cell takes its completion receipt', async () => {
     const model = await load(world({ 'api-core': ['x', 'x', 'x', 'x', 'x', 'x'], 'web-shell': ['x', ' ', ' ', ' ', ' ', '-'], 'api-billing': [' ', ' ', ' ', ' ', ' ', ' '] }, null))
     const list = unitList(model)
     expect(list.items.find(item => item.id === 'unit:api-core')?.status).toBe('done')
     expect(list.items.find(item => item.id === 'unit:web-shell')).toMatchObject({ status: 'partial', statusWord: 'functional-design done' })
-    // Its receipt says functional-design is complete, but the engine's table has it not started.
-    expect(list.items.find(item => item.id === 'unit:api-billing')?.status).toBe('planned')
+    // Its receipt says functional-design is complete and the engine's empty cell does not contradict it (0.27.2).
+    expect(list.items.find(item => item.id === 'unit:api-billing')).toMatchObject({ status: 'partial', statusWord: 'functional-design done' })
   })
 })
 
