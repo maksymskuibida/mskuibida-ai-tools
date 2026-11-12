@@ -1,6 +1,6 @@
 ---
 name: approval-gates
-description: Use at every AI-DLC approval gate (and, at a unit-end gate answered Test first, for the test plan of its not-verified points: § 7). First read aidlc/.aidlc-unit-scope.json: for the Code Generation plan approval and the unit-end gate of a Unit claimed with gate_rhythm "unit-end" go straight to the unit-end flow (unit_bundle.py, a bundles/ row in "AI-DLC unit approvals"); every other gate follows the per-stage flow. Per-stage flow: right after `aidlc engine orchestrate report --result awaiting-approval` (or `--result revised`) and before the Approval question — draft the stage's page, judge the stage against its rules in judgment.json (the evaluation, every criterion, a one-sentence summary and label per item), finalize, publish it in the developer's "AI-DLC approval gates" artifact and send its link in a message of its own before the gate question. Also when the review brief is printed with open findings (no Findings question: fix what is certain, put the rest on the gate page as cards the developer sorts), and when the developer answered, to read the notes and the finding sort they left in the page.
+description: Use at every AI-DLC approval gate (and, at a unit-end gate answered Test first, for the test plan of its not-verified points: § 7). First read aidlc/.aidlc-unit-scope.json: for the Code Generation plan approval and the unit-end gate of a Unit claimed with gate_rhythm "unit-end" go straight to the unit-end flow (unit_bundle.py, a bundles/ row in "AI-DLC unit approvals"); every other gate follows the per-stage flow. At the gates that settle the components and the Units, and at a Unit's end, build the project map first (§ 8; map_bundle.py, a maps/ row in "AI-DLC maps"): the guard refuses the question without a current one. Per-stage flow: right after `aidlc engine orchestrate report --result awaiting-approval` (or `--result revised`) and before the Approval question — draft the stage's page, judge the stage against its rules in judgment.json (the evaluation, every criterion, a one-sentence summary and label per item), finalize, publish it in the developer's "AI-DLC approval gates" artifact and send its link in a message of its own before the gate question. Also when the review brief is printed with open findings (no Findings question: fix what is certain, put the rest on the gate page as cards the developer sorts), and when the developer answered, to read the notes and the finding sort they left in the page.
 ---
 
 # Approval gates
@@ -310,6 +310,61 @@ no test plan.
    *Verified by you* (passed), *Still not verified* (picked Later, or failed and being fixed), *Failed, left as known*.
    Write the row, send the link in a message of its own, and ask the unit-end gate question again (Approve / Request
    Changes / Test first).
+
+## 8. Project maps (1.32.0)
+
+A map shows how the pieces of the project connect: pick a block, see what it needs first and what waits for it. The maps are a
+separate artifact, **AI-DLC maps** (`maps.html`), linked from the gate pages' headers, never part of a gate page. Four kinds,
+each drawn from the records:
+
+| Kind | Shows | Why it exists |
+|---|---|---|
+| `components` | the components of `components.md` as a layered graph, grouped, with what each needs and what waits for it | the shape of the design, which a table of components does not show |
+| `units` | the Units of Units Generation as waves, with points, stories and which have landed | the order of the work, and where the project stands |
+| `stories` | a matrix of stories by Units, with a row for every story in `stories.md` that no Unit builds | a coverage check: a gap is a row with no dot |
+| `entities` | a matrix of entities by components (only when the components name entities) | who owns which data; an entity with no owner is a gap |
+
+**A map is required** at these gates, and the guard refuses the Approval question (and the write of the gate's own row) until
+the map was written from the records as they are now:
+
+| Gate | Map |
+|---|---|
+| `domain-design` (`application-design` in older engines): the stage that settles the components | `components` |
+| `units-generation` (and again whenever it is redone) | `units` |
+| a Unit's end: the unit-end page, or a per-stage Unit's `code-generation` gate | `units`, with the status refreshed |
+
+A project whose records hold no components, or no Units, has nothing to map: `map_bundle.py draft` says so and the guard passes.
+The stories and entities maps are never required; build them when the story map or the components' entities are there
+(`map_bundle.py draft --kind all` lists the ones with something to map).
+
+**Build it before the gate page**, so the page's header links it:
+
+1. `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/map_bundle.py" draft --kind <kind|all> --out <a folder in the scratchpad>`. It reads
+   the records (Units, their dependencies, waves, stories, points from `unit-points.csv`, status from the `## Unit Progress`
+   table and the `UNIT_*` receipts of `aidlc-state.md` and `audit/`: a `UNIT_MERGED` receipt, or a `UNIT_COMPLETED` receipt of
+   code-generation, means landed even when the table cell is empty; components from `components.md`) and writes
+   `judgment.json`. It prints what it found, any record it could not read (a dependency on a Unit nothing defines), and a `todo`.
+2. **Judge** in `judgment.json` what the records cannot give: a one-sentence plain `summary` per block (at most 240 characters,
+   what it is for in words of someone who has not read the design) and its `group` (the lanes the map is coloured and filtered
+   by, 3 to 7; what the records name as a kind is filled in as a start). Blocks you judged in an earlier revision keep their
+   words (`_from: your last judgment`); only new blocks need you.
+3. `... map_bundle.py finalize --kind <kind|all> --out <that folder>`. It refuses in the house shape until every block has a
+   summary and a group. It marks the revision (the row carries the previous revision's blocks, so the page shows what is new,
+   changed and removed in the round colours, and a block that landed with a tick) and writes `writes.json`.
+4. Send its `writes` with one ArtifactData batch to the **AI-DLC maps** artifact (rows `maps/<intent>-<kind>`, written whole
+   with `set`). The hook records the row, its link and the digest of the records it was built from.
+5. Then build the gate page as in § 2 or § 5: `gate_bundle.py draft` and `unit_bundle.py finalize` put `maps: [{kind, url,
+   title}]` on the row, and both pages show the links in their header.
+
+**The artifact (once per developer).** `Artifact` `action: "list"` for **AI-DLC maps**. If there is none, publish `maps.html` from
+this skill's directory once: title "AI-DLC maps", `capabilities: {db: {}, user: {}}`, `icon: "map"`, description "How the pieces
+of each AI-DLC project connect: what a component or a Unit needs first and what waits for it." Reuse its URL; after a plugin
+update republish the page from this file to the same URL once (the rows stay).
+
+**When it is refreshed.** A map is stale when the records it was built from changed: a Unit landed, Units Generation was
+redone, a component was added. The row's `digest` is a hash of those records; the guard compares it with the records at the
+gate, so there is nothing to remember: build the map again whenever the guard says so (revision 2 shows what moved). Unchanged
+records give the same revision.
 
 ## 6. The guard
 

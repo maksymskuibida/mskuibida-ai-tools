@@ -82,6 +82,7 @@ import aidlc_ids  # noqa: E402  (the shared copy, next to this file)
 import criteria as criteria_mod  # noqa: E402  (what the stage is judged against)
 import digest  # noqa: E402  (the stage's items, for the page's digest)
 import findings  # noqa: E402  (the review findings that go on the page as cards)
+import map_bundle  # noqa: E402  (the project maps; the gate page links them)
 import judgment  # noqa: E402  (the agent's evaluation of the stage, and the rules finalize holds it to)
 import validate_bundle  # noqa: E402
 
@@ -721,6 +722,12 @@ def build(args):
                  sorted({path for _row, _index, path in docs}))
     if ids:
         gate["ids"] = ids
+    try:
+        found_maps = map_bundle.links(project, intent)
+    except Exception:  # a page without its map links is still a page; the guard holds the map itself
+        found_maps = []
+    if found_maps:
+        gate["maps"] = found_maps
     given = {}
     if args.handling:
         try:

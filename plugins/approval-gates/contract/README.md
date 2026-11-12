@@ -278,3 +278,23 @@ at}`; a fail without a note is never saved.
 {state: "passed"|"failed"|"later", steps[], notes[], decision?: "fix"|"left"}}}`. `unit_bundle.py draft --tested
 <test-plan.json>` rebuilds the unit-end page from it: passed rows move to a `verified` section, failed rows decided
 `left` to a `failed` section, and every other row stays in `unverified` (retitled "Still not verified").
+
+## The map row (maps.html, approval-gates 1.32.0)
+
+Not part of the bundle: the project maps have their own file and artifact (**AI-DLC maps**, `skills/approval-gates/maps.html`,
+`db` and `user` capabilities). A row is `maps/<intent>-<kind>`, written whole with `set` by `scripts/map_bundle.py finalize`;
+its schema is [`map.schema.json`](map.schema.json) (`aidlc-map/1`).
+
+| Field | What it is |
+|---|---|
+| `kind`, `view` | `components` and `units` are graphs (`view: "graph"`: `groups`, `blocks`, `waves`); `stories` (stories by Units) and `entities` (entities by components) are matrices (`view: "matrix"`: `rows`, `cols`, `cells`) |
+| `revision` | 1 at the first publication, +1 whenever something a viewer sees changed; the same records and judgment give the same revision |
+| `previous` | the revision before, as a snapshot (a graph's `blocks` with their summary, group, status, points, layer and needs; a matrix's rows, columns and cells), so the page marks what is new, changed and removed since, in the round colours, without a second query |
+| `digest` | a hash of the records the row was built from (blocks, edges, points, stories and Unit status; not the judgment). The guard compares it with the records at the gate; a different digest is a stale map |
+| `blocks[].needs`, `usedBy` | the edges, once each way: what it needs first (with the one-line `why` the records give) and what waits for it |
+| `blocks[].status` | Units only: `landed` (the Unit Progress table's `merged` or `code-generation` cell is `[x]`, or a `UNIT_MERGED` receipt, or a `UNIT_COMPLETED` receipt of code-generation not followed by a newer `UNIT_STARTED`), `building`, `planned` |
+| `ids` | the tooltips of the ids the map shows (`aidlc_ids.py refs`), as on every page |
+
+A gate row (`gates/<id>`) and a Unit bundle carry `maps: [{kind, url, title}]` (url = `<maps artifact url>#<row id>`), filled by
+`gate_bundle.py draft` and `unit_bundle.py finalize` from the maps published for the intent; both pages show them in the header.
+The guard's rule (which gates need which map) is SKILL.md § 8. The page writes nothing to the row.
