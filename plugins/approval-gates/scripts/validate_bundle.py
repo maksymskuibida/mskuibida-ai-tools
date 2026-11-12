@@ -42,7 +42,7 @@ PAGE_KINDS = {
     "unit-end": {"changes", "unverified", "verified", "failed", "built", "other"},
 }
 BUILD_TEST_SCHEMA_PATH = os.path.join(os.path.dirname(HERE), "contract", "build-test.schema.json")
-RESERVED_KEYS = {"plan", "answers", "design"}
+RESERVED_KEYS = {"plan", "answers", "design", "records", "answer"}
 PLAN_RANK = 1.5  # the code plan sits below any section whose top label is critical or high, above the rest
 
 

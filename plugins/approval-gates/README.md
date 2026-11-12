@@ -73,6 +73,25 @@ At the `build-and-test` gate `gate_bundle.py` also reads the stage's tables into
 
 - a **results strip**: commands passed out of run, line coverage per repository as a bar against its floor, and the
   Met / Not Met / Unverified / N/A counts (press a count to filter the matrix);
+- **Needs you, a readiness counter, Your answer and Records** (1.31.0), on the per-stage page and the Unit pages:
+  - **Needs you** is a filter in the sticky bar (with a count), not a block: it shows only what waits on the person, each thing
+    in its own block, as the same DOM node and read key it has under All. One function (`needs()` on the stage page, `needs()`
+    in `unit-gate.html`) defines it: a target with no pick, a finding not sorted, a suggestion with no Do / Leave, a
+    not-verified point with no Test now / Later (decisions: they leave when picked, never when read), and an item nothing
+    handles, a criterion that fails or is not judged, a failed command, a target the sources disagree on (no decision to make:
+    they leave when read). A row picked while the filter shows stays, greyed, until the bar is pressed again; pressing the pick
+    again undoes it.
+  - **Readiness counter** in the bar: "4 decisions left · 12 unread" (a part at zero is hidden, both zero says "Ready to
+    answer" and goes to Your answer). Each part jumps to the next such row; keys `n` (next decision) and `u` (next unread), silent
+    inside fields. The change stepper's keys are now `j` / `k` (they were `n` / `p`).
+  - **Your answer**, the last block: target picks, finding sort, suggestion and test picks, notes, each linking back; it says
+    the decision itself is given in chat. Read-only, stores nothing.
+  - **Records**, one closed block at the bottom with a row per file (kind, why it is there, round tag, read dot): files the
+    evaluation does not cover first (unread until read), then the target-matrix source, the instruction files, the covered
+    files. It replaces the document list, Reference and As written; read keys are unchanged. On the Unit pages it holds the
+    answers and the approved design. A page with nothing else to read opens Records.
+  - **One row pattern**: the read dot ends the first line of a target row like every other row; criteria rows got the same
+    chevron the others open with; one `nsettled` look. Nothing restyled otherwise.
 - **one list of targets** (1.30.0): every target once, however many files list it (the worst verdict wins; a target whose
   files disagree carries a "sources disagree" tag with both verdicts). The open ones, Not Met first and then Unverified,
   sit at the top with their decision in the row: Accept as known, Follow-up or Fix now, with an optional note; Met and
@@ -81,7 +100,7 @@ At the `build-and-test` gate `gate_bundle.py` also reads the stage's tables into
   with your chat answer: Fix now becomes a Request Changes naming those targets, Follow-up is recorded as follow-up
   work, Accept as a known limit. A file whose targets table became the list is folded, with a line saying where its
   table is, and an item of "What the stage says" that is one of the targets links to its row instead of repeating it;
-- the build, integration, performance and security instruction files folded in a closed **Reference** section.
+- the build, integration, performance and security instruction files are rows of the closed **Records** block (see 1.31.0).
 
 If the tables are not found, the stage looks like any other.
 
@@ -174,7 +193,7 @@ stage against its rules**:
 - The page leads with **Claude's evaluation**, then **What the stage says**: each item as the agent's sentence with its
   label, grouped Look at first / Matters most / Main / Minor; opening one shows it whole, as written (a rule's logic, a
   story's criteria). Items an earlier stage settled, items unchanged since the last round and the traceability fold away
-  with a count. Files the items cover fold under **As written**; the rest still render in their views.
+  with a count. Every file of the stage sits in the one closed **Records** block at the bottom (1.31.0).
 - After Request Changes, the next draft carries the summary and label of every item whose text did not change.
 - **What changed in round N.** A revision round's page opens on what you asked for at Request Changes, what Claude did
   for each piece of it with a jump to the place on the page, and every changed, new and removed section, element and

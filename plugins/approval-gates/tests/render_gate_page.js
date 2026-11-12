@@ -29,9 +29,11 @@ setTimeout(() => {
     items: all("#b-items .irow.j").map((r) => ({ id: r.querySelector(".iid").textContent, summary: r.querySelector(".isum").textContent,
       chips: [...r.querySelectorAll(".imeta .tag")].map((t) => t.textContent) })),
     folds: all("#b-items details.settled > summary").map((s) => s.textContent),
-    asWritten: all("#b-aswritten details.doc").map((b) => b.id),
-    shownDocs: all("#col > details.block.doc").map((b) => b.id),
-    tablesOutsideAsWritten: all("#col table").filter((t) => !t.closest("#b-aswritten") && !t.closest(".tmx")).map((t) => (t.closest("details.block") || {}).id),
+    records: all("#b-records details.doc").map((b) => b.id),
+    recordsWhy: Object.fromEntries(all("#b-records details.doc").map((b) => [b.id, (b.querySelector("summary .why") || {}).dataset ? b.querySelector("summary .why").dataset.why : ""])),
+    recordsOpen: !!($("#b-records") || {}).open,
+    docsOutsideRecords: all("#col details.block.doc").filter((b) => !b.closest("#b-records")).map((b) => b.id),
+    tablesOutsideRecords: all("#col table").filter((t) => !t.closest("#b-records") && !t.closest(".tmx")).map((t) => (t.closest("details.block") || {}).id),
     readDots: all("#col .rdot, #col .idot").length,
   };
   const first = $("#b-items .irow.j .isum");

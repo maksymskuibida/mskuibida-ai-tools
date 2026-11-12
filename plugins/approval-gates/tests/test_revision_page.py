@@ -130,7 +130,7 @@ class TestReviewing(unittest.TestCase):
         self.assertGreater(int(total), 10)
         self.assertEqual(self.r["next"], "2 / " + total)
         self.assertEqual(self.r["prev"], "1 / " + total)
-        self.assertEqual(self.r["key"], "2 / " + total, "the n key goes to the next change")
+        self.assertEqual(self.r["key"], "2 / " + total, "the j key goes to the next change")
 
     def test_the_changed_filter_keeps_only_what_changed(self):
         self.assertEqual((self.r["changed"]["items"], self.r["changed"]["of"]), (4, 9))

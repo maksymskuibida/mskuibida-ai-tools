@@ -151,7 +151,7 @@ class TestUnitEndPage(unittest.TestCase):
             self.assertEqual(count(page, f'<div class="row" id="{v}"'), 1, f"{v} is drawn once")
         for chip in ("Not verified<b>2</b>", "Verified by you<b>1</b>", "Failed, left as known<b>1</b>"):
             self.assertIn(chip, page)
-        self.assertEqual(render(b)["order"], ["verification", "built", "design"])
+        self.assertEqual(render(b)["order"], ["verification", "built", "records"])
         self.assertEqual(count(page, 'class="tag vst"'), 4, "each point carries its state")
 
     def test_a_state_chip_shows_only_those_points_and_test_picks_stay_on_not_verified_rows(self):
@@ -174,7 +174,7 @@ class TestUnitEndPage(unittest.TestCase):
         page = render(b, {"u": {"filter": "unread", "read": read_all}, "u1": {"filter": "unread", "read": {"unverified:aa": 1}}})
         self.assertNotIn('data-sec="verification"', page["u"], "no empty shell")
         self.assertIn('data-sec="built"', page["u"])
-        self.assertNotIn('data-sec="design"', page["u"], "the approved design holds nothing to read")
+        self.assertNotIn('data-sec="records"', page["u"], "the approved design holds nothing to read")
         self.assertEqual([count(page["u1"], f'<div class="row" id="{v}"') for v in ("V-1", "V-2", "V-3", "V-4")], [0, 1, 1, 1])
 
     def test_a_point_keeps_its_mark_when_its_number_moves_and_loses_it_when_its_text_changes(self):
@@ -189,9 +189,10 @@ class TestUnitEndPage(unittest.TestCase):
 
     def test_the_answers_and_the_design_show_only_with_the_whole_page(self):
         b = end_bundle()
-        page = render(b, {"all": {}, "u": {"filter": "unread"}})
-        self.assertIn('data-sec="design"', page["all"])
-        self.assertNotIn('data-sec="design"', page["u"])
+        page = render(b, {"all": {}, "open": {"sec": {"records": True}}, "u": {"filter": "unread"}})
+        self.assertIn('data-sec="records"', page["all"])
+        self.assertIn('data-part="design"', page["open"])
+        self.assertNotIn('data-sec="records"', page["u"])
 
     def test_every_plan_step_and_the_plan_section_have_marks(self):
         b = plan_bundle()

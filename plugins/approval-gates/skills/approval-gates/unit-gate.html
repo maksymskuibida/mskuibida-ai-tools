@@ -157,6 +157,19 @@ h2 .hint { margin-left: 8px; font-weight: 400; font-size: 13px; color: var(--mut
 .counts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .lc { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
 .lc b { font-family: var(--mono); font-weight: 500; }
+.nsettled { opacity: .55; } .nsettled:hover, .nsettled:focus-within { opacity: 1; }
+.pill .n { margin-left: 6px; font: 12px var(--mono); opacity: .7; }
+.ready { display: inline-flex; align-items: center; gap: 2px; font-size: 13px; color: var(--fg-2); }
+.ready .sep { color: var(--muted); }
+.rdy { min-height: 28px; height: 28px; padding: 0 10px; border-radius: 14px; border: 1px solid var(--control); background: var(--surface); color: var(--fg); font-weight: 500; font-size: 13px; }
+.rdy:hover { border-color: var(--accent); }
+.rdy.ok { background: var(--ok-bg); color: var(--ok-fg); border-color: transparent; }
+.rech { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; margin: 0; padding: 12px 18px 0; font-size: 13px; font-weight: 600; color: var(--fg-2); } .rech .hint { font-weight: 400; font-size: 12px; color: var(--muted); }
+.tag.why { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 10px; font-size: 11.5px; font-weight: 500; background: var(--raised); color: var(--fg-2); }
+.answerbody { padding: 12px 18px 16px; } .answernote { margin: 0; color: var(--fg-2); } .ansleft { margin: 10px 0 0; color: var(--warn-fg); font-weight: 500; font-size: 13px; }
+.ansg { margin-top: 14px; } .ansg h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--fg-2); display: flex; gap: 8px; align-items: baseline; } .ansg h3 b { font: 12px var(--mono); color: var(--muted); font-weight: 400; }
+.ansg ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ansg li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 6px 10px; border: 1px solid var(--line-soft); border-radius: 8px; } .ansn { flex: 1 1 100%; font-size: 13px; color: var(--fg-2); white-space: pre-wrap; overflow-wrap: anywhere; } .empty0 { color: var(--muted); margin: 10px 0 0; }
 .shown { margin-left: 4px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .secbody { border-top: 1px solid var(--line); }
 .empty { margin: 0; padding: 14px 16px; color: var(--muted); }
@@ -1068,8 +1081,7 @@ var GateView = (function () {
     if (bundle.plan) ranked.push({ key: "plan", score: [PLAN_RANK, 0, 0], i: -1 });
     var by = function (a, b) { return cmp(a.score, b.score) || (a.i - b.i); };
     var keys = ranked.sort(by).map(function (x) { return x.key; }).concat(tests.sort(by).map(function (x) { return x.key; }));
-    if ((bundle.answers || []).length) keys.push("answers");
-    if (bundle.design) keys.push("design");
+    if ((bundle.answers || []).length || bundle.design) keys.push("records");
     return keys;
   }
 
@@ -1090,11 +1102,37 @@ var GateView = (function () {
     if (open) st.open[key] = true;
     return true;
   }
+  /* ---------- Needs you: one definition of what waits on the person ----------
+     The filter, its count, the readiness counter and the Your answer block all read this list. A row waits when it carries a
+     decision with no pick (a suggestion with no Do / Leave, a not-verified point with no Test now / Later), or it has
+     nothing to decide but is not handled (no link, no accepted reason) and has not been read. A decision leaves by being
+     picked, never by being read; a row with no decision leaves when it is read. key is the row's read key. */
+  function walk(bundle) {
+    var out = [];
+    order(bundle).forEach(function (k) {
+      if (k === "plan") { ((bundle.plan || {}).steps || []).forEach(function (x) { out.push({ key: stepKey(x), anchor: "step-" + int(x.n), item: x, sec: "plan", isStep: true }); }); return; }
+      var s = sectionOfKey(bundle, k); if (!s) return;
+      sortRows(s.rows || []).forEach(function (r) { out.push({ key: rowKey(r), anchor: anchor(r.id), item: r, sec: s.key, kind: s.kind, isStep: false }); });
+    });
+    return out;
+  }
+  function needs(bundle, st) {
+    var out = [];
+    walk(bundle).forEach(function (x) {
+      if (x.isStep) return;
+      var r = x.item, pick = (st.picks || {})[x.anchor], state = r._state || x.kind;
+      if (r.suggestion && pick !== "do" && pick !== "leave") out.push({ key: x.key, anchor: x.anchor, kind: "suggestion", decision: true });
+      else if (state === "unverified" && pick !== "now" && pick !== "later") out.push({ key: x.key, anchor: x.anchor, kind: "test", decision: true });
+      else if (r.coveredBy && !r.coveredBy.link && !r.coveredBy.acceptanceReason && !isRead(st, x.key, r)) out.push({ key: x.key, anchor: x.anchor, kind: "handled", decision: false });
+    });
+    return out;
+  }
   function secOpen(st, key, dflt) { var o = st.sec[key]; return o === undefined ? dflt : o; }
   function passes(st, item, key, isStep) {
     var f = st.filter;
     if (f === "all") return true;
     if (f === "unread") return !isRead(st, key, item);
+    if (f === "needs") return !isStep && !!(st.needsNow && (st.needsNow[key] || (st.needsKeep && st.needsKeep[key])));
     if (/^v\d+$/.test(f)) { var v = +f.slice(1); return item.rev === v || (isStep && (item.subs || []).some(function (s) { return s.rev === v; })); }
     if (isStep) return false;
     if (f === "look") return !!item.lookFirst;
@@ -1228,7 +1266,7 @@ var GateView = (function () {
         (refs || cov ? '<div class="refs">' + (refs && sec.refsLabel ? "<span>" + esc(sec.refsLabel) + "</span>" : "") + refs + cov + "</div>" : "") +
         noteBox(st, key, "Only if something should change", r.suggestion) + "</div>";
     }
-    return '<div class="row' + (read ? " read" : "") + '" id="' + esc(key) + '"' + idAttr(definedIds(bundle), key) + ' style="' + bg + '">' + head + reasonLine(r) + body + "</div>";
+    return '<div class="row' + (read ? " read" : "") + (st.filter === "needs" && !(st.needsNow || {})[rowKey(r)] ? " nsettled" : "") + '" id="' + esc(key) + '"' + idAttr(definedIds(bundle), key) + ' style="' + bg + '">' + head + reasonLine(r) + body + "</div>";
   }
 
   /* a section's own dot is derived: read when every row (step) in it is, and pressing it marks or unmarks them all */
@@ -1337,37 +1375,57 @@ var GateView = (function () {
     return '<section class="card" id="plan" data-sec="plan">' + sectionHead("plan", p.title || "Code plan", p.hint || "", open, right) + body + "</section>";
   }
 
-  function answersHtml(st, bundle) {
-    var defs = definedIds(bundle);
-    var groups = bundle.answers || [], open = secOpen(st, "answers", true);
-    var total = 0, differ = 0;
-    groups.forEach(function (g) { (g.questions || []).forEach(function (q) { total++; if (q.proposed && q.answer.charAt(0) !== q.proposed.charAt(0)) differ++; }); });
-    var right = (differ ? '<span class="lc" style="' + tone("warn") + '">differs from proposal<b>' + differ + "</b></span>" : "") + '<span class="shown">' + plural(groups.length, "file") + " · " + total + "</span>";
-    var body = "";
-    if (open) {
-      body = '<div class="secbody">' + groups.map(function (g) {
-        var gk = "ans-" + g.key, go = st.open[gk] !== false;
-        var d = (g.questions || []).filter(function (q) { return q.proposed && q.answer.charAt(0) !== q.proposed.charAt(0); }).length;
-        return '<div class="row qgroup" id="' + esc(g.key) + '"><div class="rowhead"><button type="button" class="twist" data-act="group" data-key="' + esc(gk) + '" aria-expanded="' + go + '" aria-label="' + (go ? "Collapse " : "Expand ") + esc(g.title) + ' answers">' + CHEVRON + "</button>" +
-          '<button type="button" class="rtitle" data-act="group" data-key="' + esc(gk) + '" title="' + esc(g.file) + '">' + esc(g.title) + "</button>" +
-          (d ? '<span class="differ">' + d + " differ" + (d === 1 ? "s" : "") + " from the proposal</span>" : "") +
-          '<span class="shown">' + plural((g.questions || []).length, "answer") + "</span></div>" +
-          (go ? '<div class="qs">' + (g.questions || []).map(function (q) {
-            var df = q.proposed && q.answer.charAt(0) !== q.proposed.charAt(0);
-            return '<div class="q" id="' + esc(q.anchor) + '"' + idAttr(defs, q.anchor) + '><span class="qid">' + esc(q.id) + '</span><span class="ans" title="' + esc(q.answer) + '">' + esc(q.answer.length > 3 ? q.answer.slice(0, 1) + "…" : q.answer) + '</span><span class="qt" title="' + esc(q.text + (q.answer.length > 3 ? " — " + q.answer : "")) + '">' + esc(q.text) + "</span>" + (df ? '<span class="prop">proposed ' + esc(q.proposed) + "</span>" : "") + "</div>";
-          }).join("") + "</div>" : "") + "</div>";
-      }).join("") + "</div>";
-    }
-    return '<section class="card" id="answers" data-sec="answers">' + sectionHead("answers", "Your answers", "kept for reference; Q links land here", open, right) + body + "</section>";
+  /* Records: the material the page shows as written, in one closed block at the bottom: the answers you gave in earlier stages and the design you approved. */
+  function answersPart(st, bundle) {
+    var defs = definedIds(bundle), groups = bundle.answers || [];
+    if (!groups.length) return "";
+    return '<div class="recpart" id="answers" data-part="answers"><h3 class="rech"><span class="tag why">Your answers</span><span class="hint">kept for reference; Q links land here</span></h3>' + groups.map(function (g) {
+      var gk = "ans-" + g.key, go = st.open[gk] !== false;
+      var d = (g.questions || []).filter(function (q) { return q.proposed && q.answer.charAt(0) !== q.proposed.charAt(0); }).length;
+      return '<div class="row qgroup" id="' + esc(g.key) + '"><div class="rowhead"><button type="button" class="twist" data-act="group" data-key="' + esc(gk) + '" aria-expanded="' + go + '" aria-label="' + (go ? "Collapse " : "Expand ") + esc(g.title) + ' answers">' + CHEVRON + "</button>" +
+        '<button type="button" class="rtitle" data-act="group" data-key="' + esc(gk) + '" title="' + esc(g.file) + '">' + esc(g.title) + "</button>" +
+        (d ? '<span class="differ">' + d + " differ" + (d === 1 ? "s" : "") + " from the proposal</span>" : "") +
+        '<span class="shown">' + plural((g.questions || []).length, "answer") + "</span></div>" +
+        (go ? '<div class="qs">' + (g.questions || []).map(function (q) {
+          var df = q.proposed && q.answer.charAt(0) !== q.proposed.charAt(0);
+          return '<div class="q" id="' + esc(q.anchor) + '"' + idAttr(defs, q.anchor) + '><span class="qid">' + esc(q.id) + '</span><span class="ans" title="' + esc(q.answer) + '">' + esc(q.answer.length > 3 ? q.answer.slice(0, 1) + "…" : q.answer) + '</span><span class="qt" title="' + esc(q.text + (q.answer.length > 3 ? " — " + q.answer : "")) + '">' + esc(q.text) + "</span>" + (df ? '<span class="prop">proposed ' + esc(q.proposed) + "</span>" : "") + "</div>";
+        }).join("") + "</div>" : "") + "</div>";
+    }).join("") + "</div>";
+  }
+  function designPart(st, bundle) {
+    var d = bundle.design; if (!d) return "";
+    var rows = d.rows || [];
+    var link = d.bundle ? '<a href="#' + esc(d.bundle) + '" data-nav="' + esc(d.bundle) + '" style="margin-top:10px;font-size:13px">Open the full plan-approval page</a>' : (d.url ? '<a href="' + esc(safeHref(d.url)) + '" target="_blank" rel="noopener">Open the full plan-approval page</a>' : "");
+    return '<div class="recpart design" id="design" data-part="design"><h3 class="rech"><span class="tag why">The design you approved</span><span class="hint">same view as at plan approval · you have seen it · ' + esc(d.counts || plural(rows.length, "row")) + '</span></h3><div class="drows">' + rows.map(function (r) {
+      return '<div class="drow"><span class="rid">' + esc(r.id) + '</span><span class="dt" title="' + esc(r.title) + '">' + esc(r.title) + '</span><span class="lab" style="' + tone(LABEL_TONE[r.label] || "low") + '">' + esc(r.label) + "</span></div>";
+    }).join("") + link + "</div></div>";
+  }
+  function recordsHtml(st, bundle) {
+    var open = secOpen(st, "records", false), nq = (bundle.answers || []).reduce(function (n, g) { return n + (g.questions || []).length; }, 0);
+    var differ = 0; (bundle.answers || []).forEach(function (g) { (g.questions || []).forEach(function (q) { if (q.proposed && q.answer.charAt(0) !== q.proposed.charAt(0)) differ++; }); });
+    var right = (differ ? '<span class="lc" style="' + tone("warn") + '">differs from proposal<b>' + differ + "</b></span>" : "") + '<span class="shown">' + [(bundle.answers || []).length ? plural(nq, "answer") : "", bundle.design ? "approved design" : ""].filter(Boolean).join(" · ") + "</span>";
+    return '<section class="card records" id="records" data-sec="records">' + sectionHead("records", "Records", "your answers and the approved design, as written", open, right) +
+      (open ? '<div class="secbody">' + answersPart(st, bundle) + designPart(st, bundle) + "</div>" : "") + "</section>";
   }
 
-  function designHtml(st, bundle) {
-    var d = bundle.design, open = secOpen(st, "design", true), rows = d.rows || [];
-    var link = d.bundle ? '<a href="#' + esc(d.bundle) + '" data-nav="' + esc(d.bundle) + '" style="margin-top:10px;font-size:13px">Open the full plan-approval page</a>' : (d.url ? '<a href="' + esc(safeHref(d.url)) + '" target="_blank" rel="noopener">Open the full plan-approval page</a>' : "");
-    var body = open ? '<div class="drows">' + rows.map(function (r) {
-      return '<div class="drow"><span class="rid">' + esc(r.id) + '</span><span class="dt" title="' + esc(r.title) + '">' + esc(r.title) + '</span><span class="lab" style="' + tone(LABEL_TONE[r.label] || "low") + '">' + esc(r.label) + "</span></div>";
-    }).join("") + link + "</div>" : "";
-    return '<section class="card design" id="design" data-sec="design">' + sectionHead("design", "The design you approved", "same view as at plan approval · you have seen it", open, '<span class="shown">' + esc(d.counts || plural(rows.length, "row")) + "</span>") + body + "</section>";
+  /* Your answer: what you picked and wrote, grouped as it reaches the agent. Read-only; stores nothing. */
+  function answerHtml(st, bundle) {
+    var w = walk(bundle), pk = st.picks || {}, nt = st.notes || {};
+    var groups = [
+      { id: "suggestions", title: "Suggestion picks", rows: w.filter(function (x) { return !x.isStep && x.item.suggestion && (pk[x.anchor] === "do" || pk[x.anchor] === "leave"); }).map(function (x) { return [x, pk[x.anchor] === "do" ? "Do it" : "Leave it"]; }) },
+      { id: "tests", title: "Test picks", rows: w.filter(function (x) { return !x.isStep && (x.item._state || x.kind) === "unverified" && (pk[x.anchor] === "now" || pk[x.anchor] === "later"); }).map(function (x) { return [x, pk[x.anchor] === "now" ? "Test now" : "Later"]; }) },
+      { id: "notes", title: "Notes", rows: w.filter(function (x) { return (nt[x.anchor] || "").trim(); }).map(function (x) { return [x, ""]; }) }
+    ].filter(function (g) { return g.rows.length; });
+    var left = needs(bundle, st).filter(function (n) { return n.decision; }).length;
+    return '<section class="card answer" id="answer" data-sec="answer"><div class="sechead"><h2><span>Your answer</span> <span class="hint">what will reach the agent with your answer in chat</span></h2></div><div class="secbody answerbody">' +
+      '<p class="answernote">The decision itself, approve or request changes, is given in chat. Your picks and notes below reach the agent when you answer there; this block only lists them and stores nothing.</p>' +
+      (left ? '<p class="ansleft" data-ans-left="' + left + '">' + plural(left, "decision") + " still without a pick.</p>" : "") +
+      (groups.length ? groups.map(function (g) {
+        return '<div class="ansg" data-ans="' + g.id + '"><h3>' + esc(g.title) + "<b>" + g.rows.length + "</b></h3><ul>" + g.rows.map(function (p) {
+          var x = p[0], note = (nt[x.anchor] || "").trim();
+          return '<li><a class="ref" href="#' + esc(x.anchor) + '" data-jump="' + esc(x.anchor) + '">' + esc(x.item.id || ("Step " + int(x.item.n))) + "</a>" + (p[1] ? "<b>" + esc(p[1]) + "</b>" : "") + (note ? '<span class="ansn">' + esc(note) + "</span>" : "") + "</li>";
+        }).join("") + "</ul></div>";
+      }).join("") : '<p class="empty0">You have not picked or written anything yet.</p>') + "</div></section>";
   }
 
   function headerHtml(st, bundle) {
@@ -1392,8 +1450,7 @@ var GateView = (function () {
     if (key === "plan") {
       var steps = bundle.plan.steps || []; short = "Plan";
       count = steps.filter(function (s) { return !isRead(st, stepKey(s), s); }).length + "/" + steps.length;
-    } else if (key === "answers") { short = "Answers"; count = String((bundle.answers || []).reduce(function (n, g) { return n + (g.questions || []).length; }, 0)); }
-    else if (key === "design") { short = "Approved design"; count = String((bundle.design.rows || []).length); }
+    } else if (key === "records") { short = "Records"; count = ""; }
     else {
       var s = sectionOfKey(bundle, key), rows = s.rows || [];
       short = s.short; count = rows.filter(function (r) { return !isRead(st, rowKey(r), r); }).length + "/" + rows.length;
@@ -1409,15 +1466,23 @@ var GateView = (function () {
     return '<a class="chip" href="#' + esc(key) + '" data-jump="' + esc(key) + '">' + esc(short) + rev + top + '<span class="count">' + esc(count) + "</span></a>";
   }
 
+  /* the readiness counter: what is left before you answer. Each part is a button that goes to the next such row (keys n and u). */
+  function readyHtml(nd, unread) {
+    var dec = nd.filter(function (n) { return n.decision; }).length;
+    var parts = [dec ? '<button type="button" class="rdy" data-act="next" data-val="n" title="Go to the next decision without a pick (key n)">' + plural(dec, "decision") + " left</button>" : "",
+      unread ? '<button type="button" class="rdy" data-act="next" data-val="u" title="Go to the next row you have not read (key u)">' + unread + " unread</button>" : ""].filter(Boolean);
+    return '<span class="ready" id="ready" role="status" aria-live="polite" data-decisions="' + dec + '" data-unread="' + unread + '">' + (parts.length ? parts.join('<span class="sep" aria-hidden="true"> · </span>') : '<button type="button" class="rdy ok" data-act="toanswer" title="Go to Your answer">Ready to answer</button>') + "</span>";
+  }
   function barHtml(st, bundle, keys) {
     var items = itemsOf(bundle), read = items.filter(function (x) { return isRead(st, x.key, x.item); }).length;
     var pct = items.length ? Math.round(read / items.length * 100) : 100;
     var unitEnd = bundle.page === "unit-end";
-    var filters = [["all", "All"], ["look", "Look first"], ["unread", "Unread"], ["top", unitEnd ? "High and core" : "High and critical"]].concat(st.rvKeys && Object.keys(st.rvKeys).length ? [["changed", "Changed"]] : []);
+    var nd = needs(bundle, st);
+    var filters = [["all", "All"], ["look", "Look first"], ["needs", "Needs you", nd.length], ["unread", "Unread"], ["top", unitEnd ? "High and core" : "High and critical"]].concat(st.rvKeys && Object.keys(st.rvKeys).length ? [["changed", "Changed"]] : []);
     return '<div class="bar" id="bar"><div class="barrow">' +
       '<div class="seg" role="group" aria-label="Detail"><button type="button" data-act="mode" data-val="summary" aria-pressed="' + (st.mode === "summary") + '">Summary</button><button type="button" data-act="mode" data-val="full" aria-pressed="' + (st.mode === "full") + '">Full</button></div>' +
-      '<div class="filters" role="group" aria-label="Show">' + filters.map(function (f) { return '<button type="button" class="pill" data-act="filter" data-val="' + f[0] + '" aria-pressed="' + (st.filter === f[0]) + '">' + f[1] + "</button>"; }).join("") + "</div>" +
-      '<div class="tools"><span class="progress"><span class="num">Read ' + read + "/" + items.length + '</span><span class="meter" aria-hidden="true"><i style="width:' + pct + '%"></i></span></span>' +
+      '<div class="filters" role="group" aria-label="Show">' + filters.map(function (f) { return '<button type="button" class="pill" data-act="filter" data-val="' + f[0] + '" aria-pressed="' + (st.filter === f[0]) + '">' + f[1] + (f[2] != null ? '<b class="n">' + f[2] + "</b>" : "") + "</button>"; }).join("") + "</div>" +
+      '<div class="tools">' + readyHtml(nd, items.length - read) + '<span class="progress"><span class="num">Read ' + read + "/" + items.length + '</span><span class="meter" aria-hidden="true"><i style="width:' + pct + '%"></i></span></span>' +
       '<button type="button" class="btn" data-act="expand">Expand all</button><button type="button" class="btn" data-act="collapse">Collapse all</button><button type="button" class="btn wide" data-act="allread">Mark all read</button></div></div>' +
       '<nav class="chips" aria-label="Sections">' + keys.map(function (k) { return chipFor(st, bundle, k); }).join("") + "</nav></div>";
   }
@@ -1426,7 +1491,7 @@ var GateView = (function () {
     var h = bundle.header || {}, items = itemsOf(bundle), read = items.filter(function (x) { return isRead(st, x.key, x.item); }).length;
     var lead = bundle.page === "plan" ? "Approve the plan or ask for changes in chat." : "Approve the Unit or ask for changes in chat.";
     var rest = h.footer || (bundle.page === "plan" ? "Notes you leave on rows go to the agent with your answer." : "Asking for changes here sends the Unit’s stages back for review; the code plan is the cheaper place to push back.");
-    return '<footer class="band"><b>' + esc(lead) + "</b><span>" + esc(rest) + '</span><span class="end num">read ' + read + "/" + items.length + "</span></footer>";
+    return '<footer class="band"><b>' + esc(lead) + "</b><span>" + esc(rest) + '</span></footer>';
   }
 
   /* A section with nothing to show is left out, with its heading, counts and nav chip: it has no rows, or the filter hides
@@ -1434,8 +1499,7 @@ var GateView = (function () {
   function hasContent(st, bundle, key) {
     if (key === "plan") { var steps = bundle.plan.steps || []; return steps.some(function (x) { return passes(st, x, stepKey(x), true); }); }
     /* the answers and the approved design hold nothing to read: they show with the whole page, never under a filter */
-    if (key === "answers") return (bundle.answers || []).length > 0 && st.filter === "all";
-    if (key === "design") return !!((bundle.design.rows || []).length || bundle.design.bundle || bundle.design.url) && st.filter === "all";
+    if (key === "records") return st.filter === "all" && ((bundle.answers || []).length > 0 || !!(bundle.design && ((bundle.design.rows || []).length || bundle.design.bundle || bundle.design.url)));
     var s = sectionOfKey(bundle, key);
     if (!s) return false;
     if (s.asApproved || (s.map && st.filter === "all")) return true;
@@ -1445,13 +1509,13 @@ var GateView = (function () {
   /* The whole page for one bundle. st: {mode, filter, open, sec, read, notes, picks, noteStat}. */
   function render(bundle, st) {
     st = Object.assign({ mode: "full", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {}, vstate: {} }, st || {});
+    st.needsNow = {}; needs(bundle, st).forEach(function (n) { st.needsNow[n.key] = 1; });
     var keys = order(bundle).filter(function (k) { return hasContent(st, bundle, k); }), parts = {};
     sectionsOf(bundle).forEach(function (s) { parts[s.key] = sectionHtml(st, bundle, s); });
     if (bundle.plan) parts.plan = planHtml(st, bundle);
-    if ((bundle.answers || []).length) parts.answers = answersHtml(st, bundle);
-    if (bundle.design) parts.design = designHtml(st, bundle);
+    if ((bundle.answers || []).length || bundle.design) parts.records = recordsHtml(st, bundle);
     var empty = keys.length || st.filter === "all" ? "" : '<p class="empty card">Nothing here for this filter.</p>';
-    return headerHtml(st, bundle) + barHtml(st, bundle, keys) + "<main>" + keys.map(function (k) { return parts[k]; }).join("") + empty + footerHtml(st, bundle) + idIndex(bundle) + "</main>";
+    return headerHtml(st, bundle) + barHtml(st, bundle, keys) + "<main>" + keys.map(function (k) { return parts[k]; }).join("") + empty + (st.filter === "all" ? answerHtml(st, bundle) : "") + footerHtml(st, bundle) + idIndex(bundle) + "</main>";
   }
 
   function listHtml(rows) {
@@ -1467,7 +1531,12 @@ var GateView = (function () {
       }).join("");
   }
 
-  return { render: render, listHtml: listHtml, pageTitle: pageTitle, order: order, sortRows: sortRows, anchor: anchor, itemsOf: itemsOf, itemsOfSection: itemsOfSection, sectionsOf: sectionsOf, rowKey: rowKey, isRead: isRead, applyTestPick: applyTestPick, esc: esc, idMap: idMap };
+  /* does the row pass the page's current filter (the jump of the readiness counter keeps the filter when it can) */
+  function passesFilter(bundle, st, x) {
+    var s2 = Object.assign({}, st); s2.needsNow = {}; needs(bundle, st).forEach(function (n) { s2.needsNow[n.key] = 1; });
+    return passes(s2, x.item, x.key, x.isStep);
+  }
+  return { passesFilter: passesFilter, needs: needs, walk: walk, render: render, listHtml: listHtml, pageTitle: pageTitle, order: order, sortRows: sortRows, anchor: anchor, itemsOf: itemsOf, itemsOfSection: itemsOfSection, sectionsOf: sectionsOf, rowKey: rowKey, isRead: isRead, applyTestPick: applyTestPick, esc: esc, idMap: idMap };
 })();
 if (typeof module !== "undefined") module.exports = GateView;
 /* RENDER-END */
@@ -1477,7 +1546,7 @@ if (typeof module !== "undefined") module.exports = GateView;
   "use strict";
   var app = document.getElementById("app"), toastEl = document.getElementById("toast");
   var db = null, user = null, uid = null;
-  var view = { id: "", row: null, bundle: null, ids: {}, unsub: [], st: null, readKey: "", saving: false, unsaved: false, timer: 0, rounds: [], base: null, rvAt: -1, rvOnly: 0 };
+  var view = { nav: {}, id: "", row: null, bundle: null, ids: {}, unsub: [], st: null, readKey: "", saving: false, unsaved: false, timer: 0, rounds: [], base: null, rvAt: -1, rvOnly: 0 };
 
   function freshState() { return { mode: "full", filter: "all", open: {}, sec: {}, read: {}, notes: {}, picks: {}, noteStat: {}, vstate: {} }; }
   function toast(text) { toastEl.textContent = text; toastEl.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(function () { toastEl.hidden = true; }, 2400); }
@@ -1543,13 +1612,14 @@ if (typeof module !== "undefined") module.exports = GateView;
   function reveal(target) {
     var st = view.st, b = view.bundle;
     if (!b || !target) return;
-    var secs = GateView.sectionsOf(b), secKeys = secs.map(function (s) { return s.key; }).concat(["plan", "answers", "design"]);
+    var secs = GateView.sectionsOf(b), secKeys = secs.map(function (s) { return s.key; }).concat(["plan", "records"]);
+    if (target === "answers" || target === "design") st.sec.records = true;
     if (secKeys.indexOf(target) >= 0) st.sec[target] = true;
     secs.forEach(function (s) { (s.rows || []).forEach(function (r) { if (GateView.anchor(r.id) === target) { st.sec[s.key] = true; st.open[target] = true; if (s.merged) st.vstate = {}; } }); });
     if (/^step-\d+$/.test(target)) { st.sec.plan = true; st.open[target] = true; }
     (b.answers || []).forEach(function (g) {
-      if (g.key === target) st.sec.answers = true;
-      (g.questions || []).forEach(function (q) { if (q.anchor === target) { st.sec.answers = true; st.open["ans-" + g.key] = true; } });
+      if (g.key === target) st.sec.records = true;
+      (g.questions || []).forEach(function (q) { if (q.anchor === target) { st.sec.records = true; st.open["ans-" + g.key] = true; } });
     });
     if (st.filter !== "all") st.filter = "all";
     paint();
@@ -1616,7 +1686,9 @@ if (typeof module !== "undefined") module.exports = GateView;
       sits.forEach(function (x) { var r = x.item.rev || 1; if (sall) st.read[x.key] = r - 1; else st.read[x.key] = Math.max(st.read[x.key] || 0, r); });
       saveReads();
     } else if (act === "mode") { st.mode = val; st.open = {}; st.sec = {}; }
-    else if (act === "filter") { st.filter = val; st.sec = {}; }
+    else if (act === "filter") { st.filter = val; st.sec = {}; st.needsKeep = {}; GateView.needs(view.bundle, st).forEach(function (n) { st.needsKeep[n.key] = 1; }); }
+    else if (act === "toanswer") { st.filter = "all"; paint(); var ans = document.getElementById("answer"); if (ans) ans.scrollIntoView({ block: "start", behavior: "auto" }); return; }
+    else if (act === "next") { goNext(val); return; }
     else if (act === "expand" || act === "collapse") {
       var on = act === "expand";
       GateView.order(view.bundle).forEach(function (k) { st.sec[k] = on; });
@@ -1637,6 +1709,28 @@ if (typeof module !== "undefined") module.exports = GateView;
     var key = e.target.dataset && e.target.dataset.note;
     if (!key || !view.st) return;
     view.st.notes[key] = e.target.value; setStat(key, "Unsaved"); queueSave();
+  });
+  /* the readiness counter's jumps: the next decision without a pick (n) or the next unread row (u), in the order the page shows them */
+  function goNext(kind) {
+    var st = view.st, b = view.bundle, w = GateView.walk(b), list;
+    if (kind === "n") {
+      var nd = GateView.needs(b, st), dec = nd.filter(function (x) { return x.decision; }), use = dec.length ? dec : nd, set = {};
+      use.forEach(function (x) { set[x.key] = 1; });
+      list = w.filter(function (x) { return set[x.key]; });
+    } else list = w.filter(function (x) { return !GateView.isRead(st, x.key, x.item); });
+    if (!list.length) { toast(kind === "n" ? "Nothing waits on you." : "You have read everything."); return; }
+    var at = -1; w.forEach(function (x, i) { if (x.anchor === view.nav[kind]) at = i; });
+    var next = list.filter(function (x) { return w.indexOf(x) > at; })[0] || list[0];
+    view.nav[kind] = next.anchor;
+    if (!GateView.passesFilter(b, st, next)) st.filter = "all";
+    st.sec[next.sec] = true; st.open[next.anchor] = true;
+    paint();
+    var el = document.getElementById(next.anchor);
+    if (el) { el.scrollIntoView({ block: "center", behavior: "auto" }); el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); }
+  }
+  document.addEventListener("keydown", function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey || !view.st || !view.bundle || (e.target.closest && e.target.closest("textarea, input, select, [contenteditable]"))) return;
+    if (e.key === "n" || e.key === "u") { e.preventDefault(); goNext(e.key); }
   });
   window.addEventListener("resize", barHeight);
   /* every id on the page: a link with a tooltip, by the shared AidlcIds */
@@ -1707,7 +1801,7 @@ if (typeof module !== "undefined") module.exports = GateView;
     strip.innerHTML = '<div class="rvtop"><h2>What changed since v' + baseV + '</h2><span class="hint">' + (n ? n + (n === 1 ? " change" : " changes") + " · " + (rvCount(total) || "no words") : "Nothing differs from v" + baseV) + "</span>" +
       '<label class="rvpick"><span>Compared with</span><select data-rvbase aria-label="The earlier version to compare with">' + pick + "</select></label>" +
       '<span class="seg rvseg" role="group" aria-label="Changes"><button type="button" data-rvview="show" aria-pressed="' + show + '">Changes</button><button type="button" data-rvview="clean" aria-pressed="' + !show + '">Clean</button></span>' +
-      (show ? '<span class="rvnav"><button type="button" class="btn" data-rvstep="-1" aria-label="Previous change" title="Previous change (p)">↑</button><span class="num" id="rvpos">' + (view.rvAt >= 0 ? view.rvAt + 1 : "–") + " / " + rvStops().length + '</span><button type="button" class="btn" data-rvstep="1" aria-label="Next change" title="Next change (n)">↓</button></span>' : "") + "</div>" +
+      (show ? '<span class="rvnav"><button type="button" class="btn" data-rvstep="-1" aria-label="Previous change" title="Previous change (k)">↑</button><span class="num" id="rvpos">' + (view.rvAt >= 0 ? view.rvAt + 1 : "–") + " / " + rvStops().length + '</span><button type="button" class="btn" data-rvstep="1" aria-label="Next change" title="Next change (j)">↓</button></span>' : "") + "</div>" +
       (n ? '<ul class="rvlist">' + D.items.map(function (x) { return '<li><a href="#' + esc(x.anchor) + '" data-jump="' + esc(x.anchor) + '">' + rvTagHtml(x.t) + '<span class="rvt">' + esc(itemName(x.item)) + "</span>" + rvCount(x.c) + "</a></li>"; }).join("") +
         D.removed.map(function (it) { return '<li class="gone"><span>' + rvTagHtml("gone") + '<span class="rvt">' + esc(itemName(it)) + "</span></span></li>"; }).join("") + "</ul>" : "");
     main.insertBefore(strip, main.firstChild);
@@ -1761,7 +1855,7 @@ if (typeof module !== "undefined") module.exports = GateView;
   app.addEventListener("change", function (e) { if (e.target.matches && e.target.matches("[data-rvbase]")) { view.base = view.rounds.filter(function (r) { return r.id === e.target.value; })[0] || view.base; view.rvAt = -1; paint(); } });
   document.addEventListener("keydown", function (e) {
     if (!view.base || RevDiff.pref() !== "show" || e.metaKey || e.ctrlKey || e.altKey || (e.target.closest && e.target.closest("textarea, input, select, [contenteditable]"))) return;
-    if (e.key === "n" || e.key === "j") { e.preventDefault(); rvStep(1); } else if (e.key === "p" || e.key === "k") { e.preventDefault(); rvStep(-1); }
+    if (e.key === "j") { e.preventDefault(); rvStep(1); } else if (e.key === "k") { e.preventDefault(); rvStep(-1); }
   });
 
   /* ---------- views ---------- */
