@@ -286,3 +286,9 @@ def documents(slug, produces, rnd, unit=False):
         else:
             out[key] = generic(slug, key, rnd, with_flow=(rnd_of(slug, key) % 3 == 0))
     return out
+
+
+def cut(text, n):
+    """The text whole. The contract rejects a clipped text (one ending in an ellipsis), so the preview never hands a page a sentence cut mid-word;
+    n is the length the earlier version clipped to, kept so a call reads the same."""
+    return str(text)

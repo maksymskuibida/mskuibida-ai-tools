@@ -3,7 +3,12 @@
 .vz-title { font-size: 12px; font-weight: 600; color: var(--fg-2); margin: 0 0 6px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 .vz-title .hint { font-weight: 400; font-size: 12px; }
 .vz-sr, .vz .sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; list-style: none; }
-.vz-scroll { overflow: auto; max-width: 100%; max-height: 70vh; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 6px; }
+.vz-scroll { overflow: auto; max-width: 100%; max-height: 70vh; border: 1px solid var(--line); border-radius: 8px; padding: 6px;
+  /* wider than the frame: a fade on the edge that has more, and a scrollbar that stays visible */
+  background: linear-gradient(to right, var(--surface), var(--surface)) left center / 28px 100% no-repeat local, linear-gradient(to left, var(--surface), var(--surface)) right center / 28px 100% no-repeat local,
+    linear-gradient(to right, color-mix(in srgb, var(--fg, #000) 16%, transparent), transparent) left center / 18px 100% no-repeat scroll, linear-gradient(to left, color-mix(in srgb, var(--fg, #000) 16%, transparent), transparent) right center / 18px 100% no-repeat scroll, var(--surface); }
+.vz-scroll::-webkit-scrollbar { height: 10px; width: 10px; } .vz-scroll::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--muted, #888) 70%, transparent); border-radius: 6px; border: 2px solid var(--surface); } .vz-scroll::-webkit-scrollbar-track { background: var(--line-soft); border-radius: 6px; }
+.vz-cue { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
 .vz-flat { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 10px 12px; }
 .vz-svg { display: block; max-width: none; font: 500 12px var(--body); }
 .vz-svg text { fill: var(--fg); }

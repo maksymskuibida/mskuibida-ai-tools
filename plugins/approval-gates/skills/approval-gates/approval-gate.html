@@ -482,9 +482,22 @@ var GateViz = (function () {
     return '<nav class="fo-side" data-rv-skip aria-label="Headings of this file"><p class="fo-h">In this file</p><ol>' + li + '</ol></nav><details class="fo-strip" data-rv-skip><summary>In this file<span class="n">' + items.length + ' headings</span></summary><ol>' + li + "</ol></details>";
   }
 
+  /* a diagram wider than its frame scrolls inside the frame, and says so: a note under it while it overflows (the fade and the scrollbar are the CSS's) */
+  function cue(root) {
+    [].forEach.call(root.querySelectorAll(".vz-scroll"), function (s) {
+      var more = s.scrollWidth > s.clientWidth + 2, c = s.nextElementSibling && s.nextElementSibling.classList.contains("vz-cue") ? s.nextElementSibling : null;
+      if (more && !c) { c = document.createElement("p"); c.className = "vz-cue"; c.textContent = "Wider than the page: scroll sideways for the rest."; s.parentNode.insertBefore(c, s.nextSibling); }
+      else if (!more && c) c.remove();
+      s.classList.toggle("vz-more", more);
+    });
+  }
+
   /* hover or focus a box: it and what it is linked to stand out, the rest steps back */
   function bind(root) {
     if (!root || root.__vz) return; root.__vz = true;
+    var queued = false, again = function () { if (queued) return; queued = true; (window.requestAnimationFrame || setTimeout)(function () { queued = false; cue(root); }); };
+    again(); window.addEventListener("resize", again); root.addEventListener("toggle", again, true); root.addEventListener("click", again);
+    if (window.MutationObserver) new MutationObserver(again).observe(root, { childList: true, subtree: true });
     function on(e) {
       var n = e.target.closest && e.target.closest(".vz-node, .vz-item"); if (!n) return;
       var fig = n.closest(".vz"), id = n.getAttribute("data-id"), rel = {}; rel[id] = 1;
@@ -515,7 +528,7 @@ var GateViz = (function () {
     });
   }
 
-  return { diagram: diagram, heat: heat, funnel: funnel, timeline: timeline, lanes: lanes, dots: dots, outline: outline, bind: bind, keysOf: keysOf, esc: esc };
+  return { diagram: diagram, heat: heat, funnel: funnel, timeline: timeline, lanes: lanes, dots: dots, outline: outline, bind: bind, cue: cue, keysOf: keysOf, esc: esc };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = GateViz;
 /* gate-viz.js:end */
@@ -1630,6 +1643,7 @@ figure.screen > details.sub { margin: 0; padding: 4px 12px 6px; border-top: 1px 
 .xrow-open > summary::before, details.crow > summary::before { content: ""; flex: none; width: 14px; height: 14px; align-self: center; background: currentColor; color: var(--muted); -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'%3E%3Cpath d='M5 3l4 4-4 4' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 14px no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'%3E%3Cpath d='M5 3l4 4-4 4' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 14px no-repeat; transition: transform .12s; }
 details.crow[open] > summary::before { transform: rotate(90deg); }
 .nsettled { opacity: .55; }
+.nsdone { flex: none; font: 600 11px/1.3 var(--body, inherit); padding: 2px 7px; border-radius: 4px; background: var(--ok-bg); color: var(--ok-fg); white-space: nowrap; }
 .nsettled:hover, .nsettled:focus-within { opacity: 1; }
 .ready { display: inline-flex; align-items: center; gap: 2px; font-size: 13px; color: var(--fg-2); }
 .ready .sep { color: var(--muted); }
@@ -1718,6 +1732,7 @@ tr.frow.sorted td { color: var(--muted); }
 .tmx { overflow-x: auto; } .tmx table { border-collapse: collapse; font-size: 12px; }
 .tmx th, .tmx td { padding: 4px 8px; border-bottom: 1px solid var(--line-soft); text-align: center; white-space: nowrap; }
 .tmx th { font: 500 12px var(--mono); color: var(--fg-2); } .tmx th.r { text-align: left; }
+.tlist { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 2px 18px; font-size: 12.5px; } .tlist li { display: flex; gap: 8px; padding: 3px 0; border-bottom: 1px solid var(--line-soft); min-width: 0; } .tlist li b { font: 500 12px var(--mono); } .tlist li span { color: var(--fg-2); overflow-wrap: anywhere; } .tlist li.miss span { color: var(--crit-fg); } .tcap { margin: 0 0 6px; font-size: 12px; color: var(--muted); }
 .tmx .hit { color: var(--ok-fg); font-weight: 700; } .tmx .miss { color: var(--crit-fg); font-weight: 700; }
 .lane { display: grid; gap: 2px; }
 .irow { border-radius: 8px; } .irow:hover { background: var(--hover); }
@@ -1883,7 +1898,7 @@ details.sec.rv-chg, details.sec.rv-new, details.sec.rv-removed { border-radius: 
 .only-changed .rv-same:not(.block) { display: none !important; }
 .rsec.changed::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--rv-chg); margin-left: 6px; vertical-align: middle; }
 [data-rv="clean"] .irow.rv-chg, [data-rv="clean"] .irow.rv-new { box-shadow: none; }
-@media (max-width: 640px) { .rvhead { flex-direction: column; } .rvpick { width: 100%; } .rvpick select { width: 100%; } ol.rvdone > li { padding-left: 38px; } ul.rvlist li.rvsub { padding-left: 10px; margin-left: 4px; } }
+@media (max-width: 640px) { .rvhead { flex-direction: column; } .rvhead > * { flex: 0 0 auto; }  /* in a column a flex-basis is a height: the card is sized by its text */ .rvpick { width: 100%; } .rvpick select { width: 100%; } ol.rvdone > li { padding-left: 38px; } ul.rvlist li.rvsub { padding-left: 10px; margin-left: 4px; } }
 [data-rv="clean"] #b-revision :is(.rv-tag, .rv-n) { display: inline-flex !important; }  /* the list of changes keeps its tags in Clean */
 /* rev-diff.css:begin */
 /* Shared: the canonical copy is shared/rev-diff/rev-diff.css; scripts/sync-shared.py copies it into every page that
@@ -1941,7 +1956,12 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
 .vz-title { font-size: 12px; font-weight: 600; color: var(--fg-2); margin: 0 0 6px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 .vz-title .hint { font-weight: 400; font-size: 12px; }
 .vz-sr, .vz .sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; list-style: none; }
-.vz-scroll { overflow: auto; max-width: 100%; max-height: 70vh; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 6px; }
+.vz-scroll { overflow: auto; max-width: 100%; max-height: 70vh; border: 1px solid var(--line); border-radius: 8px; padding: 6px;
+  /* wider than the frame: a fade on the edge that has more, and a scrollbar that stays visible */
+  background: linear-gradient(to right, var(--surface), var(--surface)) left center / 28px 100% no-repeat local, linear-gradient(to left, var(--surface), var(--surface)) right center / 28px 100% no-repeat local,
+    linear-gradient(to right, color-mix(in srgb, var(--fg, #000) 16%, transparent), transparent) left center / 18px 100% no-repeat scroll, linear-gradient(to left, color-mix(in srgb, var(--fg, #000) 16%, transparent), transparent) right center / 18px 100% no-repeat scroll, var(--surface); }
+.vz-scroll::-webkit-scrollbar { height: 10px; width: 10px; } .vz-scroll::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--muted, #888) 70%, transparent); border-radius: 6px; border: 2px solid var(--surface); } .vz-scroll::-webkit-scrollbar-track { background: var(--line-soft); border-radius: 6px; }
+.vz-cue { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
 .vz-flat { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 10px 12px; }
 .vz-svg { display: block; max-width: none; font: 500 12px var(--body); }
 .vz-svg text { fill: var(--fg); }
@@ -2109,19 +2129,23 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
 .bm { position: relative; }
 .bmb { height: 30px; min-height: 30px; padding: 0 11px; display: inline-flex; align-items: center; gap: 6px; border-radius: 15px; white-space: nowrap; }
 .bmb .n { font: 500 11px var(--mono); color: var(--muted); }
+.bmb .rl-s, .bmb .vl-s { display: none; }
+.bmb.rndb { color: var(--rvc, inherit); border-color: color-mix(in srgb, var(--rvc, var(--line)) 45%, var(--control, var(--line))); font-weight: 600; }
+.bpop .keys { display: grid; grid-template-columns: 64px 1fr 1fr; gap: 4px 12px; align-items: center; font-size: 12px; color: var(--fg-2); } .bpop .keys kbd { font: 500 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; background: var(--surface); }
 .bmb .bi { display: none; }
 /* outline labels wrap, never clip mid-word */
 .rdoc { align-items: flex-start; height: auto; }
 .rdoc > .rtitle, #rail .rtitle { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; line-height: 1.35; }
 .rsec { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
 .bmb[aria-expanded="true"] { background: var(--accent-soft); border-color: var(--accent); }
-.bpop { position: absolute; right: 0; top: calc(100% + 8px); z-index: 20; min-width: 240px; max-width: min(520px, calc(100vw - 32px)); display: grid; gap: 10px; padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 28px rgba(23, 26, 33, .18); }
+.bpop { position: absolute; right: 0; top: calc(100% + 8px); z-index: 20; min-width: 330px; max-width: min(520px, calc(100vw - 32px)); display: grid; gap: 10px; padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 28px rgba(23, 26, 33, .18); }
 .bmrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .bml { font-size: 12px; font-weight: 600; color: var(--fg-2); min-width: 64px; }
 .bmh { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--fg-2); }
 .bmh .hint { display: block; font-weight: 400; }
 .bpop .rv-legend, .bpop .vz-tl { margin: 0; padding: 0; list-style: none; }
 .bpop .fpill { height: 28px; }
+.bts > .ackbtn { align-self: flex-start; margin-top: 2px; }
 .ackbtn { min-height: 26px; padding: 0 10px; border-radius: 13px; font-size: 12px; font-weight: 500; flex: none; white-space: nowrap; background: var(--surface); }
 @media (max-width: 1099px) {
   .gbar .barrow { flex-wrap: wrap; }
@@ -2138,6 +2162,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
   .bmenus { gap: 4px; }
   .bmb { padding: 0 9px; height: 26px; min-height: 26px; font-size: 12.5px; }
   .bmb .n { display: none; }
+  .bmb .rl-l, .bmb .vl-l { display: none; } .bmb .rl-s, .bmb .vl-s { display: inline; }
   .bmb.railtoggle .bl { display: none; }
   .bmb.railtoggle .bi { display: block; }
   .gbar .ready { flex: 1 1 auto; }
@@ -2925,7 +2950,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const total = lp.total, read = lp.read;
     const NEED = needs(); view.nsNow = new Set(NEED.map((n) => n.key));
     const CS = changeSummary(), nChanged = CS ? CS.n : Object.keys(view.changed).length, nNotes = noted().length;  /* the one count of changes: the pill, the banner, the timeline and the list of changes all read it */
-    const filters = [["all", "All", blocks.filter((b) => !b.nested).length, "Every block of the page"], ["needs", "Needs you", NEED.length, "Only what waits on you: a decision with no pick, or something not handled, failing or not judged that you have not acknowledged"], ["unread", "Unread", total - read, "Only the things you have not read yet (key u goes to the next)"]].concat(nChanged ? [["changed", "Changed", nChanged, CS ? "Only what changed, is new or was removed since " + sinceLabel() + " (" + CS.changed + " changed, " + CS.added + " new, " + CS.removed + " removed)" : "Only what changed since the earlier round"]] : []);
+    const filters = [["all", "All", null, "Every block of the page"], ["needs", "Needs you", NEED.length, "Only what waits on you: a decision with no pick, or something not handled, failing or not judged that you have not acknowledged. A row you just settled stays in place marked Done until you leave this view; the number counts only what still waits"], ["unread", "Unread", total - read, "Only the things you have not read yet (key u goes to the next)"]].concat(nChanged ? [["changed", "Changed", nChanged, CS ? "Only what changed, is new or was removed since " + sinceLabel() + " (" + CS.changed + " changed, " + CS.added + " new, " + CS.removed + " removed)" : "Only what changed since the earlier round"]] : []);
     if (!filters.some((f) => f[0] === view.filter)) view.filter = "all";
     /* header facts */
     const b = g.brief ? parseBrief(g.brief) : null; const open = b ? b.rows.filter((x) => isOpenStatus(x.status)).length : null;
@@ -2957,7 +2982,10 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     el.col.classList.toggle("only-changed", view.filter === "changed");
     el.col.querySelectorAll("[data-item]").forEach((n) => {
       const r = isRead(n.dataset.item); n.classList.toggle("read", r);
-      const ns = view.filter === "needs"; n.classList.toggle("nsettled", ns && !view.nsNow.has(n.dataset.item));
+      const ns = view.filter === "needs"; const settledNow = ns && !view.nsNow.has(n.dataset.item); n.classList.toggle("nsettled", settledNow);
+      const dn = n.querySelector(":scope > .ih > .ns-done, :scope > .ns-done, :scope > summary > .ns-done, :scope > .ih > .imain > .imeta > .ns-done");
+      if (settledNow && !dn) { const m = n.querySelector(":scope > .ih > .imain > .imeta"); const b = document.createElement("span"); b.className = "nsdone ns-done"; b.textContent = "Done"; b.dataset.tip = "You settled this just now. It stays here until you leave this view, and the number no longer counts it."; if (m) m.appendChild(b); else { const d = n.querySelector(".idot"); if (d && d.parentElement) d.parentElement.insertBefore(b, d); } }
+      else if (!settledNow && dn) dn.remove();
       n.hidden = (view.filter === "unread" && r) || (view.filter === "changed" && n.classList.contains("rv-same")) || (ns && (!nsShown(n.dataset.item) || n.classList.contains("tlink")));  /* the item that only points at a target is not a second copy of it */
       const d = [...n.querySelectorAll("[data-iread]")].find((x) => x.dataset.iread === n.dataset.item); if (d) { d.dataset.tip = r ? "Read. Press to mark unread" : "Mark as read"; d.setAttribute("aria-label", (r ? "Mark unread: " : "Mark read: ") + readName(n, n.dataset.item.split(":").slice(1).join(":"))); d.classList.toggle("isread", r); }
     });
@@ -2969,7 +2997,8 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
       if (waits.has(k) && !has && !n.classList.contains("rv-removed")) {
         const b = document.createElement("button"); b.type = "button"; b.className = "ackbtn"; b.dataset.ack = k; b.textContent = "Seen, will answer in chat";
         b.dataset.tip = "You have seen this and will say what to do about it in your answer. It stops counting as waiting on you; reading it does not.";
-        const dot = n.querySelector(".idot"); if (dot && dot.parentElement) dot.parentElement.insertBefore(b, dot); else n.appendChild(b);
+        /* the action sits with the row's actions: before the read dot in a row, at the foot of a tile (never over the dot, never above the tile's label) */
+        const dot = n.classList.contains("bts") ? null : n.querySelector(".idot"); if (dot && dot.parentElement) dot.parentElement.insertBefore(b, dot); else n.appendChild(b);
       } else if (!waits.has(k) && has) has.remove();
     });
     paintElems();
@@ -2994,17 +3023,22 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
      jump to a block: on a narrow screen a button that opens the outline) as small buttons that open a menu. */
   const rvSeg = () => `<span class="seg rvseg" role="group" aria-label="How the changes show"><button type="button" data-rvview="show" aria-pressed="${rvOn()}" data-tip="Mark what changed since ${esc(sinceLabel())}: words added are highlighted, words removed struck">Changes</button><button type="button" data-rvview="clean" aria-pressed="${!rvOn()}" data-tip="The page as it is now, each round's changes in that round's colour">Clean</button></span>`;
   const rvStepper = () => !view.prev || !rvOn() ? "" : `<span class="rvbar"><button type="button" class="rvstep" data-rvstep="-1" aria-label="Previous change" data-tip="Previous change (k)">${UP}</button><span class="num rvpos" id="rvpos" aria-live="polite">${view.rvAt >= 0 ? view.rvAt + 1 : "–"} / ${rvStops().length}</span><button type="button" class="rvstep" data-rvstep="1" aria-label="Next change" data-tip="Next change (j)">${DOWN}</button></span>`;
+  /* the Rounds control says what is compared: "Round 3 vs 2" (short "r3 vs r2"), in the round's colour */
+  const roundsSince = () => { const r = view.prev && view.prev.g && view.prev.g.round; return r && r !== roundNo() ? r : 0; };
+  const roundsLabel = () => { const a = roundsSince(); return `<span class="rl-l">Round ${esc(roundNo())} vs ${a ? esc(a) : "last"}</span><span class="rl-s">r${esc(roundNo())} vs ${a ? "r" + esc(a) : "last"}</span>`; };
+  const roundsAria = () => { const a = roundsSince(); return `Rounds: round ${roundNo()} compared with ${a ? "round " + a : "the last page"}`; };
   function barHtml(filters, NEED, unread, nNotes, CS, total) {
     const on = view.menu || "";
-    const pills = filters.map((x) => `<button type="button" class="fpill" data-filter="${x[0]}" aria-pressed="${view.filter === x[0]}"${x[3] ? ` data-tip="${esc(x[3])}"` : ""}>${x[1]}<span class="n">${x[2]}</span></button>`).join("");
-    const rounds = view.prev ? `<div class="bm"><button type="button" class="bmb" data-menu="rounds" aria-haspopup="true" aria-expanded="${on === "rounds"}" aria-controls="m-rounds" data-tip="The rounds of this stage and what each one changed">Rounds<span class="n">v${esc(roundNo())}</span></button>` +
+    const pills = filters.map((x) => `<button type="button" class="fpill" data-filter="${x[0]}" aria-pressed="${view.filter === x[0]}"${x[3] ? ` data-tip="${esc(x[3])}"` : ""}>${x[1]}${x[2] == null ? "" : `<span class="n">${x[2]}</span>`}</button>`).join("");
+    const rounds = view.prev ? `<div class="bm"><button type="button" class="bmb rndb rv-t${RevDiff.tone(roundNo())}" data-menu="rounds" aria-haspopup="true" aria-expanded="${on === "rounds"}" aria-controls="m-rounds" aria-label="${esc(roundsAria())}" data-tip="${esc(roundsAria() + ". Open for the rounds of this stage and what each one changed")}">${roundsLabel()}</button>` +
       `<div class="bpop" id="m-rounds" role="group" aria-label="Rounds"${on === "rounds" ? "" : " hidden"}><p class="bmh">What each round changed<span class="hint">press a round to show only its colour</span></p><span id="rvlegend">${view.rvLegend || ""}</span>${CS ? `<p class="bmh hint">Round ${esc(roundNo())} against ${esc(sinceLabel())}: ${CS.changed} changed · ${CS.added} new · ${CS.removed} removed</p>` : ""}</div></div>` : "";
-    const menu = `<div class="bm"><button type="button" class="bmb" data-menu="view" aria-haspopup="true" aria-expanded="${on === "view"}" aria-controls="m-view" data-tip="How the page shows its changes, and the bulk actions">View</button>` +
+    const menu = `<div class="bm"><button type="button" class="bmb" data-menu="view" aria-haspopup="true" aria-expanded="${on === "view"}" aria-controls="m-view" aria-label="View and actions" data-tip="View and actions: how the page shows its changes, Expand all, Collapse all, Mark all read, the keyboard shortcuts (?)"><span class="vl-l">View and actions</span><span class="vl-s">View</span></button>` +
       `<div class="bpop" id="m-view" role="group" aria-label="View"${on === "view" ? "" : " hidden"}>` +
       (view.prev ? `<div class="bmrow"><span class="bml">Changes</span>${rvSeg()}${rvStepper()}</div>` : "") +
-      `<div class="bmrow"><button type="button" data-all="open" data-tip="Open every block and section">Expand all</button><button type="button" data-all="close" data-tip="Close every block and section">Collapse all</button></div>` +
+      `<div class="bmrow"><span class="bml">Actions</span><button type="button" data-all="open" data-tip="Open every block and section">Expand all</button><button type="button" data-all="close" data-tip="Close every block and section">Collapse all</button></div>` +
       (nNotes ? `<div class="bmrow"><button type="button" class="fpill" data-filter="notes" aria-pressed="${view.filter === "notes"}" data-tip="Only the documents you left a note on">With notes<span class="n">${nNotes}</span></button></div>` : "") +
-      `<div class="bmrow"><button type="button" data-allread="1" data-tip="Mark every readable thing read (a decision still waits for its pick)">Mark all read</button></div></div></div>`;
+      `<div class="bmrow"><span class="bml"></span><button type="button" data-allread="1" data-tip="Mark every readable thing read (a decision still waits for its pick)">Mark all read</button></div>` +
+      `<div class="bmrow keys"><span class="bml">Keys</span><span><kbd>n</kbd> next decision</span><span><kbd>u</kbd> next unread</span>${view.prev ? `<span><kbd>j</kbd> <kbd>k</kbd> next, previous change</span>` : ""}<span><kbd>?</kbd> this menu</span><span><kbd>Esc</kbd> closes it</span></div></div></div>`;
     const outline = `<button type="button" class="bmb railtoggle" data-outline="1" aria-controls="rail" aria-expanded="${el.rail.classList.contains("show")}" aria-label="Outline" data-tip="The outline: every block and file, to jump to"><svg class="bi" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="M2 4h12M2 8h12M2 12h8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg><span class="bl">Outline</span></button>`;
     return `<div class="barrow"><div class="filters" role="group" aria-label="Show">${pills}</div>${readyHtml(NEED, unread, total)}<span class="savestat" id="savestat" role="status" aria-live="polite"></span><div class="bmenus">${rounds}${menu}${outline}</div></div>`;
   }
@@ -5064,9 +5098,14 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const q = (s) => n.querySelector(s), tx = (x) => plainTitle(x ? x.textContent : "");
     let t;
     if (n.matches("tr")) t = [...n.cells].slice(0, 2).map((c) => tx(c)).filter(Boolean).join(" ");
-    else { const id = tx(q(".iid, .tm-id")), body = tx(q(".ctitle, .isum, .pt1, h1, h2, h3, h4, b, .decides, p, summary")); t = (id && body && !body.startsWith(id) ? id + " " : "") + (body || id); }
+    else {
+      const id = tx(q(".iid, .tm-id")), body = tx([".ctitle", ".isum", ".pt1", "h1", "h2", "h3", "h4", "b", ".decides", "p", "summary"].map((s) => q(s)).find(Boolean));
+      t = (id && body && !body.startsWith(id) ? id + " " : "") + (body || id);
+      const st = n.classList.contains("crow") ? tx(q(":scope > summary > .tag")).toLowerCase() : "";  /* a criterion: "Mark read: <text>, holds" */
+      t = (t || "").trim().slice(0, 80); if (st) t += ", " + st;
+    }
     t = (t || "").trim();
-    return (t || cleanId(fallback) || "this").slice(0, 80);
+    return (t || cleanId(fallback) || "this").slice(0, 100);
   }
   const idot = (key, label) => `<button type="button" class="idot" data-iread="${esc(key)}" aria-label="${esc((isRead(key) ? "Mark unread: " : "Mark read: ") + label)}" data-tip="${isRead(key) ? "Read. Press to mark unread" : "Mark as read"}"><i aria-hidden="true"></i></button>`;
   const share = (it) => it.coveredBy && it.coveredBy.link ? "ok" : it.coveredBy && it.coveredBy.acceptanceReason ? "acc" : it.settled ? "old" : "new";
@@ -5102,9 +5141,10 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
   function traceHtml(D) {
     const T = D.trace || []; if (!T.length) return "";
     const froms = [...new Set(T.map((t) => t.from))], tos = [...new Set(T.map((t) => t.to || "—"))];
-    if (tos.length > 14) return `<div class="dsec"><h3>Traceability<span class="hint">${T.filter((t) => t.ok).length} of ${T.length} covered</span></h3></div>`;
+    /* the disclosure's own summary already says "N of M covered": what it opens to is the trace itself, never that line again */
+    if (tos.length > 14) return `<div class="dsec"><ul class="tlist">${froms.map((f) => { const hits = T.filter((x) => x.from === f); const by = [...new Set(hits.filter((x) => x.ok && x.to).map((x) => x.to))]; return `<li class="${hits.some((x) => x.ok) ? "hit" : "miss"}"><b>${esc(f)}</b><span>${by.length ? "covered by " + esc(by.join(", ")) : hits.some((x) => x.ok) ? "covered" : "not covered"}</span></li>`; }).join("")}</ul></div>`;
     const cell = (f, t) => { const hit = T.find((x) => x.from === f && (x.to || "—") === t); return hit ? (hit.ok ? `<td class="hit" data-tip="${esc(f + " is covered by " + t)}">&#9679;</td>` : `<td class="miss" data-tip="${esc(f + ": not covered" + (t !== "—" ? " by " + t : ""))}">&#10005;</td>`) : "<td></td>"; };
-    return `<div class="dsec"><h3>Traceability<span class="hint">${T.filter((t) => t.ok).length} of ${T.length} covered; rows are what is traced, columns what covers it</span></h3><div class="tmx"><table><thead><tr><th class="r" scope="col"></th>${tos.map((t) => `<th scope="col">${esc(t)}</th>`).join("")}</tr></thead><tbody>${froms.map((f) => `<tr><th class="r" scope="row">${esc(f)}</th>${tos.map((t) => cell(f, t)).join("")}</tr>`).join("")}</tbody></table></div></div>`;
+    return `<div class="dsec"><p class="tcap">Rows are what is traced, columns what covers it.</p><div class="tmx"><table><thead><tr><th class="r" scope="col"></th>${tos.map((t) => `<th scope="col">${esc(t)}</th>`).join("")}</tr></thead><tbody>${froms.map((f) => `<tr><th class="r" scope="row">${esc(f)}</th>${tos.map((t) => cell(f, t)).join("")}</tr>`).join("")}</tbody></table></div></div>`;
   }
   function lanesHtml(D, docs) {
     return KIND_ORDER.filter((k) => D.items.some((i) => i.kind === k)).map((k) => {
@@ -5221,6 +5261,15 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
       (cols ? `<div class="egrid">${cols}</div>` : "") + noConflict + criteriaHtml(C) +
       (traceOnly && (traceOnly.trace || []).length ? `<details class="settled" data-settled="trace"${view.iopen.has("settled:trace") ? " open" : ""}><summary>Traceability: ${traceOnly.trace.filter((t) => t.ok).length} of ${traceOnly.trace.length} covered</summary>${traceHtml(traceOnly)}</details>` : "") + `</div></details>`;
   }
+  /* the first line of a Markdown body that the item's header line already shows is not drawn a second time */
+  function unsaid(it) {
+    const body = String(it.body || ""); if (it.format === "yaml" || !it.summary) return body;
+    const sum = rvNorm(plainTitle(it.summary)).toLowerCase(), lines = body.split("\n"), at = lines.findIndex((l) => l.trim());
+    if (at < 0) return body;
+    const first = rvNorm(plainTitle(lines[at].replace(/^\s*(#+|[-*]|\d+\.)\s+/, ""))).toLowerCase();
+    if (first.length < 12 || !sum.includes(first)) return body;
+    return lines.slice(at + 1).join("\n").replace(/^\s*\n/, "").trim();
+  }
   function asWritten(it) {
     if (!it.body) return "";
     if (it.format === "yaml" && typeof jsyaml !== "undefined") {
@@ -5230,7 +5279,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
       } catch { /* shown as written */ }
       return `<pre class="plain">${esc(it.body)}</pre>`;
     }
-    return `<div class="md aw" data-md="${esc(it.body)}"></div>`;
+    const rest = unsaid(it); return rest ? `<div class="md aw" data-md="${esc(rest)}"></div>` : "";
   }
   /* an item that is a target: said once in the matrix, so here only its summary and a link to its row; the row's read key is the target's */
   function targetItemRow(it, tg) {
@@ -5244,14 +5293,14 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     const doc = docs.find((d) => d.key === it.doc); const L = LABEL[it.label];
     /* said once: an id the opened text already shows (a story's own criteria) is not listed again as "Relates to" */
     const shown = (m) => new RegExp("(^|[^\\w.-])" + String(m).replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "($|[^\\w-])").test(String(it.body || ""));
-    const relIds = (it.relates || it.mentions || []).filter((m) => !shown(m));
+    const relIds = [...new Set(it.relates || it.mentions || [])].filter((m) => !shown(m));
     const rel = relIds.length ? `<div class="rel"><span>Relates to</span>${relIds.map((m) => `<span class="chip">${esc(m)}</span>`).join("")}</div>` : "";
     const sameAsSum = rvNorm(it.summary || "").toLowerCase().includes(rvNorm(it.title || "").toLowerCase());
     return `<div class="irow j${read ? " read" : ""}${it.lookFirst ? " lf" : ""}" id="item-${esc(it.key)}" data-item="${esc(key)}" data-aidlc-id="${esc(it.id)}"><div class="ih">` +
       `<button type="button" class="ix" data-iopen="${esc(it.key)}" aria-expanded="${open}" aria-label="${esc((open ? "Hide " : "Show ") + it.id + " as written")}">${CHEV}</button>` +
       `<div class="imain"><div class="imeta"><span class="iid">${esc(it.id)}</span><span class="kind">${esc(KIND_SHORT[it.kind] || it.kind)}</span>${L ? `<span class="tag" ${toneOf(L[1])} data-tip="${esc(L[2])}">${esc(L[0])}</span>` : ""}${handledChip(it)}</div>` +
       `<button type="button" class="isum" data-iopen="${esc(it.key)}">${inline(it.summary || it.title)}</button></div>${idot(key, it.id)}</div>` + reasonHtml(it) +
-      (open ? `<div class="ib aw-wrap"><p class="awt"><b>As written</b>${sameAsSum ? "" : inline(it.title)}</p>${asWritten(it)}${rel}${doc ? `<a class="jump" href="#" data-go="d-${esc(doc.key)}">in ${esc(doc.path ? doc.path.split("/").pop() : doc.title)}</a>` : ""}</div>` : "") + "</div>";
+      (open ? `<div class="ib aw-wrap">${sameAsSum && !asWritten(it) ? "" : `<p class="awt"><b>As written</b>${sameAsSum ? "" : inline(it.title)}</p>`}${asWritten(it)}${rel}${doc ? `<a class="jump" href="#" data-go="d-${esc(doc.key)}">in ${esc(doc.path ? doc.path.split("/").pop() : doc.title)}</a>` : ""}</div>` : "") + "</div>";
   }
   function itemsBlock(D) {
     const docs = docList(); const all = D.items;
@@ -5362,6 +5411,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
   document.addEventListener("keydown", (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey || (e.target.closest && e.target.closest("textarea, input, select, [contenteditable]"))) return;
     if (e.key === "n" || e.key === "u") { e.preventDefault(); navTo(e.key); }
+    else if (e.key === "?") { e.preventDefault(); setMenu("view"); }
   });
   el.col.addEventListener("click", (e) => { const g = e.target.closest("[data-ansgo]"); if (!g) return; e.preventDefault(); e.stopPropagation(); const n = nodeOfKey(g.dataset.ansgo); if (n) jumpTo(n); }, true);
 

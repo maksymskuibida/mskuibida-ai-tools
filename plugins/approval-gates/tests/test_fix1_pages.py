@@ -150,7 +150,7 @@ class TestNothingTwice(unittest.TestCase):
 
     def test_an_opened_item_does_not_list_the_ids_its_own_text_shows(self):
         html = read(STAGE_PAGE)
-        self.assertIn("const relIds = (it.relates || it.mentions || []).filter((m) => !shown(m));", html)
+        self.assertIn("const relIds = [...new Set(it.relates || it.mentions || [])].filter((m) => !shown(m));", html)
         self.assertIn("sameAsSum ? \"\" : inline(it.title)", html)
 
     def test_a_criterion_does_not_say_its_title_again(self):

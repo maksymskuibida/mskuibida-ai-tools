@@ -237,11 +237,20 @@ def row_problems(gate, docs_text=None):
     for it in judged_items((gate.get("digest") or {}).get("items")):
         where = f"item {it.get('id')}"
         out += text_problems(where + " summary", it.get("summary"), SUMMARY_MAX)
+        if it.get("kind") == "decision" and says_only_topic(it):
+            out.append(f"{where} summary: it names the topic ({str(it.get('summary')).strip()!r}); say what the decision is, in one sentence")
         if it.get("label") not in LABELS:
             out.append(f"{where}: label one of {', '.join(LABELS)} (what it costs if it is wrong)")
         elif it.get("lookFirst") and it["label"] not in ("critical", "high"):
             out.append(f"{where}: lookFirst is for critical and high items; raise the label or drop lookFirst")
     return out
+
+
+def says_only_topic(item):
+    """A decision whose summary is its topic (a heading, or a few words) does not help the reader choose what to open first."""
+    words = re.findall(r"[\w']+", str(item.get("summary") or "").lower())
+    title = re.findall(r"[\w']+", str(item.get("title") or "").lower())
+    return bool(words) and (words == title or len(words) <= 3)
 
 
 def place_problems(where, w, gate, docs_text=None):

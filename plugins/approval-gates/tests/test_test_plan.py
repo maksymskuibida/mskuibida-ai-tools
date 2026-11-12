@@ -408,7 +408,7 @@ process.stdout.write(JSON.stringify(out));
         self.assertEqual(got["unpick"], [False, "", True])
         self.assertEqual(got["later"], [True, True])
         self.assertEqual(got["reread"], [True, 2])
-        self.assertEqual(got["do"], [False, "do", False])
+        self.assertEqual(got["do"], [True, "do", True], "Do it marks the row read, as Test now does (fix round 2, F-1)")
         self.assertFalse(got["closed"])
 
 

@@ -1,5 +1,26 @@
 # approval-gates changelog
 
+## 1.35.1
+
+Fix round 2 of the pages (marketplace 1.57.0): the 16 minor findings of a second on-screen review. The look stays; the experience improves.
+Templates changed: `approval-gate.html`, `unit-gate.html`, `maps.html`, the shared `gate-viz`; `scripts/judgment.py`; preview `dev/preview*.py`.
+
+- **The bar says what is compared.** The Rounds control reads "Round 3 vs 2" ("r3 vs r2" on a phone), in the round's colour, on the per-stage
+  page, the Unit pages and the maps page (a tag in the maps bar); the bar keeps its height. The first filter pill is "All", with no count.
+- **View and actions.** The menu button says what it holds; its Actions row labels Expand all, Collapse all and Mark all read, and a Keys row
+  lists n, u, j and k, ? and Esc; pressing ? opens it.
+- **Nothing twice.** An opened item's "As written" leaves out the first line its header sentence already says; the same reference is one chip;
+  a note is listed once in Your answer (with its pick, or under Notes when it has none).
+- **Counts agree.** The Needs you chip counts what waits; a row settled just now stays in place marked Done and is not counted. The header's
+  changed / new split is the rows' tags (a row new since the round compared with is tagged "new", whatever round last touched it).
+- **One rule for picks.** Do it / Leave it mark the row read, as Test now / Later and the per-stage picks already did.
+- **Disclosures and diagrams.** The traceability disclosure opens to the per-id trace, never to its own header again; a diagram wider than its
+  frame has a fade, a visible scrollbar and a note; "How the pieces connect" wraps onto lines, labels are whole (cut at a word with an ellipsis
+  and a title), and under three pieces it is not drawn.
+- **Smaller.** The "What you asked for" card is sized by its text on a phone; a criterion's read dot is named "Mark read: <text>, <verdict>";
+  the "Seen, will answer in chat" action sits at the foot of its tile; `judgment.py` names a decision whose summary is only its topic;
+  the preview hands the pages whole sentences.
+
 ## 1.35.0
 
 Fix round 1 of the pages' rework, for the per-stage page, the Unit pages and the test plan page (`approval-gate.html`,

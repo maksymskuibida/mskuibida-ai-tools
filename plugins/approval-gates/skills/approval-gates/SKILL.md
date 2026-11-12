@@ -82,7 +82,7 @@ the stage has a reviewer:
    - **Every point has `sources`**: a criterion key, an item id, `doc:<document key>` or a finding id. The page makes
      each a link that opens what it names.
    - **Every item** in `items` (the draft lists them with their text under `_asWritten`): a one-sentence `summary` (at
-     most 300 characters) and a `label` by what it costs if it is wrong: `critical` wrong data, security or hard to undo;
+     most 300 characters; a decision's says what it decides, not only its topic, and the validator names one that does not) and a `label` by what it costs if it is wrong: `critical` wrong data, security or hard to undo;
      `high` wrong behaviour people would see; `medium` rework in this stage or Unit; `low` cosmetic or internal. Set
      `lookFirst: true` on the critical and high items the developer must check; keep or fix `relates`. Items an earlier
      stage settled are not listed: the page folds them. After a Request Changes round, items whose text did not change

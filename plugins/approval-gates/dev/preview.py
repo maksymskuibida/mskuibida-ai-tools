@@ -241,7 +241,8 @@ def plain_summary(written):
     lines = [re.sub(r"\s+", " ", re.sub(r"[`*#|]", "", x)).strip() for x in str(written).split("\n")]
     lines = [x for x in lines if x]
     title = lines[0] if lines else ""
-    body = [x for x in lines[1:] if not re.match(r"^(?:[-*]\s*)?(?:AC\d|Status:|Context\b|Decision\b|Consequences\b|Priority\b)", x, re.I)]
+    decided = next((re.sub(r"^Decision\.?\s*", "", x) for x in lines[1:] if re.match(r"^Decision\b", x)), "")  # a decision says what it decides
+    body = [decided] if decided else [x for x in lines[1:] if not re.match(r"^(?:[-*]\s*)?(?:AC\d|Status:|Context\b|Decision\b|Consequences\b|Priority\b)", x, re.I)]
     sentence = re.split(r"(?<=[.!?])\s", " ".join(body))[0][:170].rstrip(" …,;:") if body else ""
     if sentence and title and not sentence.lower().startswith(title.lower()):
         text = f"{title}: {sentence[0].lower() + sentence[1:]}" if not re.match(r"^[A-Z]{2,}", sentence) else f"{title}: {sentence}"
@@ -364,8 +365,8 @@ def special_scenarios(bakery, graph, tmp):
     st = next(s for s in graph if s["slug"] == "user-stories")
     findings = {"source": "aidlc", "stage": "user-stories", "stage_name": "User Stories", "artifact": "reviews/review-01.md",
                 "findings": [{"id": f"R-0{i}", "severity": sev, "where": f"stories.md, US{i}.1", "finding": f"{pc.sentence(('f', i))} {pc.sentence(('f2', i))}",
-                              "action": pc.sentence(("act", i))[:110], "status": "New", "blocking": sev in ("Critical", "Major"),
-                              "title": pc.sentence(("t", i))[:70].rstrip(".")}
+                              "action": pc.cut(pc.sentence(("act", i)), 110), "status": "New", "blocking": sev in ("Critical", "Major"),
+                              "title": pc.cut(pc.sentence(("t", i)), 70).rstrip(".")}
                              for i, sev in enumerate(["Critical", "Major", "Major", "Minor", "Minor", "Minor"], 1)], "carried": []}
     out = []
     s = sample_of(bakery, st, None, 1, tmp, findings=findings)
@@ -379,7 +380,7 @@ def special_scenarios(bakery, graph, tmp):
     if ft:
         early = {"source": "aidlc", "stage": "feasibility", "stage_name": "Feasibility & Constraints", "artifact": "reviews/review-01.md",
                  "findings": [{"id": f"R-0{i}", "severity": sev, "where": "feasibility-assessment.md", "finding": f"{pc.sentence(('ef', i))} {pc.sentence(('ef2', i))}",
-                               "action": pc.sentence(("eact", i))[:110], "status": "New", "blocking": sev in ("Critical", "Major"), "title": pc.sentence(("et", i))[:70].rstrip(".")}
+                               "action": pc.cut(pc.sentence(("eact", i)), 110), "status": "New", "blocking": sev in ("Critical", "Major"), "title": pc.cut(pc.sentence(("et", i)), 70).rstrip(".")}
                               for i, sev in enumerate(["Major", "Minor", "Minor"], 1)], "carried": []}
         s = sample_of(bakery, ft, None, 1, tmp, findings=early)
         out.append(Scenario("gate-ideation-open-decisions", "Per-stage gates, special", "Feasibility (phase 1, Ideation) with three review findings to sort: a gate before Construction that still waits on decisions.", "gate", gate_rows(s), s["id"]))
