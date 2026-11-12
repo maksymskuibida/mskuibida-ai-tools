@@ -480,6 +480,103 @@ class SessionTests(Base):
         self.assertEqual((done.returncode, done.stdout), (0, ""))
 
 
+class BackwardTests(Base):
+    """The title follows the stage the checkout is on now, whichever way it moved: back, sideways or forward."""
+
+    EARLY = "Inception — Units Generation"
+    LATE = "Construction — Build and Test"
+
+    def settle(self, stage, title):
+        """Move the project to `stage`, let the hook ask, and answer it as the assistant does."""
+        self.set_state(stage)
+        out = self.bash("aidlc engine orchestrate next")
+        if title in self.context_of(out):
+            self.renamed(title)
+        return out
+
+    def test_jump_back_after_a_later_stage_asks_for_the_earlier_title(self):
+        self.settle("units-generation", self.EARLY)
+        self.settle("build-and-test", self.LATE)
+        self.set_state("units-generation")
+        self.assertIn(f'"title": "{self.EARLY}"', self.context_of(self.bash("aidlc engine jump units-generation")))
+
+    def test_jump_reopen_asks_for_the_earlier_title(self):
+        self.settle("requirements-analysis", "Inception — Requirements Analysis")
+        self.settle("build-and-test", self.LATE)
+        self.set_state("requirements-analysis")
+        out = self.bash("aidlc engine jump reopen requirements-analysis")
+        self.assertIn('"title": "Inception — Requirements Analysis"', self.context_of(out))
+
+    def test_jump_back_noticed_at_the_end_of_the_turn_when_no_tool_call_saw_it(self):
+        out = self.bash()
+        self.assertEqual(self.stop()["decision"], "block")  # the first title was asked for and blocked once
+        self.renamed("Inception — Requirements Analysis")
+        self.settle("build-and-test", self.LATE)
+        self.set_state("requirements-analysis")  # moved by a tool the hook does not watch
+        out = self.stop()
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("Inception — Requirements Analysis", out["reason"])
+
+    def test_declined_title_is_asked_again_when_the_stage_comes_back(self):
+        self.bash()
+        self.renamed("Inception — Requirements Analysis", response="The user declined.")
+        self.settle("build-and-test", self.LATE)
+        self.set_state("requirements-analysis")
+        self.assertIn("Inception — Requirements Analysis", self.context_of(self.bash()))
+
+    def test_prompt_after_going_back_emits_the_earlier_title(self):
+        self.bind()
+        self.set_state("units-generation")
+        self.assertEqual(self.title_of(self.prompt()), self.EARLY)
+        self.settle("build-and-test", self.LATE)  # renamed mid-turn by the assistant
+        self.set_state("units-generation")  # a Request Changes goes back
+        self.assertEqual(self.title_of(self.prompt()), self.EARLY)
+
+    def test_prompt_after_going_back_outside_the_desktop_app(self):
+        self.bind()
+        self.set_state("build-and-test")
+        self.assertEqual(self.title_of(self.prompt(desktop=False)), self.LATE)
+        self.set_state("units-generation")
+        self.assertEqual(self.title_of(self.prompt(desktop=False)), self.EARLY)
+
+    def test_redo_of_an_earlier_stage_mid_construction(self):
+        self.claim("u1-core")
+        self.settle("functional-design", "u1-core — Functional Design")
+        self.set_state("units-generation")  # Units Generation redone while a Unit is claimed
+        self.assertIn(f'"title": "{self.EARLY}"', self.context_of(self.bash("aidlc engine jump units-generation")))
+
+    def test_directive_that_goes_back_is_followed(self):
+        self.settle("build-and-test", self.LATE)
+        self.set_directive("units-generation")
+        self.assertIn(self.EARLY, self.context_of(self.bash()))
+
+    def test_unit_switch_back_and_forth(self):
+        self.claim("u1-core")
+        self.set_state("functional-design")
+        self.assertIn("u1-core — Functional Design", self.context_of(self.bash()))
+        self.renamed("u1-core — Functional Design")
+        self.claim("u2-extras")
+        self.assertIn("u2-extras — Functional Design", self.context_of(self.bash("aidlc unit claim u2-extras")))
+        self.renamed("u2-extras — Functional Design")
+        self.claim("u1-core")
+        out = self.bash("aidlc unit claim u1-core")
+        self.assertIn('"title": "u1-core — Functional Design"', self.context_of(out))
+
+    def test_resumed_session_takes_the_title_of_the_stage_it_is_on_now(self):
+        self.bind()
+        self.set_state("units-generation")
+        self.assertEqual(self.title_of(self.prompt()), self.EARLY)
+        self.settle("build-and-test", self.LATE)
+        self.set_state("units-generation")  # changed underneath the session while it was closed
+        out = self.run_hook({"hook_event_name": "SessionStart", "source": "resume"})
+        self.assertEqual(self.title_of(out), self.EARLY)
+
+    def test_same_title_is_not_asked_twice_in_a_row(self):
+        self.settle("units-generation", self.EARLY)
+        self.assertIsNone(self.bash())
+        self.assertIsNone(self.stop())
+
+
 class ManifestTests(unittest.TestCase):
     def test_hooks_json_runs_the_script_on_each_event(self):
         with open(os.path.join(PLUGIN, "hooks", "hooks.json"), encoding="utf-8") as f:
