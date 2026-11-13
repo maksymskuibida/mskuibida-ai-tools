@@ -1698,8 +1698,8 @@ var GateView = (function () {
   var SEVERITY = ["critical", "high", "medium", "low"];
   var WEIGHTS = ["core", "main", "minor"];
   var LABEL_TONE = { critical: "crit", high: "high", medium: "med", low: "low", core: "core", main: "main", minor: "minor" };
-  var LAYER_TONE = { setup: "low", tests: "ok", data: "r2", logic: "med", api: "r3", UI: "high", infra: "warn", checks: "low", docs: "low", other: "low" };
-  var LAYER_ORDER = ["UI", "api", "logic", "data", "infra", "tests", "setup", "checks", "docs", "other"];
+  var LAYER_TONE = { setup: "low", tests: "ok", data: "r2", logic: "med", api: "r3", UI: "high", infra: "warn", code: "r4", copy: "r5", checks: "low", docs: "low", other: "low" };
+  var LAYER_ORDER = ["UI", "api", "logic", "code", "data", "infra", "tests", "setup", "checks", "copy", "docs", "other"];
   var PLAN_RANK = 1.5;
 
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }

@@ -258,7 +258,7 @@
       "properties": {
         "n": { "type": "integer", "minimum": 1 },
         "title": { "$ref": "#/$defs/line" },
-        "layer": { "enum": ["setup", "tests", "data", "logic", "api", "UI", "infra", "checks", "docs", "other"] },
+        "layer": { "enum": ["setup", "tests", "data", "logic", "api", "UI", "infra", "code", "copy", "checks", "docs", "other"] },
         "files": { "type": "integer", "minimum": 0 },
         "subs": {
           "type": "array",

@@ -498,5 +498,65 @@ class TestRealU4Records(Base):
             self.assertIn("The design you approved", render(end)["summary"])
 
 
+class TestLayers(unittest.TestCase):
+    """layer_of: neutral fixtures, a Unit that names its steps by feature."""
+
+    @staticmethod
+    def layer(title, body="", files=()):
+        import unit_bundle
+        return unit_bundle.layer_of(title, body, files)
+
+    def test_a_feature_named_unit_has_no_other(self):
+        steps = [
+            ("Folder and runner check", "Create `Sources/Widget/` and run the test command once.", ["Sources/Widget/"]),
+            ("Widget requests: tests", "", []), ("Widget requests: implement", "Edit `Sources/Widget/Requests.swift`.", ["Sources/Widget/Requests.swift"]),
+            ("Commands: tests", "", []), ("Commands: implement", "", []),
+            ("Row: tests", "", []), ("Row: implement", "", []),
+            ("Column: tests", "", []), ("Column: implement", "", []),
+            ("Shell: tests", "", []), ("Shell: implement (under the exceptions)", "", []),
+            ("Copy", "Add the keys to `Resources/Localizable.xcstrings`.", ["Resources/Localizable.xcstrings"]),
+            ("Build, lint and the full unit run", "Run the full suite and the linter.", []),
+            ("Documentation and traceability", "Update `docs/notes.md`.", ["docs/notes.md"]),
+        ]
+        got = [self.layer(*s) for s in steps]
+        counts = {k: got.count(k) for k in set(got)}
+        self.assertEqual(counts, {"code": 5, "tests": 5, "copy": 1, "setup": 1, "checks": 1, "docs": 1})
+
+    def test_web_style_titles_are_unchanged(self):
+        for title, want in (("Project structure and branch", "setup"), ("Slot rules (business logic)", "logic"), ("Order endpoint", "api"),
+                            ("Order page", "UI"), ("Slot calendar storage", "data"), ("Deploy pipeline", "infra"),
+                            ("Tests for the rules", "tests"), ("Build and lint", "checks"), ("Documentation", "docs"),
+                            ("Reminder job", "other")):
+            self.assertEqual(self.layer(title), want, title)
+
+    def test_the_body_decides_when_the_title_does_not(self):
+        self.assertEqual(self.layer("Reminder job", "Edit `src/jobs/reminder.py`."), "code")
+        self.assertEqual(self.layer("Reminder job", "Edit `tests/test_reminder.py`."), "tests")
+        self.assertEqual(self.layer("Reminder job", "Add keys to `locales/en.json`."), "copy")
+        self.assertEqual(self.layer("Reminder job", "Edit `README.md`."), "docs")
+        self.assertEqual(self.layer("Reminder job", "Think about it."), "other")
+
+    def test_a_weak_title_word_yields_to_the_files_but_a_specific_one_does_not(self):
+        self.assertEqual(self.layer("Check the focus handling", "Edit `Sources/Focus.swift`."), "code")
+        self.assertEqual(self.layer("Check the focus handling", "Run it."), "checks")
+        self.assertEqual(self.layer("Order page", "Edit `Sources/Page.swift`."), "UI")
+        self.assertEqual(self.layer("Folder and runner check", "Edit `Sources/Main.swift`."), "setup")
+
+
+class TestOldBundleDiff(unittest.TestCase):
+    def test_a_rederived_layer_is_not_a_change(self):
+        import unit_bundle
+        def bundle(layer):
+            return {"header": {"revision": 2}, "sections": [], "plan": {"steps": [
+                {"n": 1, "title": "Row: implement", "layer": layer, "files": 1, "subs": [{"text": "a"}], "implements": []},
+                {"n": 2, "title": "Row: tests", "layer": "tests", "files": 1, "subs": [{"text": "b"}], "implements": []}]}}
+        old, new = bundle("other"), bundle("code")
+        unit_bundle.mark_revisions(new, old)
+        self.assertNotIn("rev", new["plan"]["steps"][0])
+        new["plan"]["steps"][0]["subs"][0]["text"] = "changed"
+        unit_bundle.mark_revisions(new, old)
+        self.assertEqual(new["plan"]["steps"][0]["rev"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()

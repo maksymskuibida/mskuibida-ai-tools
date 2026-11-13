@@ -22,7 +22,7 @@ INTENT = "260101-bakery-preorder"
 UNIT = "u2-pickup-slots"
 MAPS = [{"kind": "units", "url": "https://example.com/preview/maps-units#260101-bakery-preorder-units", "title": "Unit map"}, {"kind": "components", "url": "https://example.com/preview/maps-components#260101-bakery-preorder-components", "title": "Component map"}]
 LABELS = ["critical", "high", "medium", "medium", "low", "high", "low"]
-LAYERS = ["setup", "data", "logic", "logic", "api", "api", "UI", "UI", "tests", "tests", "checks", "docs"]
+LAYERS = ["setup", "data", "logic", "logic", "api", "api", "UI", "UI", "tests", "tests", "code", "checks", "copy", "docs"]
 
 
 def row(rid, title, label, rev, extra=None):
