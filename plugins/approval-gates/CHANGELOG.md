@@ -1,5 +1,17 @@
 # approval-gates changelog
 
+## 1.35.2
+
+Code plan steps are filed into layers by what they are (marketplace 1.57.1). Templates changed: `unit-gate.html` (two layer labels); `scripts/unit_bundle.py`.
+
+- **Two new layers, `code` and `copy`.** A step whose title says implement / implementation / code (or "build the X", "add a Y") is `code`, not `other`;
+  localisation and strings steps are `copy`. A project that names steps by feature no longer gets all its coding steps under "other".
+- **The body decides when the title does not.** The files a step names are read: source files are `code`, test files `tests`, `.xcstrings` / `.strings` /
+  `.po` / `locales/*.json` `copy`, `.md` and README `docs`. A specific title word (tests, setup, data, logic, api, UI, infra) still wins; the weak words
+  (build, check, lint, documentation) yield to the files. Folder and runner steps are `setup`, not `checks`. `other` is the last resort.
+- **A rebuilt round no longer shows every step as changed** because its layer was derived again: the round diff compares title, files, sub-steps and
+  references, not the derived layer.
+
 ## 1.35.1
 
 Fix round 2 of the pages (marketplace 1.57.0): the 16 minor findings of a second on-screen review. The look stays; the experience improves.

@@ -81,19 +81,66 @@ WAIVED = re.compile(r"^(waived|accepted|deferred|won'?t fix|wontfix)\b", re.I)
 SEVERITY_HINT = {"critical": "critical", "blocker": "critical", "major": "medium", "minor": "low", "nit": "low", "info": "low"}
 ID_TOKEN = re.compile(r"\b(?:[A-Z]{1,6}\d+(?:\.\d+)*|R-\d+|ADR-\d+|Q\d+)\b")
 DEFINED_ID = re.compile(r"^(?:[A-Z]{1,6}\d+(?:\.\d+)*|ADR-\d+)$")
-FILE_TOKEN = re.compile(r"`([^`\s]+\.[A-Za-z]{1,5})`")
+FILE_TOKEN = re.compile(r"`([^`\s]+\.(?:[A-Za-z]{1,5}|xcstrings|stringsdict))`")
 MAX_ROW_BYTES = 900_000
+# How a code-plan step is filed into a layer (`layer_of`). Precedence, first match wins:
+#   1. SPECIFIC title words: tests, setup, data, logic, api, UI, infra, copy. A title that names its subject beats the body.
+#   2. The title says "implement" / "code" / "build the X" (CODE_TITLE): the step is the code -> "code".
+#   3. WEAK title words ("build", "check", "lint", "configuration", "documentation"): the title only hints, so the
+#      files the step names go first. A step that names source, test, copy or docs files is filed by them
+#      ("Check the focus handling" that edits Swift is code, not checks); with no such file the word stands.
+#   4. The files the step names (BODY_ORDER: source -> code, tests, copy, docs), when no title word matched.
+#   5. "other" only when nothing matched at all.
+# Setup comes before the weak words on purpose: "Folder and runner check" creates a folder and proves the test command
+# runs; "check" there is no reason to file it under checks.
 LAYERS = (
     (re.compile(r"\btests?\b|test runner", re.I), "tests"),
-    (re.compile(r"project structure|setup|scaffold|branch", re.I), "setup"),
+    (re.compile(r"project structure|setup|scaffold|branch|\bfolders?\b|\bdirector(?:y|ies)\b|\brunner\b", re.I), "setup"),
     (re.compile(r"data access|storage|persistence|database|data model", re.I), "data"),
     (re.compile(r"business logic|domain|rules", re.I), "logic"),
     (re.compile(r"\bapi\b|endpoint|http|mcp|backend", re.I), "api"),
     (re.compile(r"frontend|\bui\b|component|screen|page", re.I), "UI"),
     (re.compile(r"infrastructure|deploy|ci\b|pipeline", re.I), "infra"),
+    (re.compile(r"^copy\b|locali[sz]|translation|\bi18n\b|\bl10n\b|\bstrings?\s+(?:catalog|file|table)\b|\.xcstrings", re.I), "copy"),
+)
+CODE_TITLE = re.compile(r"\bimplement(?:s|ed|ing|ation|ations)?\b|\bcode\b|^(?:build|write|add|create)\s+(?:the|a|an)\s", re.I)
+WEAK_LAYERS = (
     (re.compile(r"build|check|lint|configuration", re.I), "checks"),
     (re.compile(r"documentation|readme|docs", re.I), "docs"),
 )
+SOURCE_EXT = {"py", "js", "jsx", "ts", "tsx", "mjs", "cjs", "swift", "kt", "kts", "java", "go", "rs", "rb", "cs", "c", "cc", "cpp",
+              "h", "hpp", "m", "mm", "php", "scala", "vue", "svelte", "dart", "ex", "exs", "sql", "css", "scss", "html"}
+COPY_EXT = {"xcstrings", "strings", "stringsdict", "po", "pot", "arb", "xliff", "xlf", "resx"}
+DOCS_EXT = {"md", "mdx", "rst", "adoc"}
+STEP_FILE = re.compile(r"[\w@./-]+\.(?:" + "|".join(sorted(SOURCE_EXT | COPY_EXT | DOCS_EXT | {"json"}, key=len, reverse=True)) + r")\b")
+TEST_PATH = re.compile(r"(?:^|[/._-])tests?(?:[/._-]|$)|[a-z]Tests?(?:[/.]|$)|(?:^|[/._-])specs?(?:[/._-]|$)|__tests__", re.I)
+COPY_PATH = re.compile(r"(?:^|/)(?:locales?|i18n|l10n|translations?)/|\bi18n\b", re.I)
+
+
+def file_layer(path):
+    """The layer one named file points at: tests, copy, docs, code, or None (config, data files, unknown)."""
+    name = path.strip("`'\"()[]{}.,;:").lower()
+    ext = name.rsplit(".", 1)[-1] if "." in name else ""
+    if TEST_PATH.search(path) and ext in SOURCE_EXT | {"json"}:
+        return "tests"
+    if ext in COPY_EXT or (COPY_PATH.search(name) and ext in {"json", "yml", "yaml", "js", "ts"}):
+        return "copy"
+    if ext in DOCS_EXT or name.rsplit("/", 1)[-1].startswith("readme"):
+        return "docs"
+    if ext in SOURCE_EXT:
+        return "code"
+    return None
+
+
+BODY_ORDER = ("code", "tests", "copy", "docs")  # a step that names source files is the code, even when it also names a test
+
+
+def layer_from_files(text, files=()):
+    found = {file_layer(f) for f in set(files) | set(STEP_FILE.findall(text or ""))}
+    for layer in BODY_ORDER:
+        if layer in found:
+            return layer
+    return None
 
 
 class BundleError(Exception):
@@ -505,11 +552,15 @@ def parse_steps(path):
     return steps
 
 
-def layer_of(title):
+def layer_of(title, text="", files=()):
+    """The layer of a plan step; the precedence is written above LAYERS."""
     for pattern, layer in LAYERS:
         if pattern.search(title):
             return layer
-    return "other"
+    if CODE_TITLE.search(title):
+        return "code"
+    weak = next((layer for pattern, layer in WEAK_LAYERS if pattern.search(title)), None)
+    return layer_from_files(text, files) or weak or "other"
 
 
 def plan_steps(path, unit, defs, questions):
@@ -520,7 +571,7 @@ def plan_steps(path, unit, defs, questions):
         files = {m for m in FILE_TOKEN.findall(st["text"]) if "/" in m or "." in m}
         implements = [r for r in make_refs(text, defs, "code-generation", questions, limit=8)]
         out.append({
-            "n": i, "title": one_line(st["title"], 120), "layer": layer_of(st["title"]), "files": len(files),
+            "n": i, "title": one_line(st["title"], 120), "layer": layer_of(st["title"], st["text"], files), "files": len(files),
             "subs": [{"text": s[:4000]} for s in st["subs"]] or [{"text": st["title"]}],
             "implements": implements,
             "source": {"path": rel(path, unit.project), "key": "step:" + gate_bundle.slugify(st["title"]), "digest": digest(st["title"], *st["subs"])},
@@ -909,7 +960,9 @@ def mark_revisions(bundle, previous):
                     sub.pop("rev", None)
             else:
                 sub["rev"] = revision
-        same = old and content(old, ("title", "layer", "files", "implements")) == content(st, ("title", "layer", "files", "implements")) \
+        # Not "layer": it is derived from the title, the files and the sub-steps, which are all compared here. A bundle drafted by an
+        # older plugin version filed the same step differently; comparing it would show every step as changed.
+        same = old and content(old, ("title", "files", "implements")) == content(st, ("title", "files", "implements")) \
             and [s["text"] for s in old["subs"]] == [s["text"] for s in st["subs"]]
         if same:
             for k in ("rev", "revKind", "revNote"):

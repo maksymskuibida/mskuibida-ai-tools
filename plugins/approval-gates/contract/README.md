@@ -106,8 +106,8 @@ schema file itself, so the two cannot drift. Keep to that subset when the schema
 {n, title, layer, files, subs[] {text, rev?}, implements[] (refs), rev?, revKind?, revNote?, source?}
 ```
 
-Steps stay in build order: `n` is 1, 2, 3 …. `layer` is one of setup, tests, data, logic, api, UI, infra, checks, docs
-or other. `files` is how many files the step touches. `implements` lists the design points the step implements, as
+Steps stay in build order: `n` is 1, 2, 3 …. `layer` is one of setup, tests, data, logic, api, UI, infra, code, copy, checks, docs
+or other (code: a step that implements a feature by name; copy: localisation and strings; other: nothing matched). `files` is how many files the step touches. `implements` lists the design points the step implements, as
 references. A sub-step's own `rev` marks the exact sub-step a revision changed.
 
 ## Rules the schema cannot say (checked by the validator)
