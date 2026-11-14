@@ -224,6 +224,19 @@ def decisions(rnd):
     return "# Decisions\n\n" + "".join(f"## ADR-{i:03d} {pick(TOPICS, 'adr', i).capitalize()}\n\n**Status:** accepted\n\n**Context.** {para(('adr', i), 2)}\n\n**Decision.** {sentence(('d', i))}\n\n" for i in range(1, n + 1))
 
 
+def bolt_plan(rnd):
+    """A bolt plan written the short way: `## B1 name (U1)` headings, a Sequence table, and the sections a plan also has."""
+    names = ["walking skeleton", "bakery and slots", "loaf catalogue", "order page", "stock check", "baker list", "reminder job", "pick-up slot calendar",
+             "order history", "admin screens", "start on boot"]
+    out = ["# Bolt plan\n\nEleven bolts, each shippable on its own.\n\n## Sequence\n\n| Bolt | Unit | Line | Starts when | Can run beside |\n|---|---|---|---|---|\n"]
+    for i, name in enumerate(names, 1):
+        out.append(f"| B{i} | U{i} {name} | {pick(['both', 'api', 'web'], i)} | {'now' if i == 1 else 'B' + str(i - 1) + ' is done'} | {'nothing' if i % 3 else 'B' + str(max(1, i - 2))} |\n")
+    for i, name in enumerate(names, 1):
+        out.append(f"\n## B{i} {name} (U{i})\n\n- **Done when**: {sentence(('bd', i))}\n- **Confidence hypothesis**: {sentence(('bh', i, rnd if i == 3 else 1))}\n- **Expected demo**: {sentence(('be', i))}\n")
+    out.append(f"\n## Not a Bolt\n\n{sentence(('nb', 1))}\n\n## Sources\n\n- FR1, US1.1\n")
+    return "".join(out)
+
+
 def build_and_test(rnd):
     """(summary, results): 48 targets over four Units in the summary; u2:NFR7 is listed in the results file too, with another verdict."""
     out = ["# Build and Test Summary: bakery pre-order, first version\n\n## Target Verification Matrix\n\nEvidence codes: **A** the API tests, **AP** the speed tests, **W** the web tests, **H** by hand.\n"]
@@ -283,6 +296,8 @@ def documents(slug, produces, rnd, unit=False):
             out[key] = code_plan(rnd)
         elif key == "decisions":
             out[key] = decisions(rnd)
+        elif key == "bolt-plan":
+            out[key] = bolt_plan(rnd)
         else:
             out[key] = generic(slug, key, rnd, with_flow=(rnd_of(slug, key) % 3 == 0))
     return out

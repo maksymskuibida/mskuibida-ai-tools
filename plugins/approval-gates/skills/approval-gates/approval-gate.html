@@ -3258,10 +3258,10 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
       first.remove();
     }
   }
-  /* Every H2 (or H1 when there are several) starts a collapsible section. */
+  /* Every H2 (or H1 when there are several, or H3 when the file has no H2) starts a collapsible section, each with its own read mark; a file with no headings stays one block. */
   function sectionize(root, d, expand, level) {
     const kids = [...root.childNodes];
-    level = level || (kids.filter((n) => n.nodeType === 1 && n.tagName === "H2").length >= 1 ? "H2" : (kids.filter((n) => n.nodeType === 1 && n.tagName === "H1").length >= 2 ? "H1" : null));
+    level = level || (kids.filter((n) => n.nodeType === 1 && n.tagName === "H2").length >= 1 ? "H2" : (kids.filter((n) => n.nodeType === 1 && n.tagName === "H1").length >= 2 ? "H1" : (kids.filter((n) => n.nodeType === 1 && n.tagName === "H3").length >= 1 ? "H3" : null)));
     if (!level) return;
     const out = document.createDocumentFragment(); let cur = null, n = 0, lead = null;
     const flush = () => { if (cur) { const cnt = cur.secbody.querySelectorAll("p, li, tr, pre").length; cur.querySelector(".cnt").textContent = cnt ? cnt + " items" : ""; } };
@@ -3923,18 +3923,33 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
   }
 
   /* --- bolt plan: a strip of bolts, then each section --- */
+  const BOLT_HEAD = /^(?:bolt\s*|b)(\d+)(?=$|[\s:.—–-])/i;  /* "B1 name", "Bolt 1: name", "B1 — name", "B1. name"; not "Background" or "B1x" */
   function viewBolts(d) {
-    let secs = splitHeadings(d.text, "##"); let bolts = secs.filter((s) => /^bolt\s*\d+/i.test(s.title));
+    let secs = splitHeadings(d.text, "##"); let bolts = secs.filter((s) => BOLT_HEAD.test(s.title));
     if (!bolts.length) { /* bolts as H3 under milestone H2s: flatten to one list, each bolt tagged with its milestone */
-      const flat = [secs[0]]; secs.slice(1).forEach((s) => { const inner = splitHeadings(s.body, "###"); const hits = inner.filter((x) => /^bolt\s*\d+/i.test(x.title)); if (hits.length) { if (inner[0].body.trim()) flat.push({ title: s.title, body: inner[0].body }); hits.forEach((x) => flat.push(Object.assign(x, { group: s.title }))); } else flat.push(s); });
-      secs = flat; bolts = secs.filter((s) => /^bolt\s*\d+/i.test(s.title)); if (!bolts.length) return null;
+      const flat = [secs[0]]; secs.slice(1).forEach((s) => { const inner = splitHeadings(s.body, "###"); const hits = inner.filter((x) => BOLT_HEAD.test(x.title)); if (hits.length) { if (inner[0].body.trim()) flat.push({ title: s.title, body: inner[0].body }); hits.forEach((x) => flat.push(Object.assign(x, { group: s.title }))); } else flat.push(s); });
+      secs = flat; bolts = secs.filter((s) => BOLT_HEAD.test(s.title)); if (!bolts.length) return null;
     }
     const root = wrap(); const lead = stripH1(secs[0].body).trim(); if (lead) root.appendChild(mdBlocks(d, lead, false, 0));
-    const info = bolts.map((b) => { const units = (b.body.match(/\*\*Units:?\*\*:?\s*([^\n]*)/) || [])[1] || ""; const pts = parseInt((b.body.match(/(\d+)\s*(?:story\s*)?points?\b/i) || [])[1] || "0"); const count = parseInt((units.match(/^\s*(\d+)/) || [])[1] || "") || (b.body.match(/^\|\s*\d+\s*\|/gm) || []).length || (units.match(/\bU\d+\b/g) || []).length; return { title: b.title, pts, count }; });
+    /* a Sequence table (Bolt | Unit | Line | Starts when | Can run beside), when the plan has one, gives each bolt's line and what it can run beside */
+    const seq = {}; secs.slice(1).forEach((s) => { mdLines(s.body).forEach((l) => { const c = l.split("|").map((x) => x.trim().replace(/[`*]/g, "")); if (c.length >= 4 && c[0] === "") { const m = (c[1] || "").match(BOLT_HEAD); if (m) seq[+m[1]] = { line: c[3] || "", beside: c[5] || "" }; } }); });
+    const info = bolts.map((b) => {
+      const num = +(b.title.match(BOLT_HEAD) || [])[1];
+      const units = (b.body.match(/\*\*Units?:?\*\*:?\s*([^\n]*)/) || [])[1] || ""; const inTitle = (b.title.match(/\(([^)]*\bU\d+[^)]*)\)/) || [])[1] || "";
+      const pts = parseInt((b.body.match(/(\d+)\s*(?:story\s*)?points?\b/i) || [])[1] || "0");
+      const count = parseInt((units.match(/^\s*(\d+)/) || [])[1] || "") || (b.body.match(/^\|\s*\d+\s*\|/gm) || []).length || (units.match(/\bU\d+\b/g) || []).length || (inTitle.match(/\bU\d+\b/g) || []).length;
+      const sq = seq[num] || {}; const beside = sq.beside && !/^(nothing|none|-|—)$/i.test(sq.beside) ? "beside " + sq.beside : "";
+      return { title: b.title, pts, count, line: sq.line && !/^both$/i.test(sq.line) ? sq.line : "", beside };
+    });
     const max = Math.max(1, ...info.map((i) => i.pts));
-    root.insertAdjacentHTML("beforeend", `<div class="bolts">${info.map((i) => `<div class="bolt"><b>${inline(i.title)}</b><span class="hint">${i.count ? i.count + " units" : ""}${i.pts ? ` · ${i.pts} points` : ""}</span>${i.pts ? `<div class="bar"><i style="width:${Math.round(100 * i.pts / max)}%"></i></div>` : ""}</div>`).join("")}</div>`);
-    let n = 10;
-    secs.slice(1).forEach((s) => { if (!s.title) return; const isBolt = /^bolt\s*\d+/i.test(s.title); const sec = section(d, n++, s.title, isBolt); if (s.group) sec.querySelector("summary").insertAdjacentHTML("beforeend", `<span class="chip muted" data-tip="${esc("Under the heading " + s.group)}">${esc(s.group)}</span>`); const facts = isBolt ? factsOf(s.body) : []; const rest = isBolt ? stripFacts(s.body) : s.body; if (facts.length) sec.secbody.insertAdjacentHTML("beforeend", `<dl class="facts">${facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${inline(v)}</dd>`).join("")}</dl>`); sec.secbody.appendChild(mdDiv(rest)); if (isBolt) { const m = s.title.match(/^(Bolt)\s*(\d+)/i); if (m) regRef("Bolt " + m[2], sec, s.title); sec.dataset.elem = "1"; } root.appendChild(sec); });
+    root.insertAdjacentHTML("beforeend", `<div class="bolts">${info.map((i) => `<div class="bolt"><b>${inline(i.title)}</b><span class="hint">${[i.count ? i.count + (i.count === 1 ? " unit" : " units") : "", i.pts ? i.pts + " points" : "", i.line, i.beside].filter(Boolean).map(esc).join(" · ")}</span>${i.pts ? `<div class="bar"><i style="width:${Math.round(100 * i.pts / max)}%"></i></div>` : ""}</div>`).join("")}</div>`);
+    /* the bolts are built first, so a reference to B3 lands on the bolt, not on the row of the Sequence table that names it */
+    const made = [];
+    const build = (s, n) => { const isBolt = BOLT_HEAD.test(s.title); const sec = section(d, n, s.title, isBolt); if (s.group) sec.querySelector("summary").insertAdjacentHTML("beforeend", `<span class="chip muted" data-tip="${esc("Under the heading " + s.group)}">${esc(s.group)}</span>`); const facts = isBolt ? factsOf(s.body) : []; const rest = isBolt ? stripFacts(s.body) : s.body; if (facts.length) sec.secbody.insertAdjacentHTML("beforeend", `<dl class="facts">${facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${inline(v)}</dd>`).join("")}</dl>`); sec.secbody.appendChild(mdDiv(rest)); if (isBolt) { const m = s.title.match(BOLT_HEAD); if (m) { regRef("Bolt " + m[1], sec, s.title); regRef("B" + m[1], sec, s.title); } sec.dataset.elem = "1"; } else if (!sec.secbody.querySelector("table")) sec.dataset.elem = "1";  /* a section that is not a bolt has its own mark too, unless a table in it has one per row */
+      made[n] = sec; };
+    const todo = secs.slice(1).filter((s) => s.title).map((s, k) => [s, 10 + k]);
+    todo.filter(([s]) => BOLT_HEAD.test(s.title)).concat(todo.filter(([s]) => !BOLT_HEAD.test(s.title))).forEach(([s, n]) => build(s, n));
+    made.forEach((sec) => { if (sec) root.appendChild(sec); });
     return root;
   }
 

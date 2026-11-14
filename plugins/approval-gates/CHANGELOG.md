@@ -1,5 +1,17 @@
 # approval-gates changelog
 
+## 1.35.3
+
+Short bolt headings get the bolt view, and a document with no view of its own is read by section (marketplace 1.57.2). Templates changed: `approval-gate.html` only.
+
+- **`## B1 name (U1)` is a bolt.** The bolt view took only `Bolt 1: …` headings, so a plan that numbered its bolts `B1`…`B11` fell back to plain markdown.
+  It now accepts `B<n>` and `Bolt <n>`, with `:`, `—`, `–`, `-`, `.` or a space after the number (a heading such as "Background" is not a bolt), as H2
+  or as H3 under milestone H2s. The Unit is read from the title (`(U1)`) or the body; a `Sequence` table (Bolt | Unit | Line | Starts when | Can run
+  beside) adds each bolt's line and what it can run beside to the strip. B1 and Bolt 1 both resolve as references, and a reference lands on the bolt, not on
+  the Sequence row that names it. A section of the plan that is not a bolt (Not a Bolt, Sources) has its own read dot.
+- **A file with only H3 headings is read by section.** A plain document already had one read dot per H2 section (H1 when there are several); a file with
+  no H2 had none. Its H3 headings are now its sections, each with a dot, read marks, the Unread filter and the round diff. A file with no headings stays one block.
+
 ## 1.35.2
 
 Code plan steps are filed into layers by what they are (marketplace 1.57.1). Templates changed: `unit-gate.html` (two layer labels); `scripts/unit_bundle.py`.
