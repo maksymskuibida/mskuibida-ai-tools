@@ -1709,6 +1709,9 @@ tr.frow.sorted td { color: var(--muted); }
 .fcard .need { font-size: 12px; color: var(--crit-fg); }
 .fcarried { margin: 10px 0 0; font-size: 13px; color: var(--muted); }
 /* ---- At a glance: the stage item by item. Tiles, then coverage per kind, the trace, then one lane per kind ---- */
+.bolt-rp { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; background: var(--surface); }
+.bolt-rp.lf { border-left-color: var(--warn-fg); }
+.bolt-rp .isum { margin: 6px 0 0; font-weight: 600; }
 .digest .body { display: grid; gap: 18px; padding: 4px 14px 16px; }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
 .tile { display: grid; gap: 4px; align-content: start; padding: 10px 12px; border-radius: 10px; background: var(--raised); border: 1px solid var(--line-soft); min-width: 0; }
@@ -3924,6 +3927,12 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
 
   /* --- bolt plan: a strip of bolts, then each section --- */
   const BOLT_HEAD = /^(?:bolt\s*|b)(\d+)(?=$|[\s:.—–-])/i;  /* "B1 name", "Bolt 1: name", "B1 — name", "B1. name"; not "Background" or "B1x" */
+  /* the agent's review point of a bolt (a digest item B<n>): summary, label, look-first, what it relates to; drawn in the bolt's own section */
+  function boltReviewPoint(id) {
+    const it = ((view.gate && view.gate.digest && view.gate.digest.items) || []).find((i) => i.kind === "bolt" && i.id === id); if (!it || !it.summary) return "";
+    const L = LABEL[it.label]; const rel = [...new Set(it.relates || it.mentions || [])];
+    return `<div class="bolt-rp${it.lookFirst ? " lf" : ""}" data-bolt-item="${esc(it.id)}"><div class="imeta"><span class="kind">Review point</span>${L ? `<span class="tag" ${toneOf(L[1])} data-tip="${esc(L[2])}">${esc(L[0])}</span>` : ""}${it.lookFirst ? '<span class="tag" data-tip="Claude marked this for your first look">look first</span>' : ""}</div><p class="isum">${inline(it.summary)}</p>${rel.length ? `<div class="rel"><span>Relates to</span>${rel.map((m) => `<span class="chip">${esc(m)}</span>`).join("")}</div>` : ""}</div>`;
+  }
   function viewBolts(d) {
     let secs = splitHeadings(d.text, "##"); let bolts = secs.filter((s) => BOLT_HEAD.test(s.title));
     if (!bolts.length) { /* bolts as H3 under milestone H2s: flatten to one list, each bolt tagged with its milestone */
@@ -3945,7 +3954,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     root.insertAdjacentHTML("beforeend", `<div class="bolts">${info.map((i) => `<div class="bolt"><b>${inline(i.title)}</b><span class="hint">${[i.count ? i.count + (i.count === 1 ? " unit" : " units") : "", i.pts ? i.pts + " points" : "", i.line, i.beside].filter(Boolean).map(esc).join(" · ")}</span>${i.pts ? `<div class="bar"><i style="width:${Math.round(100 * i.pts / max)}%"></i></div>` : ""}</div>`).join("")}</div>`);
     /* the bolts are built first, so a reference to B3 lands on the bolt, not on the row of the Sequence table that names it */
     const made = [];
-    const build = (s, n) => { const isBolt = BOLT_HEAD.test(s.title); const sec = section(d, n, s.title, isBolt); if (s.group) sec.querySelector("summary").insertAdjacentHTML("beforeend", `<span class="chip muted" data-tip="${esc("Under the heading " + s.group)}">${esc(s.group)}</span>`); const facts = isBolt ? factsOf(s.body) : []; const rest = isBolt ? stripFacts(s.body) : s.body; if (facts.length) sec.secbody.insertAdjacentHTML("beforeend", `<dl class="facts">${facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${inline(v)}</dd>`).join("")}</dl>`); sec.secbody.appendChild(mdDiv(rest)); if (isBolt) { const m = s.title.match(BOLT_HEAD); if (m) { regRef("Bolt " + m[1], sec, s.title); regRef("B" + m[1], sec, s.title); } sec.dataset.elem = "1"; } else if (!sec.secbody.querySelector("table")) sec.dataset.elem = "1";  /* a section that is not a bolt has its own mark too, unless a table in it has one per row */
+    const build = (s, n) => { const isBolt = BOLT_HEAD.test(s.title); const sec = section(d, n, s.title, isBolt); if (s.group) sec.querySelector("summary").insertAdjacentHTML("beforeend", `<span class="chip muted" data-tip="${esc("Under the heading " + s.group)}">${esc(s.group)}</span>`); const facts = isBolt ? factsOf(s.body) : []; const rest = isBolt ? stripFacts(s.body) : s.body; if (isBolt) { const bm = s.title.match(BOLT_HEAD); const rp = bm ? boltReviewPoint("B" + bm[1]) : ""; if (rp) sec.secbody.insertAdjacentHTML("beforeend", rp); } if (facts.length) sec.secbody.insertAdjacentHTML("beforeend", `<dl class="facts">${facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${inline(v)}</dd>`).join("")}</dl>`); sec.secbody.appendChild(mdDiv(rest)); if (isBolt) { const m = s.title.match(BOLT_HEAD); if (m) { regRef("Bolt " + m[1], sec, s.title); regRef("B" + m[1], sec, s.title); } sec.dataset.elem = "1"; } else if (!sec.secbody.querySelector("table")) sec.dataset.elem = "1";  /* a section that is not a bolt has its own mark too, unless a table in it has one per row */
       made[n] = sec; };
     const todo = secs.slice(1).filter((s) => s.title).map((s, k) => [s, 10 + k]);
     todo.filter(([s]) => BOLT_HEAD.test(s.title)).concat(todo.filter(([s]) => !BOLT_HEAD.test(s.title))).forEach(([s, n]) => build(s, n));
@@ -5103,8 +5112,8 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
   /* ---------- At a glance: the stage item by item (gate_bundle.py writes `digest`; scripts/digest.py) ---------- */
   const dg = () => (view.gate && view.gate.digest && ((view.gate.digest.items || []).length || (view.gate.digest.trace || []).length)) ? view.gate.digest : null;
   const KIND_NAMES = { requirement: ["Requirements", "requirement", "requirements"], nfr: ["Non-functional requirements", "NFR", "NFRs"], rule: ["Business rules", "rule", "rules"], decision: ["Decisions", "decision", "decisions"], story: ["Stories", "story", "stories"],
-    unit: ["Units", "Unit", "Units"], component: ["Components", "component", "components"] };
-  const KIND_ORDER = ["requirement", "nfr", "rule", "decision", "story", "unit", "component"];
+    unit: ["Units", "Unit", "Units"], bolt: ["Bolts", "bolt", "bolts"], component: ["Components", "component", "components"] };
+  const KIND_ORDER = ["requirement", "nfr", "rule", "decision", "story", "unit", "bolt", "component"];
   const kindName = (k, n) => n === 1 ? KIND_NAMES[k][1] : KIND_NAMES[k][2];  /* the right plural: stories, not storys */
   const itemKeys = () => Object.keys(view.hashes).filter((k) => k.startsWith("item:") || k.startsWith("finding:"));
   const itemProgress = () => { const keys = itemKeys(); return { total: keys.length, read: keys.filter((k) => isRead(k)).length }; };
@@ -5208,7 +5217,7 @@ li.rv-addblk, td.rv-addblk, th.rv-addblk { padding-left: 8px; }
     "not-ready": ["Not ready", "warn", "Claude would not approve this as it stands; the points below say why"] };
   const LABEL = { critical: ["critical", "crit", "Wrong data, security, or hard to undo if this is wrong"], high: ["high", "high", "Wrong behaviour people would see if this is wrong"],
     medium: ["medium", "med", "Rework in this stage or Unit if this is wrong"], low: ["low", "low", "Cosmetic or internal if this is wrong"] };
-  const KIND_SHORT = { requirement: "Requirement", nfr: "NFR", rule: "Rule", decision: "Decision", story: "Story" };
+  const KIND_SHORT = { requirement: "Requirement", nfr: "NFR", rule: "Rule", decision: "Decision", story: "Story", bolt: "Bolt", unit: "Unit" };
   const ORIGIN = { stage: ["Stage definition", "Stage rule", "The engine's own definition of this stage"], review: ["Reviewer's checklist", "Review check", "What the stage's reviewer checks"],
     rule: ["Project rules", "Project rule", "A settled rule of this project (its memory files)"], earlier: ["Earlier stages", "Earlier stage", "What an earlier, approved stage settled"] };
   const CVERDICT = { holds: ["Holds", "ok"], fails: ["Fails", "crit"], "n/a": ["Not relevant", "low"] };

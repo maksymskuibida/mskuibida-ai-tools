@@ -225,7 +225,8 @@ def decisions(rnd):
 
 
 def bolt_plan(rnd):
-    """A bolt plan written the short way: `## B1 name (U1)` headings, a Sequence table, and the sections a plan also has."""
+    """A bolt plan written the short way: `## B1 name (U1)` headings, a Sequence table, and the sections a plan also has.
+    Each bolt is a review item (digest.py, 1.35.4): the preview's judge gives each a summary and a label, and the bolt view shows them in the bolt."""
     names = ["walking skeleton", "bakery and slots", "loaf catalogue", "order page", "stock check", "baker list", "reminder job", "pick-up slot calendar",
              "order history", "admin screens", "start on boot"]
     out = ["# Bolt plan\n\nEleven bolts, each shippable on its own.\n\n## Sequence\n\n| Bolt | Unit | Line | Starts when | Can run beside |\n|---|---|---|---|---|\n"]

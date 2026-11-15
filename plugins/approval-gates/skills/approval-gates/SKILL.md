@@ -62,7 +62,7 @@ the stage has a reviewer:
      NEVER / ALWAYS bullet of the memory files that apply), and what earlier stages settled (`earlier-<artifact>`: one per
      document the stage consumes).
    - The rest is as before: the gate's `ids` (`aidlc_ids.py sync`, then `refs` with `--near`; leave them as written), the
-     stage's items one by one (requirements, NFRs, rules, decisions, stories; whole, never clipped; a rule from its YAML
+     stage's items one by one (requirements, NFRs, rules, decisions, stories, and at Delivery Planning each bolt of the bolt plan, `B1`, `B2` …, with its Units, done-when and demo, each needing its own summary, label and lookFirst in judgment.json; whole, never clipped; a rule from its YAML
      source of truth), `buildTest` for the Build and Test stage, and the finding cards with `--findings` (§ 2a).
    - **Nothing traced is left unhandled in silence**: when the stage's traceability.json has a row that is not covered, or
      a requirement or NFR that no row covers, draft refuses and names each one. Write a JSON file `{"<id>": {"text": "…",

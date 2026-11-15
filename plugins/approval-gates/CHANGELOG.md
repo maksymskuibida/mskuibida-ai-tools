@@ -1,5 +1,18 @@
 # approval-gates changelog
 
+## 1.35.4
+
+Each bolt of a Delivery Planning bolt plan is a review item (marketplace 1.57.3). Scripts changed: `digest.py`, `judgment.py`; template: `approval-gate.html`.
+
+- **Bolts are items.** In the `bolt-plan` document, each `## B1 name (U1)` / `## Bolt 1: name` heading (H2, or H3 under milestone H2s) becomes an item `B1`
+  of kind `bolt`: the title without the Unit parentheses, the Units it names (title or `**Units:**`), its done-when, confidence hypothesis and demo bullets
+  as `fields`, its row of the `Sequence` table as `order`, and the requirements and stories it mentions. The draft asks for a summary, a label and a
+  lookFirst per bolt in `judgment.json`, and finalize refuses a blank one, like every other kind. Before, such a plan gave `items: {}` and the page had no
+  review points.
+- **The review point sits in the bolt.** The bolt view draws each bolt's summary, label, look-first mark and what it relates to at the top of the bolt's own
+  section; the items block lists the bolts too, so look-first bolts appear in its tiers. Read dots and B1/Bolt 1 references are unchanged.
+- **A bolt plan is not folded away.** The draft no longer suggests `covered` for it (the bolt items hold most of its text): it stays shown in its bolt view.
+
 ## 1.35.3
 
 Short bolt headings get the bolt view, and a document with no view of its own is read by section (marketplace 1.57.2). Templates changed: `approval-gate.html` only.

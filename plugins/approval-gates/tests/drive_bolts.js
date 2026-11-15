@@ -67,7 +67,20 @@ async function plain() {
     flatDots: bb.querySelectorAll("[data-eread]").length };
 }
 
+/* each bolt's review point, drawn inside its own section of the bolt view; the read dots of 1.35.3 stay */
+async function items() {
+  const { w, errors } = boot(fileA); await wait(900);
+  const b = w.document.querySelector("#d-bolt-plan");
+  if (!b) return { errors, found: false };
+  const points = [...b.querySelectorAll(".bolt-rp")].map((p) => ({
+    bolt: p.dataset.boltItem, in: (p.closest("details.sec") || {}).dataset ? p.closest("details.sec").dataset.title : "",
+    summary: text(p.querySelector(".isum")), label: text(p.querySelector(".tag")), lookFirst: p.classList.contains("lf"),
+  }));
+  const listed = [...w.document.querySelectorAll("#itemsbody .irow .kind")].filter((k) => text(k) === "Bolt").length;
+  return { errors, found: true, points, listed, sections: secs(b), dots: b.querySelectorAll("[data-eread]").length, strip: b.querySelectorAll(".bolts .bolt").length };
+}
+
 (async () => {
-  const out = await ({ view, plain }[scenario])();
+  const out = await ({ view, plain, items }[scenario])();
   process.stdout.write(JSON.stringify(out)); process.exit(0);
 })();
