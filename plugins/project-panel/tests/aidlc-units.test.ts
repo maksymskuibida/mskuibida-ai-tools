@@ -1,7 +1,7 @@
 // Construction by Unit of work: the Units, their story points and their receipts in, one row per Unit out.
 import { test, expect, describe } from 'claude-code/testing'
 import { aidlc } from '../src/providers/aidlc'
-import { buildOrder, parseClaimRegistry, parseUnitDag, parseUnitEvents, parseUnitIndex, parseUnitMerged, parseUnitProgress, parseUnitScope, progressOf, startOf, unitStageStatuses, withReceipts } from '../src/providers/aidlc/units'
+import { buildOrder, parseClaimRegistry, parseUnitDag, parseGateEvents, parseUnitEvents, parseUnitGates, parseUnitIndex, parseUnitMerged, parseUnitProgress, parseUnitScope, progressOf, startOf, unitStageStatuses, withGates, withReceipts } from '../src/providers/aidlc/units'
 import type { Unit, UnitCell, UnitEvent, UnitFacts, UnitProgress } from '../src/providers/aidlc/units'
 import { cloudIdsOf, jiraServerOf, parsePointsCsv, storyPointsOf, withRows } from '../src/providers/aidlc/points'
 import { isResumedAfter } from '../src/providers/aidlc/park'
@@ -1140,5 +1140,94 @@ describe('Units told apart before they start: claimed, ready, blocked', () => {
     expect(unitList(await load(t)).items.find(item => item.id === 'unit:api-core')?.status).toBe('done')
     t.files[REGISTRY_PATH] = registry({ 'api-billing': 'claimed' }, 'another-uuid')
     expect(unitList(await load(t)).items.find(item => item.id === 'unit:api-billing')?.status).toBe('planned')
+  })
+})
+
+describe('the unit-end gate column of the Unit Progress table', () => {
+  const table = (cells: string, gate: string) =>
+    stateText().replace(
+      '## Current Status',
+      [
+        '## Unit Progress',
+        '',
+        '| unit | owner | functional-design | nfr-requirements | nfr-design | infrastructure-design | code-generation | gate | merged |',
+        '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+        `| api-billing | A | ${cells} | [${gate}] | [ ] |`,
+        '',
+        '## Current Status',
+      ].join('\n'),
+    )
+  const ROW = '[x] | [x] | [x] | [x] | [ ]'
+  const gateBlock = (at: string, event: string, stages = 'functional-design,code-generation') =>
+    ['## Gate', `**Timestamp**: ${at}`, `**Event**: ${event}`, '**Unit**: api-billing', `**Gate Stages**: ${stages}`, ''].join('\n')
+  const rejected = [
+    '# AI-DLC Audit Log', '', '---', '',
+    gateBlock('2026-10-03T09:00:00Z', 'GATE_REJECTED'), '---', '',
+    gateBlock('2026-10-03T09:00:01Z', 'STAGE_REVISING'), '---', '',
+  ].join('\n')
+  const unitRows = (...rows: [string, string, string][]) =>
+    audit(...rows.map(([at, event, stage]): [string, string, string, string] => [at, event, stage, 'api-billing'])).split('\n---\n\n').slice(1).join('\n---\n\n')
+  const world = (gate: string, ...rows: [string, string, string][]) =>
+    tree(table(ROW, gate), {
+      [`${INTENT_DIR}/audit/host-a.md`]: [rejected, audit(['2026-10-02T09:00:00Z', 'UNIT_COMPLETED', 'functional-design', 'api-billing']), unitRows(...rows)].join('\n---\n\n'),
+      [POINTS_PATH]: POINTS,
+      ...claimOf('api-billing'),
+    })
+  const stages = (model: PanelModel) => construction(model).items.map(item => [item.id, item.status])
+
+  test('parseUnitGates reads [R] and [?] from the gate column; a table without one names nothing', () => {
+    expect([...parseUnitGates(table(ROW, 'R'))]).toEqual([['api-billing', 'R']])
+    expect([...parseUnitGates(table(ROW, '?'))]).toEqual([['api-billing', '?']])
+    expect(parseUnitGates(table(ROW, 'x')).size).toBe(0)
+    const bare = ['## Unit Progress', '', '| unit | owner | functional-design |', '| --- | --- | --- |', '| u | A | [x] |', '', '## Current Status'].join('\n')
+    expect(parseUnitGates(bare).size).toBe(0)
+    // The gate column stays out of the per-stage reads.
+    expect([...(parseUnitProgress(table(ROW, 'R')).get('api-billing')?.keys() ?? [])]).toHaveLength(5)
+    expect([...parseUnitMerged(table(ROW, 'R'))]).toEqual([])
+  })
+
+  test('parseGateEvents reads the unit and its Gate Stages', () => {
+    expect(parseGateEvents(rejected)).toEqual([
+      { event: 'GATE_REJECTED', unit: 'api-billing', stages: ['functional-design', 'code-generation'], at: '2026-10-03T09:00:00Z' },
+      { event: 'STAGE_REVISING', unit: 'api-billing', stages: ['functional-design', 'code-generation'], at: '2026-10-03T09:00:01Z' },
+    ])
+  })
+
+  test('Request Changes: functional-design is revising and current, though its cell says done; code-generation re-runs', async () => {
+    const model = await load(world('R'))
+    expect(stages(model)).toEqual([['functional-design', 'revising'], ['nfr-requirements', 'done'], ['nfr-design', 'done'], ['infrastructure-design', 'done'], ['code-generation', 'planned']])
+    expect(construction(model).items.find(item => item.isCurrent)?.id).toBe('functional-design')
+    expect(unitList(model).items.find(item => item.id === 'unit:api-billing')).toMatchObject({ status: 'revising' })
+  })
+
+  test('the revision settles functional-design and starts code-generation: code-generation is current', async () => {
+    const model = await load(
+      world('R', ['2026-10-03T10:00:00Z', 'UNIT_STARTED', 'functional-design'], ['2026-10-03T11:00:00Z', 'UNIT_COMPLETED', 'functional-design'], ['2026-10-03T12:00:00Z', 'UNIT_STARTED', 'code-generation']),
+    )
+    expect(stages(model)[0]).toEqual(['functional-design', 'done'])
+    expect(stages(model)[4]).toEqual(['code-generation', 'revising'])
+    expect(construction(model).items.find(item => item.isCurrent)?.id).toBe('code-generation')
+  })
+
+  test('functional-design opened again and not yet settled stays the revising stage', async () => {
+    const model = await load(world('R', ['2026-10-03T10:00:00Z', 'UNIT_STARTED', 'functional-design']))
+    expect(stages(model)[0]).toEqual(['functional-design', 'revising'])
+    expect(stages(model)[4]).toEqual(['code-generation', 'planned'])
+  })
+
+  test('back at the gate ([?]): the Unit awaits its approval on the last gate stage', async () => {
+    const model = await load(
+      world('?', ['2026-10-03T10:00:00Z', 'UNIT_COMPLETED', 'functional-design'], ['2026-10-03T12:00:00Z', 'UNIT_COMPLETED', 'code-generation']),
+    )
+    expect(stages(model).at(-1)).toEqual(['code-generation', 'awaiting'])
+    expect(stages(model)[0]).toEqual(['functional-design', 'done'])
+    expect(unitList(model).items.find(item => item.id === 'unit:api-billing')).toMatchObject({ status: 'awaiting' })
+  })
+
+  test('without receipts the first stage the Unit runs is the one revising; a stage that holds its own [?] is left alone', () => {
+    const rows = new Map([['u', new Map<string, UnitCell>([['functional-design', 'S'], ['nfr-design', 'x'], ['code-generation', ' ']])]])
+    expect(withGates(rows, new Map([['u', 'R' as const]]), [], []).get('u')?.get('nfr-design')).toBe('R')
+    const own = new Map([['u', new Map<string, UnitCell>([['functional-design', '?'], ['code-generation', ' ']])]])
+    expect(withGates(own, new Map([['u', '?' as const]]), [], []).get('u')?.get('code-generation')).toBe(' ')
   })
 })

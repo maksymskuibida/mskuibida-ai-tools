@@ -242,6 +242,94 @@ export function parseUnitMerged(state: string): Set<string> {
 }
 
 /**
+ * The `gate` column of the `## Unit Progress` table by Unit: `?` (the Unit awaits its unit-end approval) or `R` (the owner
+ * asked for changes at it). Any other mark, and a table with no gate column, name nothing.
+ */
+export function parseUnitGates(state: string): Map<string, 'R' | '?'> {
+  const out = new Map<string, 'R' | '?'>()
+  const start = state.search(/^## Unit Progress[^\S\n]*$/m)
+  if (start < 0) return out
+  const rest = state.slice(start).split('\n').slice(1)
+  const end = rest.findIndex(line => /^## /.test(line))
+  const lines = (end < 0 ? rest : rest.slice(0, end)).filter(line => line.trim().startsWith('|'))
+  const split = (line: string) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim())
+  const header = lines[0] === undefined ? [] : split(lines[0]).map(cell => cell.toLowerCase())
+  const at = header.indexOf('gate')
+  if (header[0] !== 'unit' || at < 0) return out
+  for (const line of lines.slice(1)) {
+    const row = split(line)
+    const mark = /^\[(.)\]$/.exec(row[at] ?? '')?.[1]
+    if ((row[0] ?? '') !== '' && (mark === 'R' || mark === '?')) out.set(row[0] ?? '', mark)
+  }
+  return out
+}
+
+/** A GATE_REJECTED / STAGE_REVISING receipt: the stages the owner's Request Changes at a unit-end gate sends back. */
+export type GateEvent = { event: 'GATE_REJECTED' | 'STAGE_REVISING'; unit: string; stages: string[]; at: string }
+
+/** The GATE_REJECTED / STAGE_REVISING rows of one audit shard that name a Unit, in file order. */
+export function parseGateEvents(shard: string): GateEvent[] {
+  if (!shard.includes('GATE_REJECTED') && !shard.includes('STAGE_REVISING')) return []
+  const events: GateEvent[] = []
+  for (const block of shard.split(/^---\s*$/m)) {
+    const field = (key: string) => new RegExp(`^\\*\\*${key}\\*\\*:[^\\S\\n]*([^\\n]*)$`, 'm').exec(block)?.[1]?.trim() ?? ''
+    const event = field('Event')
+    if (event !== 'GATE_REJECTED' && event !== 'STAGE_REVISING') continue
+    const unit = field('Unit')
+    if (unit === '') continue
+    const stages = field('Gate Stages').split(',').map(stage => stage.trim()).filter(stage => PER_UNIT_STAGES.includes(stage))
+    events.push({ event, unit, stages, at: field('Timestamp') })
+  }
+  return events
+}
+
+/**
+ * The table with the unit-end gate folded in. With `gate_rhythm: unit-end` one gate covers several stages, and the engine
+ * leaves their cells as they were:
+ *  - gate `[?]`: the Unit awaits its approval, on the last stage the gate covers (`[?]` there).
+ *  - gate `[R]`: Request Changes. The Unit is revising: the stage it is on is `[R]`, the gate's later stages it re-runs
+ *    are not done until their new receipts settle them. The gate's stages are the latest rejection's `Gate Stages`, else
+ *    every stage the Unit runs. A stage the Unit settled since the rejection is done; the one it has open (else the first
+ *    unsettled one) is revising; the rest are `[ ]`.
+ * Per-stage cells outside the gate's stages, and skipped ones, stay as they are.
+ */
+export function withGates(
+  table: Map<string, Map<string, UnitCell>>,
+  gates: ReadonlyMap<string, 'R' | '?'>,
+  gateEvents: readonly GateEvent[],
+  events: readonly UnitEvent[],
+): Map<string, Map<string, UnitCell>> {
+  if (gates.size === 0) return table
+  const out = new Map(table)
+  for (const [unit, row] of table) {
+    const gate = gates.get(unit)
+    if (gate === undefined) continue
+    const live = PER_UNIT_STAGES.filter(stage => row.has(stage) && row.get(stage) !== 'S')
+    if (live.length === 0) continue
+    const mine = gateEvents.filter(event => event.unit === unit)
+    const rejected = mine.filter(event => event.event === 'GATE_REJECTED').at(-1) ?? mine.at(-1)
+    const named = (rejected?.stages ?? []).filter(stage => live.includes(stage))
+    const covered = named.length > 0 ? PER_UNIT_STAGES.filter(stage => named.includes(stage)) : live
+    // A stage already waiting on the person (or being revised) in its own cell is the table's to say.
+    if (live.some(stage => row.get(stage) === '?' || row.get(stage) === 'R')) continue
+    const next = new Map(row)
+    if (gate === '?') {
+      next.set(covered.at(-1) ?? '', '?')
+    } else {
+      const since = rejected?.at
+      const latestOf = (stage: string) => events.filter(event => event.unit === unit && event.stage === stage && (since === undefined || event.at > since)).at(-1)?.event
+      const isSettledSince = (stage: string) => since !== undefined && isSettled(latestOf(stage))
+      const isOpen = (stage: string) => latestOf(stage) !== undefined && !isSettled(latestOf(stage)) && latestOf(stage) !== 'UNIT_SKIPPED'
+      const unsettled = covered.filter(stage => !isSettledSince(stage))
+      const on = unsettled.find(isOpen) ?? unsettled[0]
+      for (const stage of covered) next.set(stage, isSettledSince(stage) ? 'x' : stage === on ? 'R' : ' ')
+    }
+    out.set(unit, next)
+  }
+  return out
+}
+
+/**
  * The table with what the receipts say since: the engine rewrites the table only when `/aidlc` routes, so a stage that
  * started after (`UNIT_STARTED`, `UNIT_RESUMED`, `UNIT_PAUSED` as its latest receipt) can still read `[ ]` there. Such
  * a cell becomes `[-]`. So does a `[x]` one: a stage re-opened after its approval (`aidlc engine jump reopen`) starts
@@ -309,6 +397,8 @@ export type UnitFacts = {
   builtByFiles: Set<string>
   /** Units with anything under construction/<unit>/, and the last per-unit stage that has a directory. */
   startedByFiles: Map<string, string>
+  /** Every shard's GATE_REJECTED / STAGE_REVISING rows that name a Unit, oldest first. */
+  gates?: GateEvent[]
 }
 
 /**
@@ -529,8 +619,11 @@ export async function readUnitFacts(fsx: Fsx, intentDir: string, units: readonly
   const auditDir = join(intentDir, 'audit')
   const shards = (await fsx.list(auditDir)).filter(entry => entry.kind === 'file' && entry.name.endsWith('.md'))
   const tagged: { event: UnitEvent; shard: number; pos: number }[] = []
+  const gates: GateEvent[] = []
   for (const [shard, entry] of shards.entries()) {
-    const rows = parseUnitEvents((await fsx.read(join(auditDir, entry.name))) ?? '')
+    const text = (await fsx.read(join(auditDir, entry.name))) ?? ''
+    gates.push(...parseGateEvents(text))
+    const rows = parseUnitEvents(text)
     rows.forEach((event, pos) => tagged.push({ event, shard, pos }))
   }
   tagged.sort((a, b) => (a.event.at !== b.event.at ? (a.event.at < b.event.at ? -1 : 1) : a.shard - b.shard || a.pos - b.pos))
@@ -548,5 +641,6 @@ export async function readUnitFacts(fsx: Fsx, intentDir: string, units: readonly
     const files = await Promise.all(LAST_STAGE_FILES.map(file => fsx.exists(join(lastDir, file))))
     if (files.every(Boolean)) builtByFiles.add(unit.name)
   }
-  return { events: tagged.map(one => one.event), builtByFiles, startedByFiles }
+  gates.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
+  return { events: tagged.map(one => one.event), builtByFiles, startedByFiles, gates }
 }
