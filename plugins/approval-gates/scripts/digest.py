@@ -8,7 +8,7 @@ gate_bundle.py calls `build(docs, ids, folder, handling)` and stores the result 
     trace:  {from, to, ok}
 
 - **Items** are the things a reviewer checks one by one: requirements (FR, REQ), NFRs, business rules (BR), decisions
-  (ADR) and stories (US, with their AC folded into the body). They are read from the entries of a fenced ```yaml block
+  (ADR) stories (US, with their AC folded into the body) and, in a Delivery Planning bolt plan, bolts (`## B1 title (U1)` / `## Bolt 1: title`: the Units it names, the done-when, confidence hypothesis and demo bullets as `fields`, its row of the Sequence table as `order`). They are read from the entries of a fenced ```yaml block
   (`- id: BR1.1`, the source of truth of rules.md; `format: "yaml"`, the body is the entry as written), a document's id
   tables (first column an id), `- **ID** text` bullets and `### ID Title` headings (the body is the lines under it, as
   written, criteria included). Nothing is clipped: the page shows the item whole when it is opened. Anything else stays
@@ -31,6 +31,10 @@ import handling
 # "U" comes last: US1.1 is a story, U1 a Unit; Units are items of Units Generation only (UNIT_DOCS), where they are what the stage defines
 KINDS = (("NFR", "nfr"), ("FR", "requirement"), ("REQ", "requirement"), ("BR", "rule"), ("ADR", "decision"), ("US", "story"), ("U", "unit"))
 UNIT_DOCS = ("unit-of-work",)
+BOLT_DOCS = ("bolt-plan",)  # the Delivery Planning document: each bolt in it is an item
+BOLT_HEADING = re.compile(r"^#{2,3}\s+(?:Bolt\s*|B)(\d+)(?=$|[\s:.—–-])[\s:.—–-]*(.*)$", re.I)
+BOLT_FIELDS = (("done", re.compile(r"done\s*when", re.I)), ("confidence", re.compile(r"confidence(?:\s*hypothesis)?", re.I)), ("demo", re.compile(r"(?:expected\s*)?demo", re.I)))
+UNIT_REF = re.compile(r"(?<![\w.-])U\d+(?![\w.-])")
 ITEM_ID = re.compile(r"^(?:NFR|FR|REQ|BR|US)\d+(?:\.\d+)*$|^ADR-\d+$|^U\d+$")
 ID_TOKEN = re.compile(r"(?<![\w.-])((?:NFR|FR|REQ|BR|US|AC)\d+(?:\.\d+)*|ADR-\d+|R-\d+)(?![\w-])")
 HEADING = re.compile(r"^#{2,4}\s+(?:Unit\s+)?((?:NFR|FR|REQ|BR|US)\d+(?:\.\d+)*|ADR-\d+|U\d+(?![\w.-]))\b[\s:.—-]*(.*)$")
@@ -139,6 +143,58 @@ def from_lines(text):
     return [(i, t, "\n".join(b).strip()) for i, t, b in out]
 
 
+def from_bolts(text):
+    """[{id, title, body, units[], fields{}, order?}] of the `## B1 title (U1)` / `## Bolt 1: title` headings (H2 or H3) of a bolt plan.
+    `order` is the bolt's row in the Sequence table (`{position, line?, startsWhen?, beside?}`) when the plan has one;
+    `fields` holds the done-when, confidence and demo bullets as written."""
+    seq, bolts, cur, fence = {}, [], None, False
+    for line in text.splitlines():
+        if line.strip().startswith("```"):
+            fence = not fence
+            continue
+        if fence:
+            continue
+        head = BOLT_HEADING.match(line)
+        if head:
+            cur = {"id": "B" + str(int(head.group(1))), "title": head.group(2).strip(), "lines": []}
+            bolts.append(cur)
+            continue
+        if re.match(r"^#{1,3}\s", line):
+            cur = None
+            continue
+        if line.strip().startswith("|"):
+            row = [plain(c) for c in cells(line)]
+            m = re.match(r"^(?:Bolt\s*|B)(\d+)$", row[0], re.I) if row else None
+            if m:
+                entry = {"position": len(seq) + 1}
+                for key, at in (("line", 2), ("startsWhen", 3), ("beside", 4)):
+                    if len(row) > at and row[at] and not re.fullmatch(r"-|—|none|nothing", row[at], re.I):
+                        entry[key] = row[at]
+                seq["B" + str(int(m.group(1)))] = entry
+                continue
+        if cur is not None:
+            cur["lines"].append(line.rstrip())
+    out = []
+    for b in bolts:
+        body = "\n".join(b["lines"]).strip()
+        paren = re.search(r"\(([^)]*\bU\d+[^)]*)\)\s*$", b["title"])
+        units = UNIT_REF.findall(paren.group(1)) if paren else []
+        named = re.search(r"\*\*Units?:?\*\*:?\s*([^\n]*)", body)
+        for u in UNIT_REF.findall(named.group(1) if named else ""):
+            if u not in units:
+                units.append(u)
+        fields = {}
+        for line in body.splitlines():
+            m = re.match(r"^\s*[-*]\s+\*\*([^*]+?)\*\*:?\s*:?\s*(.*)$", line)
+            if m:
+                for name, pat in BOLT_FIELDS:
+                    if name not in fields and pat.fullmatch(m.group(1).strip().rstrip(":")):
+                        fields[name] = plain(m.group(2))
+        title = plain(re.sub(r"\s*\([^)]*\bU\d+[^)]*\)\s*$", "", b["title"]))
+        out.append({"id": b["id"], "title": title, "body": body, "units": units, "fields": fields, "order": seq.get(b["id"])})
+    return out
+
+
 def traceability(docs):
     """[{from, to, ok}] from the stage's traceability.json documents (`coverage: [{id, status, target}]`)."""
     out = []
@@ -177,6 +233,24 @@ def build(docs, ids, stage_folder, given=None):
     for d in docs:
         if d.get("kind") == "review" or d["key"].startswith("traceability"):
             continue
+        if d["key"] in BOLT_DOCS:
+            for b in from_bolts(d["text"]):
+                if b["id"] in seen:
+                    continue
+                item = {"key": anchor(b["id"]), "kind": "bolt", "id": b["id"], "title": b["title"] or b["id"], "doc": d["key"]}
+                if b["body"]:
+                    item["body"] = b["body"]
+                if b["units"]:
+                    item["units"] = b["units"]
+                if b["fields"]:
+                    item["fields"] = b["fields"]
+                if b["order"]:
+                    item["order"] = b["order"]
+                mentions = sorted({m for m in ID_TOKEN.findall(b["title"] + " " + b["body"]) if m != b["id"]})
+                if mentions:
+                    item["mentions"] = mentions
+                seen[b["id"]] = item
+                items.append(item)
         yaml_ids = {i for i, _t, _b in from_yaml(d["text"])}
         for rid, title, body in from_yaml(d["text"]) + from_lines(d["text"]) + from_tables(d["text"]):
             kind = kind_of(rid)

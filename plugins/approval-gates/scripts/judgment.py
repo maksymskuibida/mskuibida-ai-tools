@@ -63,7 +63,7 @@ def suggest_document(doc, text, items):
     if doc["key"].startswith("traceability"):
         return "covered"
     mine = [i for i in items if i.get("doc") == doc["key"]]
-    if not mine:
+    if not mine or any(i.get("kind") == "bolt" for i in mine):  # a bolt plan is read in its own bolt view, the review points inside
         return "shown"
     said = sum(len(i.get("title", "")) + len(i.get("body", "")) for i in mine)
     prose = len(re.sub(r"(?m)^#.*$|^\s*\|?[-:| ]+\|?\s*$", "", text or ""))
