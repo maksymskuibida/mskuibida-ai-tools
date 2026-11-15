@@ -1209,6 +1209,33 @@ describe('the unit-end gate column of the Unit Progress table', () => {
     expect(construction(model).items.find(item => item.isCurrent)?.id).toBe('code-generation')
   })
 
+  test('each step of the revision moves the stages and the counts, from the receipts newer than the rejection', async () => {
+    const counts = (model: PanelModel) => construction(model).counts
+    const status = (model: PanelModel) => stages(model).map(one => one[1])
+    const current = (model: PanelModel) => construction(model).items.find(item => item.isCurrent)?.id
+    // Right after the rejection: functional-design (cell [x], receipt older than the rejection) is not done; the stages outside it keep theirs.
+    const first = await load(world('R'))
+    expect(status(first)).toEqual(['revising', 'done', 'done', 'done', 'planned'])
+    expect(counts(first)).toEqual({ done: 3, total: 5 })
+    expect(current(first)).toBe('functional-design')
+    // functional-design started again: still current, not counted.
+    const started = await load(world('R', ['2026-10-03T10:00:00Z', 'UNIT_STARTED', 'functional-design']))
+    expect(counts(started)).toEqual({ done: 3, total: 5 })
+    expect(current(started)).toBe('functional-design')
+    // Its new UNIT_COMPLETED: done and counted, code-generation is current.
+    const completed = await load(world('R', ['2026-10-03T10:00:00Z', 'UNIT_STARTED', 'functional-design'], ['2026-10-03T11:00:00Z', 'UNIT_COMPLETED', 'functional-design']))
+    expect(status(completed)).toEqual(['done', 'done', 'done', 'done', 'revising'])
+    expect(counts(completed)).toEqual({ done: 4, total: 5 })
+    expect(current(completed)).toBe('code-generation')
+    // code-generation completed too and the gate is back at [?]: awaiting, the earlier stages done.
+    const back = await load(
+      world('?', ['2026-10-03T10:00:00Z', 'UNIT_COMPLETED', 'functional-design'], ['2026-10-03T12:00:00Z', 'UNIT_COMPLETED', 'code-generation']),
+    )
+    expect(status(back)).toEqual(['done', 'done', 'done', 'done', 'awaiting'])
+    expect(counts(back)).toEqual({ done: 4, total: 5 })
+    expect(unitList(back).items.find(item => item.id === 'unit:api-billing')).toMatchObject({ status: 'awaiting' })
+  })
+
   test('functional-design opened again and not yet settled stays the revising stage', async () => {
     const model = await load(world('R', ['2026-10-03T10:00:00Z', 'UNIT_STARTED', 'functional-design']))
     expect(stages(model)[0]).toEqual(['functional-design', 'revising'])
