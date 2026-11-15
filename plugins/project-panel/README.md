@@ -398,6 +398,16 @@ Until Units Generation has finished and produced Units, Construction's seven sta
 is listed with its stages but carries no count or ring (its row says `not included yet`, in `local only`'s amber), and the plan counts only the other phases. Once the Units exist
 (or when Units Generation is skipped), Construction counts again, as below.
 
+### The unit-end gate: awaiting and Request Changes (0.28.0)
+
+With `gate_rhythm: unit-end` one gate covers several stages and the engine leaves their cells as they were, so the
+`gate` column of `## Unit Progress` says the rest. Gate `[?]`: the Unit awaits its unit-end approval, drawn on the last
+stage the gate covers. Gate `[R]` (Request Changes): the Unit is revising. The gate's stages are the latest
+`GATE_REJECTED` / `STAGE_REVISING` receipt's `Gate Stages` for that Unit (else every stage the Unit runs); a stage settled
+since the rejection reads done, the one that is open (else the first unsettled one) shows `↻ revising` and is the Now
+card's current stage, and the others read not done until their new receipts settle them. A stage that holds its own `[?]`
+or `[R]` is left to its cell. The claimed Unit's stages and the Units list row read the same.
+
 ### Units built and merged, though the table is empty (0.27.2)
 
 The engine can rebuild `## Unit Progress` with every stage cell `[ ]` while the audit receipts say the work is done. The
@@ -920,6 +930,7 @@ renderer: check the real pane too when spacing matters.
 - **0.4.0** — the `ledger` provider (WORKPLAN.md against PRs, product sections you pin).
 - **M2 (0.5.0)** — freshness: re-read on session start, branch change, writes to the `watch` files, turn end, a surface attaching, and an mtime poll; a provider's remote `fingerprint` poll (the ledger's PRs and default-branch tip); redraw only when the model changes; the desktop pane opens when the app attaches.
 - **0.6.0** — the pane redesign: header, Now card, Needs attention, Plan; three breakpoints, done-folding and the open-items cap, the status strip.
+- **0.28.0** — the unit-end gate: the `gate` column of `## Unit Progress` is read. Gate `[R]` (Request Changes) shows the Unit revising (`↻ revising` on the stage it is on, current in the Now card, later gate stages not done until their new receipts settle them), from the `GATE_REJECTED` / `STAGE_REVISING` receipts' `Gate Stages`; gate `[?]` shows the Unit awaiting its unit-end approval.
 - **0.26.0** — the Units list tells not-started Units apart: a Unit claimed in the engine's claim registry (`aidlc/.aidlc-claim-registry.json`, `claims.<unit>.status == "claimed"`) or at this checkout is in progress (`claimed`); a free one whose dependencies are all done gets an open circle in normal text; one waiting on Units not done gets a lock and dim text. A finished Unit stays done. No dependency data: the plain not-started look.
 - **0.25.0** — a Unit's design stages left out at its claim (`aidlc unit claim --skip-stages`, the engine's `UNIT_SKIPPED` receipts) are drawn skipped and weigh nothing in the Unit's progress or counts: on the older engine whose table writes them `[x]`, between the claim and the next `next`, and where the state has no Unit Progress table. A stage started again after its skip is no longer skipped.
 - **0.24.0** — the desktop's pull-request card under Needs attention has one line per PR, with all its statuses in a word or two and its command as a small button, instead of a card's worth per row.

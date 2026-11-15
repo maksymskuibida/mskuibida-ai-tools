@@ -31,7 +31,7 @@ import type { Derived, Two } from './truths'
 import { hasMoreThanBranch, sessionContext } from './session'
 import { readTwo } from './two'
 import { readUnitMatrix, withKinds } from './unit-matrix'
-import { PER_UNIT_STAGES, LAST_UNIT_STAGE, CLAIM_REGISTRY_FILE, UNIT_SCOPE_FILE, parseClaimRegistry, parseUnitMerged, parseUnitProgress, parseUnitScope, startOf, progressOf, readUnitFacts, readUnitList, stageStatusesFromRow, unitStageStatuses, withReceipts } from './units'
+import { PER_UNIT_STAGES, LAST_UNIT_STAGE, CLAIM_REGISTRY_FILE, UNIT_SCOPE_FILE, parseClaimRegistry, parseUnitGates, parseUnitMerged, parseUnitProgress, parseUnitScope, startOf, progressOf, readUnitFacts, readUnitList, stageStatusesFromRow, unitStageStatuses, withGates, withReceipts } from './units'
 import { NO_STAGE_POINTS, STAGE_POINTS_FILE, parseStagePoints, stagePointsOf } from './stage-points'
 import { isResumedAfter } from './park'
 import type { StagePoints } from './stage-points'
@@ -590,7 +590,7 @@ async function unitsOf(
   const facts = await readUnitFacts(fsx, intentDir, units)
   // The engine's table, with the stages its receipts say started since it was last written.
   // A stage the Unit's kind does not owe is skipped, not done, though the engine's table marks it [x].
-  const table = withKinds(withReceipts(parseUnitProgress(stateText), facts.events), units, await readUnitMatrix(fsx, root))
+  const table = withKinds(withGates(withReceipts(parseUnitProgress(stateText), facts.events), parseUnitGates(stateText), facts.gates ?? [], facts.events), units, await readUnitMatrix(fsx, root))
   const progress = progressOf(units, parsed, facts, table, parseUnitMerged(stateText))
   const named = [(parsed.fields['Active Unit'] ?? '').trim(), step.unit].find(name => units.some(unit => unit.name === name))
   const working = PER_UNIT_STAGES.includes(step.stage)
