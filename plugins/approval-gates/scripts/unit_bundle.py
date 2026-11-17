@@ -194,9 +194,15 @@ def humanize(slug):
     return " ".join(out)
 
 
+NO_UNIT = "intent"  # the Unit id of an intent with no Units: its stages sit directly under construction/, once for the whole intent
+
+
 def page_title(unit, page):
     """What the page is, for its H1, tab title and list row: `Unit u2-accounts: Approve plan` / `... Approve Unit-end`.
-    unit-gate.html derives the same string from unit + page for rows written before this."""
+    unit-gate.html derives the same string from unit + page for rows written before this. An intent with no Units has
+    only its plan page, titled `Approve plan`."""
+    if unit == NO_UNIT:
+        return "Approve plan"
     return f"Unit {unit}: Approve {'plan' if page == 'plan' else 'Unit-end'}"
 
 
@@ -235,6 +241,11 @@ class Unit:
         self.space, self.intent, self.root = gate_bundle.record_root(self.project)
         self.unit = unit
         self.folder = os.path.join(self.root, "construction", unit)
+        if unit == NO_UNIT and not os.path.isdir(self.folder):
+            # An intent with no Units: Construction runs once, its stage folders are construction/<stage>.
+            self.folder = os.path.join(self.root, "construction")
+            if not os.path.isdir(os.path.join(self.folder, "code-generation")):
+                raise BundleError(f"the intent has no Units and no code-generation folder: {os.path.join(self.folder, 'code-generation')}")
         if not os.path.isdir(self.folder):
             raise BundleError(f"the Unit has no record folder: {self.folder}")
         self.graph = gate_bundle.load_graph(self.project) or {}
@@ -260,6 +271,8 @@ class Unit:
 
     def names(self):
         """(unitLabel, unitName) from the first record H1 that reads `— U4 Moving between days (`slug`)`."""
+        if self.unit == NO_UNIT:
+            return "", humanize(self.intent)
         for stage in DESIGN_STAGES + ("code-generation",):
             for path in self.documents(stage):
                 head = read(path).split("\n", 1)[0]
@@ -791,6 +804,9 @@ def carry_over(draft, previous):
 def draft(args):
     project = os.path.abspath(args.project_dir or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
     unit = Unit(project, args.unit)
+    if args.unit == NO_UNIT and unit.folder == os.path.join(unit.root, "construction") and args.page != "plan":
+        raise BundleError("an intent with no Units has only the plan page here: its completion gate is a per-stage page "
+                          "(gate_bundle.py)")
     index_definition_paths(unit)
     defs = definitions(unit)
     label, name = unit.names()

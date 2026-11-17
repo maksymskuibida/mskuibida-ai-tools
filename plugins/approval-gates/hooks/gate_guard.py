@@ -304,6 +304,34 @@ def current_stage(project):
 UNIT_END_STAGE = "code-generation"  # the last per-Unit stage: its plan approval and its gate are a Unit's two pages
 
 
+NO_UNIT = "intent"  # the Unit id of an intent with no Units (Construction runs once for the whole intent): its code plan page
+STAGE_FOLDERS = ("functional-design", "nfr-requirements", "nfr-design", "infrastructure-design", "code-generation", "build-and-test")
+
+
+def has_units(project):
+    """True when the active intent's construction/ holds a Unit folder (anything that is not a stage folder)."""
+    _intent, root = intent_root(project)
+    if not root:
+        return False
+    try:
+        return any(os.path.isdir(os.path.join(root, "construction", n)) and n not in STAGE_FOLDERS
+                   for n in os.listdir(os.path.join(root, "construction")))
+    except OSError:
+        return False
+
+
+def plan_unit(project, stage, unit):
+    """The Unit of a plan approval: the engine's, else NO_UNIT for the Code Generation plan of an intent with no Units
+    (its plan is the unit approvals plan page; its completion gate stays a per-stage page)."""
+    if unit or stage != UNIT_END_STAGE or has_units(project):
+        return unit
+    return NO_UNIT
+
+
+def unit_label(unit):
+    return "the intent's code plan" if unit == NO_UNIT else unit
+
+
 def make_key(stage, unit):
     return stage + (("/" + unit) if unit else "")
 
@@ -315,6 +343,8 @@ def unit_rhythm(project, unit, stage=UNIT_END_STAGE):
     stage is unit-end only when the active directive says so for that stage (`unit_gate: "unit-end"`)."""
     if not unit:
         return "per-stage"
+    if unit == NO_UNIT and stage == UNIT_END_STAGE:
+        return "unit-end"  # only a plan approval is ever given this unit (plan_unit)
     if stage != UNIT_END_STAGE:
         return "unit-end" if directive_unit_gate(project, stage, unit) else "per-stage"
     if directive_unit_gate(project, stage, unit):
@@ -373,6 +403,7 @@ def sync_pending(state, project):
     if not ask:
         return False
     stage, unit, written = ask
+    unit = plan_unit(project, stage, unit)
     pending = state["pending"]
     if pending and pending.get("kind") == "plan" and pending.get("stage") == stage and (pending.get("unit") or None) == unit:
         return False
@@ -395,6 +426,7 @@ def open_plan_gate(state, project, questions):
     if not cur:
         return False
     stage, unit = cur
+    unit = plan_unit(project, stage, unit)
     state["pending"] = {"stage": stage, "unit": unit, "opened_at": time.time(), "kind": "plan",
                         "rhythm": unit_rhythm(project, unit, stage), "asked_first": True}
     return True
@@ -405,7 +437,7 @@ def plan_steps(pending, stage, unit):
     if not (pending and pending.get("asked_first")):
         return []
     return [f"Record the plan decision: `aidlc engine log decision --stage {stage}"
-            + (f" --unit {unit}" if unit else "") + " --checkpoint plan-approval --value presented`."]
+            + (f" --unit {unit}" if unit and unit != NO_UNIT else "") + " --checkpoint plan-approval --value presented`."]
 
 
 def page_of(pending):
@@ -600,7 +632,9 @@ def gate_questions(state, questions):
 def publish_instruction(stage, unit, page=None):
     if page:
         script = os.path.join(PLUGIN_ROOT, "scripts", "unit_bundle.py")
-        return (f"this Unit has the unit-end rhythm, so its {'plan' if page == 'plan' else 'unit-end'} page is one gate bundle: run "
+        why = ("this intent has no Units, so its code plan approval is the unit approvals plan page" if unit == NO_UNIT
+               else f"this Unit has the unit-end rhythm, so its {'plan' if page == 'plan' else 'unit-end'} page is one gate bundle")
+        return (f"{why}: run "
                 f"`python3 \"{script}\" draft --page {page} --unit {unit} --out <a scratch file>`, do what it lists under todo, "
                 f"run `... finalize --bundle <that file> --out <a scratch folder>`, write its writes.json with one ArtifactData "
                 "batch into the AI-DLC unit approvals artifact (a `bundles/<id>` row; never a per-stage `gates/` row, never "
@@ -712,7 +746,7 @@ def require_published(state, project, stage, unit, opened, call="the Approval qu
         page = page_of(pending)
         pub = state["published"].get(make_key(stage, unit) + "@" + page)
         if not pub or (isinstance(opened, (int, float)) and pub.get("at", 0) < opened):
-            raise Refusal(f"{call} for {unit}, because the developer reads the Unit's {page} page before being asked, and it "
+            raise Refusal(f"{call} for {unit_label(unit)}, because the developer reads the Unit's {page} page before being asked, and it "
                           "was not published since the gate opened. Publish it first." + PLAN_NOTE * (page == "plan"),
                           plan_steps(pending, stage, unit) + publish_steps(stage, unit, page), published_check(page))
         return pub
@@ -796,7 +830,7 @@ def unit_end_flow_for(state, project, doc_id):
         if cand and cand[0] and cand not in candidates:
             candidates.append(cand)
     for stage, unit in candidates:
-        if not unit or not id_matches(doc_id, intent, stage, unit):
+        if not unit or not id_matches(doc_id, intent, stage, None if unit == NO_UNIT else unit):
             continue
         in_hand = bool(pending and pending.get("stage") == stage and pending.get("unit") == unit)
         if (in_hand and pending.get("rhythm") == "unit-end") or unit_rhythm(project, unit, stage) == "unit-end":
@@ -805,6 +839,11 @@ def unit_end_flow_for(state, project, doc_id):
 
 
 def wrong_flow_message(doc_id, stage, unit):
+    if unit == NO_UNIT:
+        return (f"gates/{doc_id} is the wrong page: this intent has no Units, so its {stage} plan approval is a `bundles/<id>` "
+                "row in the \"AI-DLC unit approvals\" artifact, built by unit_bundle.py, not a `gates/` row of gate_bundle.py "
+                f"in the \"AI-DLC approval gates\" artifact. Nothing was written. Run the plan-page flow: "
+                f"{publish_instruction(stage, unit, 'plan')}")
     return (f"gates/{doc_id} is the wrong page: {unit} was claimed with the unit-end rhythm, so its {stage} plan approval and "
             "its unit-end gate are `bundles/<id>` rows in the \"AI-DLC unit approvals\" artifact, built by unit_bundle.py, not "
             f"`gates/` rows of gate_bundle.py in the \"AI-DLC approval gates\" artifact. Nothing was written. Run the unit-end "
@@ -812,6 +851,11 @@ def wrong_flow_message(doc_id, stage, unit):
 
 
 def wrong_flow_refusal(doc_id, stage, unit):
+    if unit == NO_UNIT:
+        return Refusal(f"the write to gates/{doc_id}, because it is the wrong page: this intent has no Units, so its {stage} plan "
+                       "approval is a `bundles/<id>` row in the \"AI-DLC unit approvals\" artifact, built by unit_bundle.py "
+                       "(`--unit intent`), not a `gates/` row in the \"AI-DLC approval gates\" artifact. Nothing was written.",
+                       publish_steps(stage, unit, "plan"), published_check("plan"))
     return Refusal(f"the write to gates/{doc_id}, because it is the wrong page: {unit} was claimed with the unit-end rhythm, so "
                    f"its {stage} plan approval and its unit-end gate are `bundles/<id>` rows in the \"AI-DLC unit approvals\" "
                    "artifact, built by unit_bundle.py, not `gates/` rows in the \"AI-DLC approval gates\" artifact. Nothing "
@@ -1565,10 +1609,11 @@ def record_bash(event, project, state, tool_input):
                 continue
             stage = stage or "code-generation"
             unit = call.get("unit") or (cur[1] if cur and cur[0] == stage else None)
+            unit = plan_unit(project, stage, unit)
             rhythm = unit_rhythm(project, unit, stage)
             state["pending"] = {"stage": stage, "unit": unit, "opened_at": time.time(), "kind": "plan", "rhythm": rhythm}
             if rhythm == "unit-end":
-                say("PostToolUse", f"the plan for {unit} is open for approval (Approve Plan), the developer's one look at every "
+                say("PostToolUse", f"the plan for {unit_label(unit)} is open for approval (Approve Plan), the developer's one look at every "
                                    f"design stage of the Unit. Before that question: {publish_instruction(stage, unit, 'plan')}.")
             else:
                 say("PostToolUse", f"the plan for {stage} is open for approval (Approve Plan). Before that question, "
@@ -1947,7 +1992,7 @@ def post(event, project):
         changed = sync_pending(state, project)
         if changed:
             pending = state["pending"]
-            say("PostToolUse", f"the engine asks for the plan approval of {pending['unit']}. Before that question: "
+            say("PostToolUse", f"the engine asks for the plan approval of {unit_label(pending['unit'])}. Before that question: "
                                f"{publish_instruction(pending['stage'], pending['unit'], 'plan' if pending['rhythm'] == 'unit-end' else None)}.")
         if tool == "Bash":
             changed = record_bash(event, project, state, ti) or changed
