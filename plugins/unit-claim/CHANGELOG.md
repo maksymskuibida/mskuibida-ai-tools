@@ -2,7 +2,7 @@
 
 ## 0.5.0
 
-The claim dialog knows a project's own per-Unit stages (marketplace 1.64.0).
+The claim dialog knows a project's own per-Unit stages (marketplace 1.65.0).
 
 - **Stages from the stage graph.** `claim_choice.py stages` reads `.claude/tools/data/stage-graph.json`: the stages with
   `for_each: "unit-of-work"` except code-generation, in the graph's order, with the graph's names. A plugin's own stage
