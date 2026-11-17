@@ -79,6 +79,7 @@ import findings_round  # noqa: E402  (review findings at the gate: cards on the 
 sys.path.insert(0, os.path.join(PLUGIN_ROOT, "scripts"))
 import judgment  # noqa: E402  (the agent's evaluation of the stage: a gates/ row without it is refused)
 import aidlc_links  # noqa: E402  (the registry of the pages published for each stage: the project panel lists them)
+import stage_graph  # noqa: E402  (the per-Unit stages of the project's stage graph: a Unit's last stage)
 import map_bundle  # noqa: E402  (the project maps a gate needs: the guard asks the records whether the map is current)
 STALE_DAYS = 14  # another session's state file untouched for this long is removed when a state is saved
 GATE_LABELS = {"approve", "approve plan", "accept as-is"}
@@ -301,7 +302,14 @@ def current_stage(project):
     return None
 
 
-UNIT_END_STAGE = "code-generation"  # the last per-Unit stage: its plan approval and its gate are a Unit's two pages
+UNIT_END_STAGE = "code-generation"  # upstream's last per-Unit stage: the Unit's plan approval, and its gate unless the graph adds stages after it
+
+
+def unit_gate_stage(project):
+    """The stage whose gate is a Unit's unit-end gate: the last applicable per-Unit stage of the project's stage graph
+    (a custom stage approved with the Unit runs after Code Generation), else Code Generation."""
+    _intent, root = intent_root(project)
+    return stage_graph.last_stage(project, root) or UNIT_END_STAGE
 
 
 NO_UNIT = "intent"  # the Unit id of an intent with no Units (Construction runs once for the whole intent): its code plan page
@@ -313,8 +321,9 @@ def has_units(project):
     _intent, root = intent_root(project)
     if not root:
         return False
+    folders = set(STAGE_FOLDERS) | {g["slug"] for g in stage_graph.load_graph(project)}  # a custom stage's folder is not a Unit
     try:
-        return any(os.path.isdir(os.path.join(root, "construction", n)) and n not in STAGE_FOLDERS
+        return any(os.path.isdir(os.path.join(root, "construction", n)) and n not in folders
                    for n in os.listdir(os.path.join(root, "construction")))
     except OSError:
         return False
@@ -338,14 +347,15 @@ def make_key(stage, unit):
 
 def unit_rhythm(project, unit, stage=UNIT_END_STAGE):
     """"unit-end" when the gate in hand is a Unit's under the unit-end rhythm, else "per-stage". Only the Code
-    Generation gates of the Unit (its plan approval and its unit-end gate) are the Unit's two pages: the claim's scope
-    stamp (aidlc/.aidlc-unit-scope.json, written by `aidlc unit claim`) names the Unit and its rhythm. A gate of any other
-    stage is unit-end only when the active directive says so for that stage (`unit_gate: "unit-end"`)."""
+    Generation plan approval and the gate of the Unit's last stage (Code Generation, or the last custom per-Unit stage
+    the stage graph puts after it) are the Unit's two pages: the claim's scope stamp (aidlc/.aidlc-unit-scope.json,
+    written by `aidlc unit claim`) names the Unit and its rhythm. A gate of any other stage is unit-end only when the
+    active directive says so for that stage (`unit_gate: "unit-end"`)."""
     if not unit:
         return "per-stage"
     if unit == NO_UNIT and stage == UNIT_END_STAGE:
         return "unit-end"  # only a plan approval is ever given this unit (plan_unit)
-    if stage != UNIT_END_STAGE:
+    if stage not in (UNIT_END_STAGE, unit_gate_stage(project)):
         return "unit-end" if directive_unit_gate(project, stage, unit) else "per-stage"
     if directive_unit_gate(project, stage, unit):
         return "unit-end"
@@ -805,7 +815,7 @@ def maps_check(project, kinds):
 def require_maps(project, stage, unit, pub=None, call="the Approval question"):
     """Refuse a gate whose project map is missing or built from older records than the ones there now."""
     page = (pub or {}).get("page") if isinstance(pub, dict) else None
-    stale = maps_check(project, map_bundle.required_kinds(stage, page))
+    stale = maps_check(project, map_bundle.required_kinds(stage, page, project=project))
     if not stale:
         return
     kind, fr = stale[0]
@@ -1113,8 +1123,8 @@ def unit_end_page(state, project):
     A session whose gate came without a `report --result awaiting-approval` it saw has no pending gate and may have no
     stage the engine names, yet the page it wrote is the one its Approval question is about."""
     unit = claimed_unit(project)
-    if unit and unit_rhythm(project, unit, UNIT_END_STAGE) == "unit-end":
-        pub = state["published"].get(make_key(UNIT_END_STAGE, unit) + "@unit-end")
+    if unit and unit_rhythm(project, unit, unit_gate_stage(project)) == "unit-end":
+        pub = state["published"].get(make_key(unit_gate_stage(project), unit) + "@unit-end")
         if pub:
             return pub
     pages = [p for k, p in state["published"].items() if k.endswith("@unit-end")]
@@ -1131,12 +1141,12 @@ def guard_question(event, state, project, questions):
         if not state["pending"]:
             fallback = None if "approve plan" in labels(q) else unit_end_page(state, project)  # a plan question is about the plan page
             if not stage and fallback:
-                stage, unit, pub = UNIT_END_STAGE, claimed_unit(project), fallback
+                stage, unit, pub = unit_gate_stage(project), claimed_unit(project), fallback
             elif stage and fallback:
                 try:
                     require_published(state, project, stage, unit, opened)
                 except Refusal:
-                    stage, unit, pub = UNIT_END_STAGE, claimed_unit(project), fallback
+                    stage, unit, pub = unit_gate_stage(project), claimed_unit(project), fallback
         if not stage:
             continue
         if not pub:
@@ -1343,8 +1353,8 @@ def expected_page(event, state, project, question, entries):
     stage, unit, _opened = target_of(state, project)
     if not unit:
         unit = claimed_unit(project)
-        if unit and (not stage or unit_rhythm(project, unit, UNIT_END_STAGE) == "unit-end"):
-            stage = UNIT_END_STAGE
+        if unit and (not stage or unit_rhythm(project, unit, unit_gate_stage(project)) == "unit-end"):
+            stage = unit_gate_stage(project)
     page = "plan" if "approve plan" in labels(question) else "unit-end"
     start = (intent or "").lower()
     found, urls = [], []
@@ -1493,7 +1503,7 @@ def pre(event, project):
         for op, collection, doc_id, data, _url in writes_of(ti):
             if op == "set" and isinstance(data, dict) and collection in ("gates", "bundles"):
                 made = BUNDLE_ID.match(doc_id or "") if collection == "bundles" else None
-                row_stage = data.get("stage") if collection == "gates" else (UNIT_END_STAGE if made else None)
+                row_stage = data.get("stage") if collection == "gates" else (unit_gate_stage(project) if made else None)
                 if isinstance(row_stage, str):
                     unit = data.get("unit") if isinstance(data.get("unit"), str) else None
                     require_maps(project, row_stage, unit, {"page": made.group("page")} if made else None,
@@ -1700,7 +1710,7 @@ def record_artifact(project, state, tool_input, response):
                 found = aidlc_links.test_plan_revision(doc_id)
                 if found:
                     unit = _data.get("unit") if isinstance(_data, dict) and isinstance(_data.get("unit"), str) else claimed_unit(project)
-                    register_link(project, "test-plan", url, doc_id, UNIT_END_STAGE, unit, "unit-end", found[0], _data)
+                    register_link(project, "test-plan", url, doc_id, unit_gate_stage(project), unit, "unit-end", found[0], _data)
                 if doc_id not in plan_ids:
                     plan_ids.append(doc_id)
                 changed = True
@@ -1781,11 +1791,11 @@ def record_bundle(state, project, intent, doc_id, url):
     else:
         unit = claimed_unit(project)
         if page != "unit-end" or not unit or not head.endswith("-" + unit.lower()) \
-                or unit_rhythm(project, unit, UNIT_END_STAGE) != "unit-end":
+                or unit_rhythm(project, unit, unit_gate_stage(project)) != "unit-end":
             return False
         if pending and pending.get("unit") == unit:
             state["pending"] = None  # a gate of this Unit still open in the state (its plan) is over: the Unit is built
-        pending = {"stage": UNIT_END_STAGE, "unit": unit}
+        pending = {"stage": unit_gate_stage(project), "unit": unit}
     built = stamp_epoch(found.group("stamp"))
     opened = pending.get("opened_at")
     if built is None or (isinstance(opened, (int, float)) and built < opened - opened % 60):
@@ -1795,7 +1805,7 @@ def record_bundle(state, project, intent, doc_id, url):
     pub = {"id": doc_id, "url": str(url or "").rstrip("/"), "at": time.time(), "page": page}
     state["published"][make_key(pending["stage"], unit) + "@" + page] = pub
     kind, revision, _head = aidlc_links.bundle_page(doc_id)
-    register_link(project, kind, url, doc_id, UNIT_END_STAGE, unit, "unit-end", revision)
+    register_link(project, kind, url, doc_id, unit_gate_stage(project), unit, "unit-end", revision)
     say("PostToolUse", f"bundles/{doc_id} is published in the AI-DLC unit approvals artifact. The developer has NOT seen its link "
                        f"`{link_of(pub)}`: this hook note, tool results and your thinking are invisible to them. Your next "
                        "response must contain the link in its text (anywhere in it; for example write the line `Page: "

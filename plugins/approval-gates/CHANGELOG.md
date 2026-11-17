@@ -1,5 +1,19 @@
 # approval-gates changelog
 
+## 1.39.0
+
+Custom per-Unit stages are part of a Unit (marketplace 1.64.0). Templates changed: none (`unit-gate.html` is untouched: the extra rows are `built` rows and the extra stages `header.stages` entries it already draws); new script: `stage_graph.py`.
+
+- **The Unit's stages come from the stage graph.** `scripts/stage_graph.py` reads `.claude/tools/data/stage-graph.json`: the per-Unit stages are those with `for_each: "unit-of-work"`, in stage-number order; a custom
+  stage the intent's `aidlc-state.md` does not list does not apply. A Unit's last stage is the last applicable one. No graph, or none marking a per-Unit stage, keeps today's constants (`code-generation`).
+- **Gate rhythm.** `gate_guard.py` `unit_rhythm()` treats the Code Generation plan approval and the gate of the Unit's last stage as the Unit's two pages. The unit-end page, its published-link check, the
+  registry entry and the link guard follow the last stage (`unit_gate_stage()`); the plan approval stays at Code Generation. A custom stage's folder under `construction/` is no longer mistaken for a Unit folder.
+- **The unit-end bundle** lists the documents of the per-Unit stages after Code Generation as `built` rows (`B-n`, titled "<stage name>: <document title>", `where` the document, source key `built:<stage>:<file>`),
+  adds the stages to `header.stages` and their documents to `provenance.records`. The plan page is unchanged.
+- **Maps.** A Unit is landed when the Unit Progress cell of its last stage is `[x]` (or `merged`), or a `UNIT_COMPLETED` receipt of its last stage; the Unit map is required at the last stage's gate.
+- **Run-once custom stages** are per-stage gates under their graph name (`gate_bundle.py`, SKILL.md § 1); tests cover it.
+- `contract/README.md` describes the extra `built` rows. `aidlc_links.py` (a shared copy) is untouched: its unit-end registry entries keep `stage: code-generation`.
+
 ## 1.38.0
 
 Build and Test gets one test plan of every Unit's deferred points, and every test plan gets copy buttons (marketplace 1.63.0). Templates changed: `test-plan.html` and `unit-gate.html`; script: `test_plan.py`.

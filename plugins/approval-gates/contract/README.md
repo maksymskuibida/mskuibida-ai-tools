@@ -51,7 +51,7 @@ schema file itself, so the two cannot drift. Keep to that subset when the schema
 | unit-end | `unverified` | (The page tells `unverified`, `verified` and `failed` as one Verification section, each point carrying its state; the sections below are unchanged.) What isn't verified yet. After a test plan: the points still not verified (picked Later, or failed and being fixed). |
 | unit-end | `verified` | Only after a test plan: the points the person tested and passed ("Verified by you"). Each row keeps its V id. |
 | unit-end | `failed` | Only after a test plan: the points that failed and the person left as known ("Failed, left as known"). |
-| unit-end | `built` | What was built, in plain words, labelled core, main or minor. It may carry a `map` of how the pieces connect. |
+| unit-end | `built` | What was built, in plain words, labelled core, main or minor. It may carry a `map` of how the pieces connect. The documents of the custom per-Unit stages the stage graph puts after Code Generation (`for_each: "unit-of-work"`, approved with the Unit) are rows here too: `title` "<stage name>: <document title>", `where` the document path, `source.key` `built:<stage slug>:<file>`; the stages also appear in `header.stages` and the documents in `provenance.records`. |
 | both | `other` | Anything else the agent needs to show. |
 
 ### Rows
@@ -342,7 +342,7 @@ its schema is [`map.schema.json`](map.schema.json) (`aidlc-map/1`).
 | `previous` | the revision before, as a snapshot (a graph's `blocks` with their summary, group, status, points, layer and needs; a matrix's rows, columns and cells), so the page marks what is new, changed and removed since, in the round colours, without a second query |
 | `digest` | a hash of the records the row was built from (blocks, edges, points, stories and Unit status; not the judgment). The guard compares it with the records at the gate; a different digest is a stale map |
 | `blocks[].needs`, `usedBy` | the edges, once each way: what it needs first (with the one-line `why` the records give) and what waits for it |
-| `blocks[].status` | Units only: `landed` (the Unit Progress table's `merged` or `code-generation` cell is `[x]`, or a `UNIT_MERGED` receipt, or a `UNIT_COMPLETED` receipt of code-generation not followed by a newer `UNIT_STARTED`), `building`, `planned` |
+| `blocks[].status` | Units only: `landed` (the Unit Progress table's `merged` or last-stage cell is `[x]` — `code-generation`, or the Unit's last per-Unit stage in the project's stage graph (`scripts/stage_graph.py`) — or a `UNIT_MERGED` receipt, or a `UNIT_COMPLETED` receipt of that last stage not followed by a newer `UNIT_STARTED`), `building`, `planned` |
 | `ids` | the tooltips of the ids the map shows (`aidlc_ids.py refs`), as on every page |
 
 A gate row (`gates/<id>`) and a Unit bundle carry `maps: [{kind, url, title}]` (url = `<maps artifact url>#<row id>`), filled by
