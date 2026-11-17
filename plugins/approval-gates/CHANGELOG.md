@@ -1,5 +1,24 @@
 # approval-gates changelog
 
+## 1.38.0
+
+Build and Test gets one test plan of every Unit's deferred points, and every test plan gets copy buttons (marketplace 1.63.0). Templates changed: `test-plan.html` and `unit-gate.html`; script: `test_plan.py`.
+
+- **A third pick at a unit-end gate: "At Build and Test".** Next to Test now and Later on each not-verified row. Approving the Unit with it set tests nothing and holds no
+  "Test first" lock; the agent runs `test_plan.py defer`, which records the Unit's not-verified points in `deferred-to-build-and-test.json` in its code-generation
+  folder (`buildtest` rows deferred, the others listed as still not verified; `--all` defers every point when the developer says so in chat). The pick is `picks.<anchor> = "buildtest"`;
+  a Test first afterwards never tests a row picked At Build and Test.
+- **One Build and Test plan.** At the Build and Test gate the skill always offers it. `test_plan.py collect` reads every Unit's deferral record; the agent adds the stage's own
+  manual checks (`M-<n>`) from the build-and-test instruction documents. The plan is `kind: "build-and-test"`, `unit: "build-and-test"`, with no unit-end bundle: a `sources` list names each
+  point's Unit and V id (`u1:V-3`), `now` and `verifies` hold source ids, and `validate --project-dir` refuses a plan that leaves out a deferred point. Plans of the old kind
+  validate and render unchanged. Each point on the page shows the Unit it came from ("u1 · V-3").
+- **Finish.** `finish` writes `test-plan.md` and `test-plan.json` into the Build and Test stage folder, and per Unit a `build-and-test-outcome.json` (that Unit's points, by V id) that
+  `unit_bundle.py draft --tested` reads like a Unit test plan's outcome; the Unit's deferral record gets each point's state.
+- **Copy buttons.** In every test plan, each fenced block in a step's `do` has a Copy button that copies exactly its text, with a "Copied" state and a live-region announcement; the word after the
+  opening fence (Terminal, Claude Code, Ask Claude) is shown as a header naming where to paste it. Inline code is a button that copies it. Keyboard accessible; `navigator.clipboard` with a hidden-textarea
+  fallback, and, if both are blocked, the text is selected for Ctrl/⌘+C.
+- **Guidance.** Sections start where the agent must prepare something; a release project tests from a throwaway tag or build and cuts the real release as the last section, after the plan passed.
+
 ## 1.37.0
 
 The unit approvals plan page shows the Code Generation plan's steps one by one, in the plan's own order (marketplace 1.62.0). Template changed: `unit-gate.html`; test changes only elsewhere.

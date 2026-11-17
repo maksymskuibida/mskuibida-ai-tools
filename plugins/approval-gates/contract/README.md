@@ -174,8 +174,8 @@ Leave it), are stored with the page's row for the agent to read when the person 
 is always given in chat.
 
 **Test now / Later.** Each row of an `unverified` section carries a Test now / Later pick, stored like the lean on a
-suggestion: `picks.<row anchor>` is `"now"` or `"later"` (on these rows only). The agent's test plan covers the rows
-picked Test now, or every row when none is. The pick is read by the agent through `ArtifactData`; the bundle itself
+suggestion: `picks.<row anchor>` is `"now"`, `"later"` or `"buildtest"` (At Build and Test; on these rows only). The agent's test plan covers the rows
+picked Test now, or every row not picked At Build and Test when none is. Rows picked At Build and Test are recorded as deferred when the Unit is approved (see "The Build and Test plan") The pick is read by the agent through `ArtifactData`; the bundle itself
 does not change.
 
 ## Changing the contract
@@ -298,6 +298,36 @@ at}`; a fail without a note is never saved.
 {state: "passed"|"failed"|"later", steps[], notes[], decision?: "fix"|"left"}}}`. `unit_bundle.py draft --tested
 <test-plan.json>` rebuilds the unit-end page from it: passed rows move to a `verified` section, failed rows decided
 `left` to a `failed` section, and every other row stays in `unverified` (retitled "Still not verified").
+
+### The Build and Test plan (1.38.0)
+
+At the Build and Test gate the agent offers one plan of every Unit's deferred points. It has the same schema, `aidlc-test-plan/1`, with:
+
+```
+kind: "build-and-test", unit: "build-and-test", no `bundle`,
+sources[] {id: "<unit>:<point>", unit, point, title}   (point: V-<n> of a Unit, M-<n> of the stage's own manual checks)
+now[] and each step's verifies[] hold source ids; id <intent>-build-and-test-test-v<n>-<YYYYMMDDTHHMM>
+```
+
+- A Unit's points come from its `deferred-to-build-and-test.json` (code-generation folder; `test_plan.py defer` writes it when the Unit is approved):
+  `{schema: "aidlc-deferred-points/1", intent, unit, bundle, date, points[] {id: "V-3", title, body, choice: "buildtest"|"later", state?}}`.
+  `test_plan.py collect` reads every Unit's record. The stage's own points (`build-and-test:M-<n>`) come from the manual or not-automated checks of the build-and-test documents.
+- `validate --project-dir` refuses a plan that leaves a `buildtest` point out. The page shows a point as `<unit> · <point>`, with its title on hover.
+- `finish` writes `test-plan.md` and `test-plan.json` (`kind: "build-and-test"`, rows keyed by source id) into `construction/build-and-test/`, and per Unit
+  `build-and-test-outcome.json` in its code-generation folder (`{schema: "aidlc-test-outcome/1", rows: {<V id>: {state, steps, notes}}}`), which `unit_bundle.py draft --tested` reads. Older plans have no `kind` and are unchanged.
+- Release projects: section A prepares and tests from a throwaway tag or build; the real release is cut in the last section, only after the earlier sections passed.
+
+### What a step's `do` may hold (every test plan, 1.38.0)
+
+Text, with optional paste material. A fenced block (three backticks) is shown with a **Copy** button that copies exactly its text; the word(s) after the opening fence are its label and name where to paste it:
+
+| Label | Where it is pasted |
+|---|---|
+| `Terminal` | a shell |
+| `Claude Code` | the Claude Code prompt (slash commands) |
+| `Ask Claude` | a chat with Claude (a prompt) |
+
+Any other label is shown as written; no label shows no header. Inline `code` is data to paste (a path, a value, a name) and is click-to-copy. Never put prose in a block or a command inline.
 
 ## The map row (maps.html, approval-gates 1.32.0)
 

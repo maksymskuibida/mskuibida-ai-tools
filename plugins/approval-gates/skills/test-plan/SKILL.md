@@ -24,5 +24,11 @@ The developer wants to test the unit-end page's "Not verified yet" points before
    listed as left as known; something to fix → Request Changes through the engine's rejected report with those failures
    and their notes in `--reason`.
 
+**Paste material.** Put what the developer must paste in a fenced block in the step's `do`, labelled for where it goes: ` ```Terminal `, ` ```Claude Code ` (slash commands) or
+` ```Ask Claude ` (prompts); inline `code` for a path or value. The page gives each block a Copy button.
+
+**Build and Test.** At the Build and Test gate write one plan of every Unit's deferred points (`test_plan.py collect`) plus the stage's own manual checks: `kind: "build-and-test"`,
+`sources`, source ids in `now` and `verifies`; § 7b of the `approval-gates` skill. For a release project the first section tests from a throwaway tag or build and the last section cuts the real release, only after the rest passed.
+
 Started with no unit-end page yet (the Unit is not built, or the gate has not opened): say so and stop; there is nothing
 to test. Per-stage gates and the plan page have no test plan.
