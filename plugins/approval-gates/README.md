@@ -27,6 +27,12 @@ contract/                                 the gate-bundle contract: README.md an
 hooks/gate_guard.py                       the guard (hooks/hooks.json registers it)
 ```
 
+## An intent with no Units
+
+When the intent has no Units (no units-generation: Construction runs once for the whole intent), the Code Generation **plan approval** gets the same
+plan page as a unit-end Unit, published in "AI-DLC unit approvals" and titled "Approve plan". Its completion gate stays a per-stage page in "AI-DLC
+approval gates". The page is built with `unit_bundle.py draft --page plan --unit intent`; `intent` stands for the whole intent.
+
 ## A Unit with the unit-end rhythm
 
 A team Unit claimed with `--rhythm unit-end` (the `unit-claim` plugin asks for the rhythm before the claim) runs its

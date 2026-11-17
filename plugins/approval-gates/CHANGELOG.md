@@ -1,5 +1,17 @@
 # approval-gates changelog
 
+## 1.36.0
+
+The Code Generation plan approval of an intent with no Units gets the unit approvals plan page (marketplace 1.61.0). Hook changed: `gate_guard.py`; script: `unit_bundle.py`; template: `unit-gate.html` (title and crumb only).
+
+- **No Units, plan page.** In an intent whose `construction/` holds no Unit folder (Construction runs once, stage folders directly under `construction/`), the
+  Code Generation plan approval is a `bundles/<id>` row built by `unit_bundle.py draft --page plan --unit intent` and published in "AI-DLC unit approvals",
+  like a unit-end Unit's plan. The guard opens the gate with the Unit id `intent` (the engine's own `unit` stays empty), requires and accepts that bundle,
+  and refuses a per-stage `gates/` row for the plan approval as the wrong page.
+- **`unit_bundle.py` reads the no-Unit layout.** `--unit intent` with no `construction/intent/` folder reads the design stages and the code plan from
+  `construction/<stage>/`. The page is titled "Approve plan" (no U-number); the id is `<intent>-intent-plan-v<n>-<stamp>`. `--page unit-end` is refused for it.
+- **Unchanged:** the completion gate of a no-Unit intent stays a per-stage page, and every gate of an intent with Units keeps its flow and rhythm.
+
 ## 1.35.4
 
 Each bolt of a Delivery Planning bolt plan is a review item (marketplace 1.57.3). Scripts changed: `digest.py`, `judgment.py`; template: `approval-gate.html`.
