@@ -64,6 +64,25 @@ class Base(unittest.TestCase):
             f.write(f'#!/bin/sh\ncat >> "{self.judge_log}"\necho >> "{self.judge_log}"\ncat "{self.verdict}"\n')
         os.chmod(self.judge, 0o755)
         self.set_verdict(True)
+        # The handle agent likewise: it logs its prompt and answers from the `handle` file.
+        self.handle_reply = os.path.join(self.root, "handle")
+        self.handle_log = os.path.join(self.root, "handle.log")
+        self.handle_cmd = os.path.join(self.root, "handle.sh")
+        with open(self.handle_cmd, "w", encoding="utf-8") as f:
+            f.write(f'#!/bin/sh\ncat >> "{self.handle_log}"\necho >> "{self.handle_log}"\ncat "{self.handle_reply}"\n')
+        os.chmod(self.handle_cmd, 0o755)
+        self.set_handle("pgdaily")
+
+    def set_handle(self, text):
+        with open(self.handle_reply, "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def handle_calls(self):
+        try:
+            with open(self.handle_log, encoding="utf-8") as f:
+                return f.read().count("short handle")
+        except OSError:
+            return 0
 
     def set_verdict(self, value):
         with open(self.verdict, "w", encoding="utf-8") as f:
@@ -114,6 +133,7 @@ class Base(unittest.TestCase):
         env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_PROJECT_DIR", "CLAUDE_CODE_ENTRYPOINT")}
         env["AIDLC_SESSION_TITLES_DIR"] = self.states
         env["AIDLC_SESSION_TITLES_JUDGE_CMD"] = self.judge
+        env["AIDLC_SESSION_TITLES_HANDLE_CMD"] = self.handle_cmd
         if desktop:
             env["CLAUDE_CODE_ENTRYPOINT"] = "claude-desktop"
         done = subprocess.run([sys.executable, HOOK], input=json.dumps(event), capture_output=True, text=True,
@@ -156,59 +176,59 @@ class TitleTests(Base):
         return self.title_of(self.prompt())
 
     def test_phase_and_stage_from_the_graph(self):
-        self.assertEqual(self.title(), "Inception — Requirements Analysis")
+        self.assertEqual(self.title(), "pgdaily: Inception — Requirements Analysis")
 
     def test_claimed_unit_on_a_per_unit_stage(self):
         self.set_state("functional-design")
         self.claim("u4-day-navigation")
-        self.assertEqual(self.title(), "u4-day-navigation — Functional Design")
+        self.assertEqual(self.title(), "pgdaily: u4-day-navigation — Functional Design")
 
     def test_per_unit_stage_outside_a_unit_checkout_names_the_phase(self):
         self.set_state("units-generation", unit_stage="functional-design", active_unit="u5-live-updates")
-        self.assertEqual(self.title(), "Construction")
+        self.assertEqual(self.title(), "pgdaily: Construction")
 
     def test_per_unit_stage_without_a_claim_names_the_phase(self):
         self.set_state("functional-design")
-        self.assertEqual(self.title(), "Construction")
+        self.assertEqual(self.title(), "pgdaily: Construction")
 
     def test_claim_wins_over_the_shared_active_unit(self):
         self.set_state("units-generation", unit_stage="functional-design", active_unit="u5-live-updates")
         self.claim("u2-blocks")
-        self.assertEqual(self.title(), "u2-blocks — Functional Design")
+        self.assertEqual(self.title(), "pgdaily: u2-blocks — Functional Design")
 
     def test_claim_of_another_intent_is_ignored(self):
         self.set_state("functional-design")
         self.claim("u2-blocks", uuid="ffffffff-0000-0000-0000-000000000000")
-        self.assertEqual(self.title(), "Construction")
+        self.assertEqual(self.title(), "pgdaily: Construction")
 
     def test_construction_stage_not_per_unit_names_the_phase(self):
         self.set_state("build-and-test")
         self.claim("u2-blocks")
-        self.assertEqual(self.title(), "Construction — Build and Test")
+        self.assertEqual(self.title(), "pgdaily: Construction — Build and Test")
         self.assertEqual(self.judge_calls(), 0)
 
     def test_ci_pipeline_names_the_phase(self):
         self.set_state("ci-pipeline")
         self.claim("u2-blocks")
-        self.assertEqual(self.title(), "Construction — CI Pipeline")
+        self.assertEqual(self.title(), "pgdaily: Construction — CI Pipeline")
 
     def test_directive_unit_alone_does_not_name_the_unit(self):
         self.set_directive("functional-design", unit="u3-notes")
-        self.assertEqual(self.title(), "Construction")
+        self.assertEqual(self.title(), "pgdaily: Construction")
 
     def test_older_directive_is_ignored(self):
         self.set_directive("functional-design", unit="u3-notes", newer=False)
-        self.assertEqual(self.title(), "Inception — Requirements Analysis")
+        self.assertEqual(self.title(), "pgdaily: Inception — Requirements Analysis")
 
     def test_stage_missing_from_the_graph_uses_the_state_heading(self):
         self.set_state("code-review-sweep")
-        self.assertEqual(self.title(), "Construction")
+        self.assertEqual(self.title(), "pgdaily: Construction")
         self.claim("u2-blocks")
-        self.assertEqual(self.title_of(self.prompt("next")), "Construction — Code Review Sweep")
+        self.assertEqual(self.title_of(self.prompt("next")), "pgdaily: Construction — Code Review Sweep")
 
     def test_lone_intent_without_a_cursor(self):
         os.remove(os.path.join(self.intents, "active-intent"))
-        self.assertEqual(self.title(), "Inception — Requirements Analysis")
+        self.assertEqual(self.title(), "pgdaily: Inception — Requirements Analysis")
 
     def test_no_title_without_a_stage(self):
         self.write(os.path.relpath(os.path.join(self.intent_dir, "aidlc-state.md"), self.project), "# empty\n")
@@ -226,7 +246,7 @@ class JudgeTests(Base):
 
     def test_unit_session_gets_the_unit_title(self):
         self.assertEqual(self.title_of(self.prompt("write the functional design")),
-                         "u4-day-navigation — Functional Design")
+                         "pgdaily: u4-day-navigation — Functional Design")
 
     def test_judge_gets_the_unit_the_stage_and_the_prompt(self):
         self.prompt("rename the build script")
@@ -250,7 +270,7 @@ class JudgeTests(Base):
     def test_new_unit_is_judged_again(self):
         self.prompt("go")
         self.claim("u5-live-updates")
-        self.assertEqual(self.title_of(self.prompt("next")), "u5-live-updates — Functional Design")
+        self.assertEqual(self.title_of(self.prompt("next")), "pgdaily: u5-live-updates — Functional Design")
         self.assertEqual(self.judge_calls(), 2)
 
     def test_no_prompt_yet_means_no_title_and_no_judge(self):
@@ -269,7 +289,7 @@ class JudgeTests(Base):
 
     def test_judge_that_cannot_answer_counts_as_a_unit_session_and_is_retried_later(self):
         self.set_verdict(None)
-        self.assertEqual(self.title_of(self.prompt("go")), "u4-day-navigation — Functional Design")
+        self.assertEqual(self.title_of(self.prompt("go")), "pgdaily: u4-day-navigation — Functional Design")
         self.assertIsNone(self.prompt("again"))  # same title, not asked again yet
         self.assertEqual(self.judge_calls(), 1)
         path = os.path.join(self.states, SID + ".json")
@@ -284,7 +304,7 @@ class JudgeTests(Base):
 
     def test_missing_judge_counts_as_a_unit_session(self):
         os.remove(self.judge)
-        self.assertEqual(self.title_of(self.prompt("go")), "u4-day-navigation — Functional Design")
+        self.assertEqual(self.title_of(self.prompt("go")), "pgdaily: u4-day-navigation — Functional Design")
 
     def test_judge_session_itself_is_not_titled(self):
         event = {"session_id": SID, "cwd": self.project, "hook_event_name": "UserPromptSubmit", "prompt": "x"}
@@ -317,7 +337,7 @@ class CheckoutTests(Base):
 
     def test_main_checkout_on_main_is_just_construction(self):
         out = self.prompt()
-        self.assertEqual(self.title_of(out), "Construction")
+        self.assertEqual(self.title_of(out), "pgdaily: Construction")
         self.assertNotIn("AskUserQuestion", self.context_of(out))
 
     def test_other_branch_asks_and_sets_no_title(self):
@@ -339,7 +359,7 @@ class CheckoutTests(Base):
 
     def test_build_and_test_and_ci_never_ask(self):
         self.git("checkout", "-q", "-b", "feat/x")
-        for stage, title in (("build-and-test", "Construction — Build and Test"), ("ci-pipeline", "Construction — CI Pipeline")):
+        for stage, title in (("build-and-test", "pgdaily: Construction — Build and Test"), ("ci-pipeline", "pgdaily: Construction — CI Pipeline")):
             self.set_state(stage)
             out = self.prompt()
             self.assertEqual(self.title_of(out), title)
@@ -349,14 +369,14 @@ class CheckoutTests(Base):
         self.git("checkout", "-q", "-b", "feat/x")
         self.set_state("requirements-analysis")
         out = self.prompt()
-        self.assertEqual(self.title_of(out), "Inception — Requirements Analysis")
+        self.assertEqual(self.title_of(out), "pgdaily: Inception — Requirements Analysis")
         self.assertNotIn("AskUserQuestion", self.context_of(out))
 
     def test_claimed_checkout_is_not_asked(self):
         self.git("checkout", "-q", "-b", "claim/u4")
         self.claim("u4-day-navigation")
         out = self.prompt()
-        self.assertEqual(self.title_of(out), "u4-day-navigation — Functional Design")
+        self.assertEqual(self.title_of(out), "pgdaily: u4-day-navigation — Functional Design")
         self.assertNotIn("AskUserQuestion", self.context_of(out))
 
     def test_unit_checkout_answer_names_the_unit(self):
@@ -364,13 +384,13 @@ class CheckoutTests(Base):
         self.set_directive("functional-design", unit="u3-notes")
         self.prompt()
         self.answer("Unit checkout")
-        self.assertEqual(self.title_of(self.prompt("next")), "u3-notes — Functional Design")
+        self.assertEqual(self.title_of(self.prompt("next")), "pgdaily: u3-notes — Functional Design")
 
     def test_unit_checkout_answer_without_a_unit_names_the_stage(self):
         self.git("checkout", "-q", "-b", "feat/x")
         self.prompt()
         self.answer("Unit checkout")
-        self.assertEqual(self.title_of(self.prompt("next")), "Construction — Functional Design")
+        self.assertEqual(self.title_of(self.prompt("next")), "pgdaily: Construction — Functional Design")
 
     def test_something_else_keeps_the_title(self):
         self.git("checkout", "-q", "-b", "feat/x")
@@ -400,11 +420,11 @@ class SessionTests(Base):
         self.assertIsNone(self.stop())
 
     def test_aidlc_command_prompt_marks_the_session(self):
-        self.assertEqual(self.title_of(self.prompt("/aidlc next")), "Inception — Requirements Analysis")
+        self.assertEqual(self.title_of(self.prompt("/aidlc next")), "pgdaily: Inception — Requirements Analysis")
 
     def test_engine_call_asks_for_the_rename_once(self):
         out = self.bash()
-        self.assertIn('"title": "Inception — Requirements Analysis"', self.context_of(out))
+        self.assertIn('"title": "pgdaily: Inception — Requirements Analysis"', self.context_of(out))
         self.assertIsNone(self.bash())  # asked already
 
     def test_aidlc_skill_marks_the_session(self):
@@ -414,18 +434,18 @@ class SessionTests(Base):
 
     def test_stage_change_asks_again(self):
         self.bash()
-        self.renamed("Inception — Requirements Analysis")
+        self.renamed("pgdaily: Inception — Requirements Analysis")
         self.assertIsNone(self.bash())
         self.set_state("functional-design")
         self.claim("u1-core")
-        self.assertIn('"u1-core — Functional Design"', self.context_of(self.bash()))
+        self.assertIn('"pgdaily: u1-core — Functional Design"', self.context_of(self.bash()))
 
     def test_prompt_emits_only_on_change(self):
         self.bind()
-        self.assertEqual(self.title_of(self.prompt()), "Inception — Requirements Analysis")
+        self.assertEqual(self.title_of(self.prompt()), "pgdaily: Inception — Requirements Analysis")
         self.assertIsNone(self.prompt())
         self.set_state("units-generation")
-        self.assertEqual(self.title_of(self.prompt()), "Inception — Units Generation")
+        self.assertEqual(self.title_of(self.prompt()), "pgdaily: Inception — Units Generation")
 
     def test_stop_blocks_once_while_behind(self):
         self.bash()
@@ -436,7 +456,7 @@ class SessionTests(Base):
 
     def test_stop_lets_go_when_renamed(self):
         self.bash()
-        self.renamed("Inception — Requirements Analysis")
+        self.renamed("pgdaily: Inception — Requirements Analysis")
         self.assertIsNone(self.stop())
 
     def test_stop_respects_stop_hook_active(self):
@@ -445,25 +465,25 @@ class SessionTests(Base):
 
     def test_declined_rename_is_not_asked_again(self):
         self.bash()
-        self.renamed("Inception — Requirements Analysis", response="The user declined the new title.")
+        self.renamed("pgdaily: Inception — Requirements Analysis", response="The user declined the new title.")
         self.assertIsNone(self.bash())
         self.assertIsNone(self.stop())
 
     def test_failed_rename_is_not_asked_again(self):
         self.bash()
-        self.renamed("Inception — Requirements Analysis", response="boom", failure=True)
+        self.renamed("pgdaily: Inception — Requirements Analysis", response="boom", failure=True)
         self.assertIsNone(self.stop())
 
     def test_unit_named_error_is_a_success(self):
         self.set_state("functional-design")
         self.claim("u3-error-pages")
         self.bash()
-        self.renamed("u3-error-pages — Functional Design", response="Renamed to u3-error-pages — Functional Design")
+        self.renamed("pgdaily: u3-error-pages — Functional Design", response="Renamed to u3-error-pages — Functional Design")
         self.assertIsNone(self.stop())
 
     def test_outside_the_desktop_app_only_the_harness_title(self):
         self.bind()
-        self.assertEqual(self.title_of(self.prompt(desktop=False)), "Inception — Requirements Analysis")
+        self.assertEqual(self.title_of(self.prompt(desktop=False)), "pgdaily: Inception — Requirements Analysis")
         out = self.run_hook({"hook_event_name": "Stop"}, desktop=False)
         self.assertIsNone(out)
 
@@ -483,8 +503,8 @@ class SessionTests(Base):
 class BackwardTests(Base):
     """The title follows the stage the checkout is on now, whichever way it moved: back, sideways or forward."""
 
-    EARLY = "Inception — Units Generation"
-    LATE = "Construction — Build and Test"
+    EARLY = "pgdaily: Inception — Units Generation"
+    LATE = "pgdaily: Construction — Build and Test"
 
     def settle(self, stage, title):
         """Move the project to `stage`, let the hook ask, and answer it as the assistant does."""
@@ -501,28 +521,28 @@ class BackwardTests(Base):
         self.assertIn(f'"title": "{self.EARLY}"', self.context_of(self.bash("aidlc engine jump units-generation")))
 
     def test_jump_reopen_asks_for_the_earlier_title(self):
-        self.settle("requirements-analysis", "Inception — Requirements Analysis")
+        self.settle("requirements-analysis", "pgdaily: Inception — Requirements Analysis")
         self.settle("build-and-test", self.LATE)
         self.set_state("requirements-analysis")
         out = self.bash("aidlc engine jump reopen requirements-analysis")
-        self.assertIn('"title": "Inception — Requirements Analysis"', self.context_of(out))
+        self.assertIn('"title": "pgdaily: Inception — Requirements Analysis"', self.context_of(out))
 
     def test_jump_back_noticed_at_the_end_of_the_turn_when_no_tool_call_saw_it(self):
         out = self.bash()
         self.assertEqual(self.stop()["decision"], "block")  # the first title was asked for and blocked once
-        self.renamed("Inception — Requirements Analysis")
+        self.renamed("pgdaily: Inception — Requirements Analysis")
         self.settle("build-and-test", self.LATE)
         self.set_state("requirements-analysis")  # moved by a tool the hook does not watch
         out = self.stop()
         self.assertEqual(out["decision"], "block")
-        self.assertIn("Inception — Requirements Analysis", out["reason"])
+        self.assertIn("pgdaily: Inception — Requirements Analysis", out["reason"])
 
     def test_declined_title_is_asked_again_when_the_stage_comes_back(self):
         self.bash()
-        self.renamed("Inception — Requirements Analysis", response="The user declined.")
+        self.renamed("pgdaily: Inception — Requirements Analysis", response="The user declined.")
         self.settle("build-and-test", self.LATE)
         self.set_state("requirements-analysis")
-        self.assertIn("Inception — Requirements Analysis", self.context_of(self.bash()))
+        self.assertIn("pgdaily: Inception — Requirements Analysis", self.context_of(self.bash()))
 
     def test_prompt_after_going_back_emits_the_earlier_title(self):
         self.bind()
@@ -541,7 +561,7 @@ class BackwardTests(Base):
 
     def test_redo_of_an_earlier_stage_mid_construction(self):
         self.claim("u1-core")
-        self.settle("functional-design", "u1-core — Functional Design")
+        self.settle("functional-design", "pgdaily: u1-core — Functional Design")
         self.set_state("units-generation")  # Units Generation redone while a Unit is claimed
         self.assertIn(f'"title": "{self.EARLY}"', self.context_of(self.bash("aidlc engine jump units-generation")))
 
@@ -553,14 +573,14 @@ class BackwardTests(Base):
     def test_unit_switch_back_and_forth(self):
         self.claim("u1-core")
         self.set_state("functional-design")
-        self.assertIn("u1-core — Functional Design", self.context_of(self.bash()))
-        self.renamed("u1-core — Functional Design")
+        self.assertIn("pgdaily: u1-core — Functional Design", self.context_of(self.bash()))
+        self.renamed("pgdaily: u1-core — Functional Design")
         self.claim("u2-extras")
-        self.assertIn("u2-extras — Functional Design", self.context_of(self.bash("aidlc unit claim u2-extras")))
-        self.renamed("u2-extras — Functional Design")
+        self.assertIn("pgdaily: u2-extras — Functional Design", self.context_of(self.bash("aidlc unit claim u2-extras")))
+        self.renamed("pgdaily: u2-extras — Functional Design")
         self.claim("u1-core")
         out = self.bash("aidlc unit claim u1-core")
-        self.assertIn('"title": "u1-core — Functional Design"', self.context_of(out))
+        self.assertIn('"title": "pgdaily: u1-core — Functional Design"', self.context_of(out))
 
     def test_resumed_session_takes_the_title_of_the_stage_it_is_on_now(self):
         self.bind()
@@ -575,6 +595,123 @@ class BackwardTests(Base):
         self.settle("units-generation", self.EARLY)
         self.assertIsNone(self.bash())
         self.assertIsNone(self.stop())
+
+
+class HandleTests(Base):
+    """Every title carries the intent's handle, made once by a Haiku agent and shared by the intent's sessions."""
+
+    def setUp(self):
+        super().setUp()
+        self.bind()
+        self.cache = os.path.join(self.states, "intent-handles.json")
+
+    def cached(self):
+        with open(self.cache, encoding="utf-8") as f:
+            return json.load(f)
+
+    def test_agent_gets_the_intent_and_its_description(self):
+        self.write(f"aidlc/spaces/default/intents/{INTENT}/project-description.json",
+                   json.dumps({"description": "A page that shows the day"}))
+        self.prompt()
+        with open(self.handle_log, encoding="utf-8") as f:
+            seen = f.read()
+        self.assertIn(INTENT, seen)
+        self.assertIn("A page that shows the day", seen)
+
+    def test_reply_is_cleaned_and_cached_by_the_intent_uuid(self):
+        self.set_handle(' `RvDesk`\nbecause it is short\n')
+        self.assertEqual(self.title_of(self.prompt()), "rvdesk: Inception — Requirements Analysis")
+        self.assertEqual(self.cached(), {UUID: "rvdesk"})
+
+    def test_title_shapes_all_carry_the_prefix(self):
+        self.assertTrue(self.title_of(self.prompt()).startswith("pgdaily: Inception — "))
+        self.set_state("build-and-test")
+        self.assertEqual(self.title_of(self.prompt("go")), "pgdaily: Construction — Build and Test")
+        self.set_state("functional-design")
+        self.assertEqual(self.title_of(self.prompt("go")), "pgdaily: Construction")
+        self.claim("u4-day-navigation")
+        self.assertEqual(self.title_of(self.prompt("go")), "pgdaily: u4-day-navigation — Functional Design")
+
+    def test_invalid_replies_fall_back_to_the_folder_name(self):
+        for reply in ("", "far too long a handle", "has space", "bad_char", "waytoolongone"):
+            with self.subTest(reply=reply):
+                self.set_handle(reply)
+                if os.path.exists(self.cache):
+                    os.remove(self.cache)
+                self.assertEqual(self.title_of(self.prompt(reply or "x")), "daily-pa: Inception — Requirements Analysis")
+                self.assertTrue(self.cached()[UUID]["fallback"])
+                self.states_reset()
+
+    def states_reset(self):
+        for name in os.listdir(self.states):
+            os.remove(os.path.join(self.states, name))
+
+    def test_fallback_is_kept_until_the_retry_time_and_then_replaced(self):
+        self.set_handle("garbled reply here")
+        self.assertEqual(self.title_of(self.prompt()), "daily-pa: Inception — Requirements Analysis")
+        self.set_handle("pgdaily")
+        self.prompt("again")
+        self.assertEqual(self.handle_calls(), 1)  # not asked again at once
+        cache = self.cached()
+        cache[UUID]["at"] -= 700
+        with open(self.cache, "w", encoding="utf-8") as f:
+            json.dump(cache, f)
+        self.assertEqual(self.title_of(self.prompt("later")), "pgdaily: Inception — Requirements Analysis")
+        self.assertEqual(self.cached(), {UUID: "pgdaily"})
+        self.assertEqual(self.handle_calls(), 2)
+
+    def test_missing_agent_falls_back(self):
+        self.handle_cmd = os.path.join(self.root, "missing.sh")
+        self.assertEqual(self.title_of(self.prompt()), "daily-pa: Inception — Requirements Analysis")
+
+    def test_another_session_of_the_intent_reuses_the_handle(self):
+        self.prompt()
+        self.set_handle("other")
+        self.write("aidlc/.aidlc-sessions/second-session.binding.json",
+                   json.dumps({"space": "default", "intent": INTENT, "boundAt": "2026-10-20T00:00:00Z"}))
+        out = self.run_hook({"hook_event_name": "UserPromptSubmit", "prompt": "go", "session_id": "second-session"})
+        self.assertEqual(self.title_of(out), "pgdaily: Inception — Requirements Analysis")
+        self.assertEqual(self.handle_calls(), 1)
+
+    def test_a_hand_edited_handle_is_taken_over(self):
+        self.prompt()
+        with open(self.cache, "w", encoding="utf-8") as f:
+            json.dump({UUID: "mine"}, f)
+        self.assertEqual(self.title_of(self.prompt("go")), "mine: Inception — Requirements Analysis")
+        self.assertEqual(self.handle_calls(), 1)
+
+    def test_a_session_with_no_title_never_asks_for_a_handle(self):
+        self.set_state("functional-design")
+        self.claim("u4-day-navigation")
+        self.set_verdict(False)
+        self.assertIsNone(self.prompt("fix the workspace"))
+        self.assertEqual(self.handle_calls(), 0)
+
+    def test_no_rename_loop(self):
+        self.assertIsNotNone(self.prompt())
+        self.assertIsNone(self.prompt("again"))
+        self.assertIn("pgdaily: Inception", self.context_of(self.bash()))
+        self.renamed("pgdaily: Inception — Requirements Analysis")
+        self.assertEqual(self.context_of(self.bash()), "")
+        self.assertIsNone(self.stop())
+        self.assertIsNone(self.prompt("and again"))
+        self.assertEqual(self.handle_calls(), 1)
+
+    def test_a_hand_set_title_stays_protected(self):
+        self.prompt()
+        self.bash()
+        self.renamed("pgdaily: Inception — Requirements Analysis", response="Declined by the user", failure=True)
+        self.assertEqual(self.context_of(self.bash()), "")
+        self.assertIsNone(self.stop())
+
+    def test_session_started_before_the_prefix_gets_it_once(self):
+        state = {"aidlc": True, "emitted": "Inception — Requirements Analysis",
+                 "applied": "Inception — Requirements Analysis", "seen": "Inception — Requirements Analysis"}
+        os.makedirs(self.states)
+        with open(os.path.join(self.states, SID + ".json"), "w", encoding="utf-8") as f:
+            json.dump(state, f)
+        self.assertEqual(self.title_of(self.prompt()), "pgdaily: Inception — Requirements Analysis")
+        self.assertIsNone(self.prompt("again"))
 
 
 class ManifestTests(unittest.TestCase):
