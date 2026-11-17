@@ -14,6 +14,11 @@ else `Current Stage`; the Unit from this checkout's claim (aidlc/.aidlc-unit-sco
 else `Active Unit`, and only on a per-Unit stage. Stage and phase names come from the project's stage graph
 (.claude/tools/data/stage-graph.json), else the slug title-cased.
 
+Every title carries a short handle of its intent, `<handle>: <title>` (e.g. `rvdesk: u19-pr-actions — Code Generation`),
+so sessions of different intents can be told apart. The handle (at most 8 characters of a-z, 0-9 and `-`) is made once
+per intent by a Haiku agent from the intent's name and description and kept in <state folder>/intent-handles.json, so
+every session of the intent shares it; edit a value there to change a handle.
+
 A session counts as an AI-DLC session once it shows it runs the workflow: an `aidlc` engine, unit or claim command
 in Bash, an `aidlc*` skill, a prompt starting with `/aidlc`, or a binding file of its own. Other sessions in the
 same repository are left alone.
@@ -51,6 +56,10 @@ JUDGE_RETRY_SECONDS = 600  # after a judge that could not answer, wait this long
 JUDGE_TIMEOUT_SECONDS = 60
 JUDGING_ENV = "AIDLC_SESSION_TITLES_JUDGING"  # set in the judge's own process so its hooks do nothing
 JUDGE_CMD_ENV = "AIDLC_SESSION_TITLES_JUDGE_CMD"  # replaces `claude -p --model haiku …`; reads the prompt on stdin
+HANDLE_CMD_ENV = "AIDLC_SESSION_TITLES_HANDLE_CMD"  # replaces the handle agent's command; reads the prompt on stdin
+HANDLES_FILE = "intent-handles.json"  # in the state folder: {intent uuid or folder name: handle | {"handle", "fallback", "at"}}
+HANDLE = re.compile(r"^[a-z0-9][a-z0-9-]{0,7}$")
+HANDLE_SEPARATOR = ": "
 SEPARATOR = " — "
 RENAME_TOOL = "mcp__ccd_session_mgmt__set_session_title"
 # The stages that run once per Unit; on any other the title names the phase.
@@ -466,7 +475,119 @@ def answered(response):
     return None
 
 
+# ---------------------------------------------------------------- the intent handle
+
+def clean_handle(raw):
+    """The handle in the agent's reply (first line, trimmed, quotes and backticks off, lower-cased), None when it is not one."""
+    lines = str(raw or "").strip().splitlines()
+    word = lines[0].strip().strip("`'\"* ").lower() if lines else ""
+    return word if HANDLE.match(word) else None
+
+
+def fallback_handle(intent):
+    """A short form of the intent's folder name: the date prefix and the uuid tail dropped, cut to 8 characters."""
+    slug = re.sub(r"^\d{6,8}-", "", intent)
+    slug = re.sub(r"-[0-9a-f]{16}$", "", slug)
+    slug = re.sub(r"[^a-z0-9-]+", "-", slug.lower())[:8].strip("-")
+    return slug if HANDLE.match(slug) else "intent"
+
+
+def intent_description(intent_dir, text):
+    """What the intent is about, for the handle agent: project-description.json, else the state file's Project line."""
+    about = read_json(os.path.join(intent_dir, "project-description.json"))
+    if isinstance(about, dict):
+        for key in ("description", "summary", "name", "title"):
+            if isinstance(about.get(key), str) and about[key].strip():
+                return about[key].strip()[:300]
+    return field(text, "Project")[:300]
+
+
+def handle_prompt(intent, description):
+    return (
+        "Make a short handle for a software intent, so a developer can tell sessions of different intents apart at a "
+        "glance in a list of session titles.\n\n"
+        f"Intent folder: {intent}\nDescription: {description or 'none'}\n\n"
+        "Rules: at most 8 characters, only lowercase letters, digits and hyphen, a logical short name for the intent "
+        "(drop the date and filler words; abbreviate if it is longer, e.g. reviewdesk -> rvdesk). "
+        "Reply with the handle only: no quotes, no explanation.")
+
+
+def ask_handle(prompt):
+    """A valid handle from the agent, None when it cannot answer or answers with something else."""
+    if os.environ.get(JUDGING_ENV):
+        return None
+    command = os.environ.get(HANDLE_CMD_ENV)
+    command = [command] if command else ([shutil.which("claude"), "-p", "--model", "haiku", "--effort", "low",
+                                          "--no-session-persistence", "--disable-slash-commands", "--tools", ""]
+                                         if shutil.which("claude") else None)
+    if not command:
+        return None
+    try:
+        done = subprocess.run(command, input=prompt, capture_output=True, text=True, timeout=JUDGE_TIMEOUT_SECONDS,
+                              env={**os.environ, JUDGING_ENV: "1"}, cwd=tempfile.gettempdir())
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return clean_handle(done.stdout)
+
+
+def load_handles():
+    data = read_json(os.path.join(state_dir(), HANDLES_FILE))
+    return data if isinstance(data, dict) else {}
+
+
+def save_handles(handles):
+    folder = state_dir()
+    os.makedirs(folder, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=folder, prefix=HANDLES_FILE + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(handles, f, indent=1, sort_keys=True)
+        os.replace(tmp, os.path.join(folder, HANDLES_FILE))
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+        raise
+
+
+def intent_handle(intent_dir, intent, uuid, text):
+    """The handle every session of this intent shares: read from the cache, else made once by the agent and cached. A
+    value the agent could not give is a deterministic short form of the folder name, marked as a fallback and
+    replaced when the agent answers on a retry after JUDGE_RETRY_SECONDS."""
+    key = uuid or intent
+    entry = load_handles().get(key)
+    if isinstance(entry, str) and clean_handle(entry):
+        return clean_handle(entry)
+    if isinstance(entry, dict) and clean_handle(entry.get("handle")) and (
+            not entry.get("fallback") or not isinstance(entry.get("at"), (int, float))
+            or time.time() - entry["at"] < JUDGE_RETRY_SECONDS):
+        return clean_handle(entry["handle"])
+    made = ask_handle(handle_prompt(intent, intent_description(intent_dir, text)))
+    try:
+        handles = load_handles()  # again: another session may have filled it while the agent was thinking
+        current = handles.get(key)
+        if isinstance(current, str) and clean_handle(current):
+            return clean_handle(current)
+        handles[key] = made if made else {"handle": fallback_handle(intent), "fallback": True, "at": time.time()}
+        save_handles(handles)
+    except OSError:
+        pass
+    return made or fallback_handle(intent)
+
+
 def expected_title(event, state, project):
+    """(title, pending) as `plain_title` finds them, a title prefixed with its intent's handle. The handle is looked up
+    only for a title the session gets, so a session whose title is left alone never costs a handle."""
+    title, pending = plain_title(event, state, project)
+    if not title:
+        return title, pending
+    space, intent = selected_intent(project, str(event.get("session_id") or ""))
+    intent_dir = os.path.dirname(state_file(project, space, intent))
+    handle = intent_handle(intent_dir, intent, intent_uuid(project, space, intent),
+                           read_text(state_file(project, space, intent)) or "")
+    return handle + HANDLE_SEPARATOR + title, pending
+
+
+def plain_title(event, state, project):
     """(title, pending): the title the session should carry, or None when the project does not say what it is on or
     the session is not working on a Unit; `pending` is set while the developer should be asked whether a Construction
     session outside the main checkout is a Unit checkout."""

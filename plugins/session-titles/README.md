@@ -10,6 +10,23 @@ title of every session that runs an AI-DLC workflow in step with what it is on:
 | any other Construction stage outside a Unit's checkout (e.g. Functional Design) | just `Construction` | `Construction` |
 | a session in a Unit's checkout that is not working on the Unit | its title is left as it is | |
 
+Every title starts with a short handle of its intent, so sessions of different intents can be told apart:
+`rvdesk: u19-pr-actions — Code Generation`, `rvdesk: Construction`. A title the plugin leaves alone stays alone.
+
+## The intent handle
+
+The handle is at most 8 characters of `a-z`, `0-9` and `-`, a logical short name for the intent. A Haiku agent
+(`claude -p --model haiku --effort low`, no tools) makes it once per intent from the intent's folder name and its
+description (`project-description.json`, else the state file's Project line), and the answer is cached in
+`~/.claude/aidlc-session-titles/intent-handles.json` (`AIDLC_SESSION_TITLES_DIR` moves the folder), keyed by the intent's
+uuid, so every session of the intent shares it and Haiku is not called on a prompt. A reply that is not a valid handle,
+or no answer at all, gives a short form of the folder name (date prefix dropped, cut to 8) marked `"fallback"`, and the
+agent is asked again after 10 minutes. `AIDLC_SESSION_TITLES_HANDLE_CMD` replaces the command (it reads the prompt on stdin).
+
+To change a handle, edit its value in `intent-handles.json` (`{"<intent uuid>": "rvdesk"}`; a plain string is final) and
+the sessions take it at their next prompt or stage change. A session that already ran gets the prefix once, as a title
+change like any other.
+
 The title is read from the project, never from the agent's memory:
 
 - **Intent** — this session's binding (`aidlc/.aidlc-sessions/<session>.binding.json`), else the space's
