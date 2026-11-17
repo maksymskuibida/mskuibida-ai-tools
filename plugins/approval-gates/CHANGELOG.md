@@ -2,7 +2,7 @@
 
 ## 1.39.0
 
-Custom per-Unit stages are part of a Unit (marketplace 1.64.0). Templates changed: none (`unit-gate.html` is untouched: the extra rows are `built` rows and the extra stages `header.stages` entries it already draws); new script: `stage_graph.py`.
+Custom per-Unit stages are part of a Unit (marketplace 1.65.0). Templates changed: none (`unit-gate.html` is untouched: the extra rows are `built` rows and the extra stages `header.stages` entries it already draws); new script: `stage_graph.py`.
 
 - **The Unit's stages come from the stage graph.** `scripts/stage_graph.py` reads `.claude/tools/data/stage-graph.json`: the per-Unit stages are those with `for_each: "unit-of-work"`, in stage-number order; a custom
   stage the intent's `aidlc-state.md` does not list does not apply. A Unit's last stage is the last applicable one. No graph, or none marking a per-Unit stage, keeps today's constants (`code-generation`).
