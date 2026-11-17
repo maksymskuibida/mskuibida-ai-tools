@@ -350,29 +350,23 @@ class TestUnitPages(unittest.TestCase):
         self.assertIsNone(o["funnel"], "all the points not verified: the list says it already")
         self.assertEqual(o["errors"], [])
 
-    def test_plan_steps_as_lanes_in_build_order_each_step_linking_to_its_row(self):
+    def test_plan_steps_one_by_one_in_plan_order_collapsed_to_number_title_label_and_read_mark(self):
         o = drive("unit", self.page("unit-plan-r1"))
-        lanes = o["lanes"]
-        self.assertGreaterEqual(len(lanes["names"]), 2)
-        self.assertEqual(lanes["names"][0], "setup", "the lane of the first step comes first")
-        self.assertEqual(lanes["steps"], lanes["rowSteps"], "every step once")
-        self.assertTrue(o["laneJump"]["open"])
-        self.assertIn("Plan steps by layer", lanes["label"])
+        self.assertIsNone(o["lanes"], "no grouping figure: the steps run in the plan's order")
+        steps = o["steps"]
+        self.assertEqual(steps["numbers"], sorted(steps["numbers"]))
+        self.assertEqual(steps["numbers"], list(range(1, len(steps["numbers"]) + 1)), "every step once, in order")
+        self.assertEqual(steps["expanded"], 0, "steps start collapsed")
+        self.assertEqual(steps["bodies"], 0)
+        self.assertEqual(steps["headParts"], ["twist", "sno", "rtitle", "layer", "dot"], "number, title, label, read mark, expand control and nothing else")
+        self.assertEqual(steps["twistAria"], "false")
 
-    def test_a_plan_with_one_layer_keeps_the_list(self):
-        import preview_units
-        import preview
-        b = preview_units.plan_bundle(1)
-        for st in b["plan"]["steps"]:
-            st["layer"] = "logic"
-        row = {"bundle": b, "page": "plan", "title": "t", "createdAt": b["createdAt"], "status": "open", "intent": b["header"]["intent"], "unit": b["header"]["unit"]}
-        tmp = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
-        path = os.path.join(tmp, "one-layer.html")
-        open(path, "w", encoding="utf-8").write(preview.page("unit", {"bundles/" + b["id"]: row}, b["id"], {}))
-        o = drive("unit", path)
-        self.assertIsNone(o["lanes"])
-        self.assertEqual(o["errors"], [])
+    def test_marking_a_step_read_collapses_it_and_unmarking_does_not_expand_it(self):
+        o = drive("unit", self.page("unit-plan-r1"))
+        s = o["stepRead"]
+        self.assertEqual(s["opened"], "true")
+        self.assertEqual(s["afterRead"], {"expanded": "false", "read": True})
+        self.assertEqual(s["afterUnread"], {"expanded": "false", "read": False})
 
     def test_the_version_timeline_replaces_the_legend_and_one_round_shows_alone(self):
         o = drive("unit", self.page("unit-plan-r3"))

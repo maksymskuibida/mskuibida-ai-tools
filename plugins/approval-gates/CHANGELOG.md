@@ -1,5 +1,15 @@
 # approval-gates changelog
 
+## 1.37.0
+
+The unit approvals plan page shows the Code Generation plan's steps one by one, in the plan's own order (marketplace 1.62.0). Template changed: `unit-gate.html`; test changes only elsewhere.
+
+- **Plan order.** Steps are listed in the order of the code-generation plan, numbered by position (`n`, as the bundle has always kept it); the page also sorts by `n`.
+  The "Steps by layer" figure that grouped them is gone. The layer (setup, tests, data, logic, api, UI ...) is now a label chip on each step.
+- **Collapsed step = number, title, label, read mark, expand control.** File and design-point counts, the revision note and tag, sub-steps, what the step
+  implements and the note box moved into the expanded body. Steps start collapsed in every mode; the expand control and the title carry `aria-expanded`.
+- **Read mark.** Marking a step read collapses it; unmarking it leaves it collapsed. Read state, counters and filters are unchanged. Older bundles render as before.
+
 ## 1.36.0
 
 The Code Generation plan approval of an intent with no Units gets the unit approvals plan page (marketplace 1.61.0). Hook changed: `gate_guard.py`; script: `unit_bundle.py`; template: `unit-gate.html` (title and crumb only).

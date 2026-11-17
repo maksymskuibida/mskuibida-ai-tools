@@ -301,7 +301,7 @@ key of its own, and pressing a mark in it filters or jumps to the real row. The 
 - **Verification funnel** (unit-end): the points the tests cover, verified by you, not verified, failed; a part sets the state chip.
 - **Round timeline** (both kinds of page): v1 to vN with what each round changed, added and removed; it replaces the legend chips and
   keeps their behaviour (one round only; the same chip again shows all).
-- **Plan steps as lanes** (plan page, two layers or more), **criteria at a glance** (one dot each, above the evaluation), and a file's
+- **Plan steps in plan order** (plan page: one row per step, in the code plan's own order, each with its layer as a label; collapsed a step shows its number, title, label and read mark, and marking it read collapses it), **criteria at a glance** (one dot each, above the evaluation), and a file's
   **outline** (beside a long file on wide screens, a strip on narrow ones); tables scroll in their own frame with a sticky first column,
   prose keeps a measure of about 76 characters, and code never widens the page.
 

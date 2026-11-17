@@ -190,6 +190,11 @@ h2 .hint { margin-left: 8px; font-weight: 400; font-size: 13px; color: var(--mut
 .where { flex: none; width: 104px; font-size: 12px; color: var(--muted); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .where.path { font-family: var(--mono); width: 150px; }
 .lab { flex: none; width: 66px; text-align: center; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; padding: 3px 0; border-radius: 4px; }
+.sno { flex: none; min-width: 26px; height: 26px; padding: 0 6px; box-sizing: border-box; border-radius: 13px; background: var(--accent-soft); color: var(--accent-strong); font: 600 12px/26px var(--mono); text-align: center; font-variant-numeric: tabular-nums; }
+.step.read .sno { background: var(--hover); color: var(--muted); }
+.step .rowhead { cursor: default; } .step .rtitle { cursor: pointer; }
+.stepmeta { margin: 0 0 8px; font-size: 12px; color: var(--muted); } .stepmeta:empty { display: none; }
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .layer { flex: none; width: 66px; text-align: center; font-size: 11px; font-weight: 500; padding: 3px 0; border-radius: 4px; }
 .vchips { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 16px 4px; }
 .vchip { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid var(--line); background: var(--surface); color: var(--fg-2); font-size: 13px; cursor: pointer; }
@@ -2034,41 +2039,37 @@ var GateView = (function () {
     return '<section class="card" id="' + esc(s.key) + '" data-sec="' + esc(s.key) + '">' + sectionHead(s.key, s.title, s.hint, open, right) + body + "</section>";
   }
 
+  /* A plan step: one row, in the plan's own order. Collapsed it shows only its number, title, layer label, the read mark and the
+     expand control; everything else (changes since a round, file and design counts, sub-steps, what it implements, the note box)
+     is in the body. Steps start collapsed, in every mode. */
   function stepHtml(st, bundle, step) {
-    var key = "step-" + int(step.n), read = isRead(st, stepKey(step), step), open = isOpen(st, key, read), t = step.rev ? revTone(step.rev) : null;
-    var lt = LAYER_TONE[step.layer] || "low";
-    var head = '<div class="rowhead"><button type="button" class="twist" data-act="row" data-key="' + key + '" aria-expanded="' + open + '" aria-label="' + (open ? "Collapse" : "Expand") + " step " + int(step.n) + '">' + CHEVRON + "</button>" +
-      '<span class="rid">Step ' + int(step.n) + "</span>" +
-      '<button type="button" class="rtitle" data-act="row" data-key="' + key + '" title="' + esc(step.title) + '">' + esc(step.title) + "</button>" + revBadge(step) +
+    var key = "step-" + int(step.n), read = isRead(st, stepKey(step), step), open = st.open[key] === true, t = step.rev ? revTone(step.rev) : null;
+    var lt = LAYER_TONE[step.layer] || "low", dp = (step.implements || []).length;
+    var head = '<div class="rowhead"><button type="button" class="twist" data-act="row" data-key="' + key + '" aria-expanded="' + open + '" aria-controls="' + key + '-body" aria-label="' + (open ? "Collapse" : "Expand") + " step " + int(step.n) + '">' + CHEVRON + "</button>" +
+      '<span class="sno" aria-hidden="true">' + int(step.n) + "</span>" +
+      '<button type="button" class="rtitle" data-act="row" data-key="' + key + '" aria-expanded="' + open + '" aria-controls="' + key + '-body" title="' + esc(step.title) + '"><span class="vh">Step ' + int(step.n) + ": </span>" + esc(step.title) + "</button>" +
       '<span class="layer" style="' + tone(lt) + '">' + esc(step.layer) + "</span>" +
-      '<span class="where num">' + plural(step.files, "file") + "</span>" +
-      '<span class="where wide">' + ((step.implements || []).length ? plural(step.implements.length, "design pt", "design pts") : "") + "</span>" +
-      '<button type="button" class="dot" data-act="read" data-key="' + key + '" aria-label="Mark step ' + int(step.n) + (read ? " unread" : " read") + '"><i></i></button></div>';
+      '<button type="button" class="dot" data-act="read" data-key="' + key + '" aria-pressed="' + read + '" aria-label="Mark step ' + int(step.n) + (read ? " unread" : " read") + '" title="Mark ' + (read ? "unread" : "read") + '"><i></i></button></div>';
     var body = "";
     if (open) {
-      body = '<div class="rowbody">' + (step.rev && step.revNote && step.revNote !== st.commonNote ? '<p class="revnote" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">' + esc(step.revNote) + "</p>" : "") +
+      var meta = [plural(step.files, "file"), dp ? plural(dp, "design pt", "design pts") : ""].filter(Boolean).join(" · ");
+      body = '<div class="rowbody" id="' + key + '-body">' + (step.rev ? '<p class="stepmeta">' + revBadge(step) + "</p>" : "") +
+        (step.rev && step.revNote && step.revNote !== st.commonNote ? '<p class="revnote" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">' + esc(step.revNote) + "</p>" : "") +
+        '<p class="stepmeta">' + esc(meta) + "</p>" +
         '<ol class="subs">' + (step.subs || []).map(function (s) {
           if (!s.rev) return "<li>" + esc(s.text) + "</li>";
           var u = revTone(s.rev);
           return '<li style="background:var(--' + u + '-bg)">' + esc(s.text) + '<span class="sv" style="color:var(--' + u + '-fg)">v' + int(s.rev) + "</span></li>";
         }).join("") + "</ol>" +
-        ((step.implements || []).length ? '<div class="refs"><span>Implements</span>' + step.implements.map(function (x) { return refHtml(x, bundle); }).join("") + "</div>" : "") +
+        (dp ? '<div class="refs"><span>Implements</span>' + step.implements.map(function (x) { return refHtml(x, bundle); }).join("") + "</div>" : "") +
         noteBox(st, key, "Only if this step should change") + "</div>";
     }
     return '<div class="row step' + (read ? " read" : "") + '" id="' + key + '" style="' + (t ? "background:var(--" + t + "-tint)" : "") + '">' + head + body + "</div>";
   }
 
-  /* The steps grouped by layer, in build order; with one layer the list is enough. A step's place links to its row. */
-  function lanesHtml(steps) {
-    var order = [], by = {};
-    steps.slice().sort(function (x, y) { return int(x.n) - int(y.n); }).forEach(function (s) {  /* the plan is in build order: a lane sits where its first step does */
-      if (!by[s.layer]) { by[s.layer] = { name: s.layer, steps: [] }; order.push(s.layer); }
-      by[s.layer].steps.push({ key: "step-" + int(s.n), n: int(s.n), title: s.title, implements: (s.implements || []).map(function (r) { return r && r.label != null ? String(r.label) : String(r); }) });
-    });
-    return GateViz.lanes({ lanes: order.map(function (l) { return by[l]; }) });
-  }
   function planHtml(st, bundle) {
     var p = bundle.plan, steps = p.steps || [], open = secOpen(st, "plan", true);
+    steps = steps.slice().sort(function (x, y) { return int(x.n) - int(y.n); });  /* the plan's own order; an older bundle has the same n */
     var shown = steps.filter(function (s) { return passes(st, s, stepKey(s), true); });
     var layers = LAYER_ORDER.map(function (l) {
       var n = steps.filter(function (s) { return s.layer === l; }).length;
@@ -2078,7 +2079,7 @@ var GateView = (function () {
       var t = revTone(+v); return '<span class="lc" style="background:var(--' + t + "-bg);color:var(--" + t + '-fg)">v' + int(v) + "<b>" + steps.filter(function (s) { return s.rev === +v; }).length + "</b></span>";
     }).join("");
     var right = layers + revs + '<span class="shown">' + (st.filter === "all" ? steps.length : shown.length + "/" + steps.length) + "</span>" + secDot(st, bundle, "plan", p.title || "Code plan");
-    var body = open ? '<div class="secbody">' + lanesHtml(st.filter === "all" ? steps : shown) + goneAfter(st, "plan", "") + shown.map(function (s) { return stepHtml(st, bundle, s) + goneAfter(st, "plan", "step-" + int(s.n)); }).join("") + "</div>" : "";
+    var body = open ? '<div class="secbody">' + goneAfter(st, "plan", "") + shown.map(function (s) { return stepHtml(st, bundle, s) + goneAfter(st, "plan", "step-" + int(s.n)); }).join("") + "</div>" : "";
     return '<section class="card" id="plan" data-sec="plan">' + sectionHead("plan", p.title || "Code plan", p.hint || "", open, right) + body + "</section>";
   }
 
@@ -2437,8 +2438,8 @@ if (typeof module !== "undefined") module.exports = GateView;
     } else if (act === "group") st.open[key] = st.open[key] === false;
     else if (act === "read") {
       var it = GateView.itemsOf(view.bundle).filter(function (x) { return x.anchor === key; })[0];
-      /* marking a row read folds it; marking it unread opens it again */
-      if (it) { var r = it.item.rev || 1; if (GateView.isRead(st, it.key, it.item)) { st.read[it.key] = r - 1; saveReads(); st.open[key] = true; } else { markRead([it.key], r); st.open[key] = false; } }
+      /* marking a row read folds it; marking it unread opens it again, except a plan step, which stays as it is */
+      if (it) { var r = it.item.rev || 1; if (GateView.isRead(st, it.key, it.item)) { st.read[it.key] = r - 1; saveReads(); if (!/^step-/.test(key)) st.open[key] = true; } else { markRead([it.key], r); st.open[key] = false; } }
     } else if (act === "vstate") { st.vstate = st.vstate || {}; st.vstate[val] = !st.vstate[val]; }
     else if (act === "secread") {
       var sits = GateView.itemsOfSection(view.bundle, key), sall = sits.length && sits.every(function (x) { return GateView.isRead(st, x.key, x.item); });
