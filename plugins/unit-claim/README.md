@@ -1,15 +1,15 @@
 # unit-claim
 
-Before a team AI-DLC Unit is claimed, you choose which design stages it runs and how it is approved. You choose in
+Before a team AI-DLC Unit is claimed, you choose which per-Unit stages it runs and how it is approved. You choose in
 one dialog, with a recommendation for each stage shown above it.
 
 The agent opens the dialog, and the plugin's mod fills it in:
 
 - **Above the dialog**: suggested design stages. A model (Sonnet by default) reads the Unit's entry in
-  `unit-of-work.md`, its stories and each stage's own `condition:` from the project's stage graph. It splits the four
-  stages (Functional Design, NFR Requirements, NFR Design, Infrastructure Design) into **Recommended stages** and
-  **Skip these**, with a reason under each.
-- **Stages**: "Suggested stages", "All four stages", or type your own under Other.
+  `unit-of-work.md`, its stories and each stage's own `condition:` from the project's stage graph. It splits the stages
+  into **Recommended stages** and **Skip these**, with a reason under each.
+- **Stages**: "Suggested stages", "All four stages" (or "All N stages" when the project has its own), or type your own
+  under Other.
 - **Rhythm**: the rhythms the project's pinned engine accepts (`aidlc unit claim --help`): today `unit-end` (one plan
   page before the code and one page at the end, through the approval-gates plugin) and `per-stage` (an approval after
   every stage). No default is picked for you.
@@ -28,6 +28,17 @@ left-out stage is skipped when the engine's directive reaches it:
 ```
 aidlc engine orchestrate report --stage <slug> --unit <unit> --result skipped --reason "skipped at claim by the developer"
 ```
+
+## The stages come from the project's stage graph
+
+The dialog lists the per-Unit stages of the project's own stage graph (`.claude/tools/data/stage-graph.json`): the
+stages with `for_each: "unit-of-work"`, except code-generation, in the graph's order. A stage a plugin adds to the
+project (say a `demo-assessment` stage that runs right after Code Generation) is listed with the graph's name, and its
+reason is the first sentence of its `condition`, shortened. The four known design stages keep their wording, and the
+recommendation for them is the same as before. A custom stage with `execution: ALWAYS` is offered too: the engine's
+`claim --skip-stages` takes any per-Unit stage but code-generation, so the dialog follows it, and the recommender is
+told the stage runs for every Unit unless left out. Without a graph (or one with no per-Unit stage) the dialog is
+today's four design stages. The answer keeps the stages it was asked about, so the claim leaves out exactly those.
 
 If you pick NFR Design without NFR Requirements, NFR Requirements is added back, and the agent tells you in one line.
 Nothing is saved across Units or claims: every claim asks. Your answer is used by the claim it was given for; once that

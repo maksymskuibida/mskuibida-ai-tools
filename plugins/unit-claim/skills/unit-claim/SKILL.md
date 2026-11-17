@@ -33,7 +33,8 @@ The plugin's mod (`hooks/register.tsx`) replaces the placeholder with its own tw
 recommendation above them. Don't write a recommendation of your own and don't ask anything else first:
 
 - **Stages**: "Suggested stages" (the stages a model recommends, each with its reason shown above the dialog), "All
-  four stages", or the developer's own list typed under Other.
+  four stages" ("All N stages" when the project's stage graph has its own per-Unit stages, which the dialog lists too),
+  or the developer's own list typed under Other.
 - **Rhythm**: the rhythms the project's pinned engine accepts (`aidlc unit claim --help`), today `unit-end` and
   `per-stage`, with no default.
 

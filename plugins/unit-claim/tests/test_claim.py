@@ -506,6 +506,76 @@ class TestScript(Case):
         self.assertEqual(cc.with_needs(["nfr-design"])[0], ["nfr-requirements", "nfr-design"])
 
 
+GRAPH = [
+    {"slug": "workspace-scaffold", "name": "Workspace Scaffold", "for_each": None, "execution": "ALWAYS"},
+    {"slug": "functional-design", "name": "Functional Design", "for_each": "unit-of-work", "execution": "CONDITIONAL",
+     "condition": "From the graph."},
+    {"slug": "nfr-requirements", "name": "NFR Requirements", "for_each": "unit-of-work", "execution": "CONDITIONAL"},
+    {"slug": "code-generation", "name": "Code Generation", "for_each": "unit-of-work", "execution": "ALWAYS"},
+    {"slug": "demo-assessment", "name": "Demo Assessment", "for_each": "unit-of-work", "execution": "ALWAYS", "plugin": "demo",
+     "condition": "Runs right after Code Generation and is approved with the Unit. It reads the changed files and the "
+                  "conventions in force, and it reports anything that drifts from them, however small it looks."},
+    {"slug": "demo-summary", "name": "Demo Summary", "for_each": None, "execution": "ALWAYS", "plugin": "demo"},
+]
+
+
+class TestCustomPerUnitStages(Case):
+    """A project's own per-Unit stages (from its stage graph) are offered, named and ordered as the graph has them."""
+
+    def setUp(self):
+        super().setUp()
+        data = os.path.join(self.project, ".claude", "tools", "data")
+        os.makedirs(data)
+        with open(os.path.join(data, "stage-graph.json"), "w") as f:
+            json.dump(GRAPH, f)
+
+    def stages(self):
+        return json.loads(self.run_script("stages").stdout)
+
+    def test_the_per_unit_stages_in_the_graphs_order_without_code_generation(self):
+        self.assertEqual([s["slug"] for s in self.stages()], ["functional-design", "nfr-requirements", "demo-assessment"])
+
+    def test_names_from_the_graph_and_a_custom_reason_is_shortened(self):
+        by = {s["slug"]: s for s in self.stages()}
+        self.assertEqual(by["demo-assessment"]["name"], "Demo Assessment")
+        self.assertEqual(by["demo-assessment"]["condition"], "Runs right after Code Generation and is approved with the Unit.")
+        self.assertEqual(by["functional-design"]["condition"], "From the graph.")
+        self.assertIn("Skip if", by["nfr-requirements"]["condition"])  # the engine's own line, as before
+        self.assertFalse(by["functional-design"]["custom"])
+        self.assertTrue(by["demo-assessment"]["custom"])
+
+    def test_an_always_stage_is_offered_as_the_engine_allows_it(self):
+        by = {s["slug"]: s for s in self.stages()}
+        self.assertEqual(by["demo-assessment"]["execution"], "ALWAYS")
+        got = self.answer("functional-design", "per-stage")
+        self.assertEqual(got["choice"]["offered"], ["functional-design", "nfr-requirements", "demo-assessment"])
+        self.assertEqual(cc.left_out(got["choice"]), ["nfr-requirements", "demo-assessment"])
+
+    def test_a_custom_stage_can_be_chosen_by_name_or_slug_and_is_left_out_by_the_claim(self):
+        got = self.answer("Demo Assessment, functional-design", "unit-end")
+        self.assertEqual(got["choice"]["stages"], ["functional-design", "demo-assessment"])
+        self.assertEqual(cc.left_out(got["choice"]), ["nfr-requirements"])
+        self.assertEqual(self.run_script("skips", "--unit", UNIT).stdout.strip().count("--stage nfr-requirements"), 1)
+
+    def test_a_long_condition_is_cut_at_a_word(self):
+        self.assertLessEqual(len(cc.short("word " * 100)), 161)
+        self.assertTrue(cc.short("word " * 100).endswith("…"))
+
+    def test_a_graph_without_per_unit_stages_gives_the_four_design_stages(self):
+        with open(os.path.join(self.project, ".claude", "tools", "data", "stage-graph.json"), "w") as f:
+            json.dump([GRAPH[0]], f)
+        self.assertEqual([s["slug"] for s in self.stages()], list(cc.DESIGN_STAGES))
+
+    def test_the_brief_carries_the_custom_stage(self):
+        brief = json.loads(self.run_script("brief", "--unit", UNIT).stdout)
+        self.assertIn("demo-assessment", [s["slug"] for s in brief["stages"]])
+
+    def test_the_hook_names_a_left_out_custom_stage(self):
+        self.answer("functional-design", "per-stage")
+        code, out, _ = self.pre("Bash", {"command": f"aidlc engine state unit start --stage demo-assessment --unit {UNIT}"})
+        self.assertIn("Demo Assessment was left out", out + _)
+
+
 class TestHooksJson(unittest.TestCase):
     def test_events_matchers_and_the_mod(self):
         with open(os.path.join(PLUGIN, "hooks", "hooks.json")) as f:
