@@ -1,5 +1,15 @@
 # session-titles changelog
 
+## 0.6.0
+
+Custom stages get correct titles.
+
+- Cause: the per-Unit stages and the run-once Construction stages were hardcoded upstream lists, so a custom per-Unit
+  stage never got `<unit> — <stage>` and a custom run-once Construction stage was titled just `Construction`.
+- Now both lists come from the project's stage graph (`.claude/tools/data/stage-graph.json`), in the graph's order:
+  `for_each` `"unit-of-work"` is per-Unit, every other Construction stage is named in the title. The built-in lists
+  remain the fallback when the graph is missing, unreadable or declares no `for_each`.
+
 ## 0.5.0
 
 - The handle may be up to 15 characters (was 8) in every tier: the agent's feature name, validation, and the fallback (the

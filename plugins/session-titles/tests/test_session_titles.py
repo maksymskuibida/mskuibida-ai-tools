@@ -27,8 +27,12 @@ RENAME = "mcp__ccd_session_mgmt__set_session_title"
 GRAPH = [
     {"slug": "requirements-analysis", "name": "Requirements Analysis", "phase": "inception"},
     {"slug": "units-generation", "name": "Units Generation", "phase": "inception"},
-    {"slug": "functional-design", "name": "Functional Design", "phase": "construction"},
+    {"slug": "functional-design", "name": "Functional Design", "phase": "construction", "for_each": "unit-of-work"},
+    {"slug": "demo-assessment-unit", "name": "Demo Assessment (Unit)", "phase": "construction",
+     "for_each": "unit-of-work", "plugin": "demo-assessment"},
     {"slug": "build-and-test", "name": "Build and Test", "phase": "construction"},
+    {"slug": "demo-assessment-intent", "name": "Demo Assessment (Intent)", "phase": "construction",
+     "plugin": "demo-assessment"},
     {"slug": "ci-pipeline", "name": "CI Pipeline", "phase": "construction"},
 ]
 
@@ -209,6 +213,40 @@ class TitleTests(Base):
         self.claim("u2-blocks")
         self.assertEqual(self.title(), "pgdaily: Construction — Build and Test")
         self.assertEqual(self.judge_calls(), 0)
+
+    def test_custom_per_unit_stage_gets_the_unit_title(self):
+        self.set_state("demo-assessment-unit")
+        self.claim("u2-blocks")
+        self.assertEqual(self.title(), "pgdaily: u2-blocks — Demo Assessment (Unit)")
+
+    def test_custom_per_unit_stage_without_a_claim_names_the_phase(self):
+        self.set_state("demo-assessment-unit")
+        self.assertEqual(self.title(), "pgdaily: Construction")
+
+    def test_custom_run_once_stage_is_named(self):
+        self.set_state("demo-assessment-intent")
+        self.claim("u2-blocks")
+        self.assertEqual(self.title(), "pgdaily: Construction — Demo Assessment (Intent)")
+        self.assertEqual(self.judge_calls(), 0)
+
+    def test_graph_without_for_each_falls_back_to_the_built_in_lists(self):
+        self.write(".claude/tools/data/stage-graph.json",
+                   json.dumps([{k: v for k, v in row.items() if k != "for_each"} for row in GRAPH]))
+        self.set_state("functional-design")
+        self.claim("u4-day-navigation")
+        self.assertEqual(self.title(), "pgdaily: u4-day-navigation — Functional Design")
+
+    def test_missing_graph_falls_back_to_the_built_in_lists(self):
+        os.remove(os.path.join(self.project, ".claude", "tools", "data", "stage-graph.json"))
+        self.set_state("code-generation")
+        self.claim("u4-day-navigation")
+        self.assertEqual(self.title(), "pgdaily: u4-day-navigation — Code Generation")
+
+    def test_stage_sets_follow_the_graph_order(self):
+        from session_titles import stage_sets
+        self.assertEqual(stage_sets(self.project),
+                         (("functional-design", "demo-assessment-unit"),
+                          ("build-and-test", "demo-assessment-intent", "ci-pipeline")))
 
     def test_ci_pipeline_names_the_phase(self):
         self.set_state("ci-pipeline")

@@ -6,8 +6,8 @@ title of every session that runs an AI-DLC workflow in step with what it is on:
 | The session is on | Title | Example |
 |---|---|---|
 | a per-Unit stage, in a checkout that has claimed a Unit, in a session that works on that Unit | `<unit> — <stage>` | `u4-day-navigation — Functional Design` |
-| Build and Test, CI Pipeline, and any stage outside Construction | `<phase> — <stage>` | `Construction — Build and Test` |
-| any other Construction stage outside a Unit's checkout (e.g. Functional Design) | just `Construction` | `Construction` |
+| a Construction stage that runs once (Build and Test, CI Pipeline, a custom run-once stage), and any stage outside Construction | `<phase> — <stage>` | `Construction — Build and Test` |
+| a per-Unit stage outside a Unit's checkout (e.g. Functional Design) | just `Construction` | `Construction` |
 | a session in a Unit's checkout that is not working on the Unit | its title is left as it is | |
 
 Every title starts with a short handle of its intent, so sessions of different intents can be told apart:
@@ -48,6 +48,10 @@ The title is read from the project, never from the agent's memory:
 - **Unit** — only on `functional-design`, `nfr-requirements`, `nfr-design`, `infrastructure-design` and
   `code-generation`, and only from this checkout's claim (`aidlc/.aidlc-unit-scope.json`, same intent). The
   directive's unit and `Active Unit` describe the intent, not the checkout, so they no longer name a Unit.
+- **Which stages are per-Unit** — the project's stage graph: a stage with `for_each` `"unit-of-work"` is per-Unit, so a
+  custom per-Unit stage gets `<unit> — <stage>` like Code Generation; every other Construction stage in the graph runs
+  once and is titled `Construction — <stage>`. Without a graph, or with one that declares no `for_each`, the built-in
+  lists apply (per-Unit: the five upstream design and code stages; run-once: Build and Test, CI Pipeline).
 - **Names** — the project's `.claude/tools/data/stage-graph.json` (`name`, `phase`); else the stage's
   `### <PHASE> PHASE` heading in the state file and the slug title-cased.
 
@@ -66,7 +70,7 @@ again after 10 minutes. `AIDLC_SESSION_TITLES_JUDGE_CMD` replaces the command (i
 
 ## Asking instead of guessing
 
-A Construction session on any stage but Build and Test and CI Pipeline, with no Unit claimed, outside the main
+A Construction session on a per-Unit stage, with no Unit claimed, outside the main
 checkout on its main branch (a linked worktree, or any other branch), cannot be told apart from a Unit checkout. The
 hook tells the assistant — once per folder, on the next prompt or tool call — to ask the developer with
 `AskUserQuestion` (`metadata.source` `aidlc-session-titles:checkout`): **Unit checkout** or **Something else**.

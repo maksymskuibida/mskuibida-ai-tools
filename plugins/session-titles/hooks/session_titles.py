@@ -78,10 +78,12 @@ NOT_A_PROJECT = frozenset("""utf iso sha md rfc http https aes rsa ipv tcp udp s
 HANDLE_SEPARATOR = ": "
 SEPARATOR = " — "
 RENAME_TOOL = "mcp__ccd_session_mgmt__set_session_title"
-# The stages that run once per Unit; on any other the title names the phase.
+# The stages that run once per Unit; on any other the title names the phase. These are the fallback for a project
+# whose stage graph is missing, unreadable or declares no `for_each`; otherwise `stage_sets` reads them from the graph.
 PER_UNIT_STAGES = ("functional-design", "nfr-requirements", "nfr-design", "infrastructure-design", "code-generation")
 # Construction stages that keep their name in the title outside a Unit's checkout; every other Construction stage is
-# titled just `Construction` there.
+# titled just `Construction` there. Also a fallback: with a usable graph it is every Construction stage that is not
+# per-Unit, custom stages included.
 NAMED_CONSTRUCTION_STAGES = ("build-and-test", "ci-pipeline")
 # The plugin was renamed from aidlc-session-titles to session-titles, but the next two names stay as they were: the
 # state folder holds live per-session files, and the source value is matched against questions already asked.
@@ -366,6 +368,21 @@ def stage_graph(project):
             phase = row.get("phase") if isinstance(row.get("phase"), str) else ""
             out[row["slug"]] = (name.strip(), phase.strip())
     return out
+
+
+def stage_sets(project):
+    """(per_unit, named): the stages that run once per Unit, and the Construction stages that keep their name in the
+    title outside a Unit's checkout, both in the graph's order. Read from the stage graph (`for_each` ==
+    "unit-of-work" is per-Unit; every other Construction stage is named); the constants when the graph is missing,
+    unreadable or declares no `for_each` at all."""
+    graph = read_json(os.path.join(project, ".claude", "tools", "data", "stage-graph.json"))
+    rows = [r for r in graph if isinstance(r, dict) and isinstance(r.get("slug"), str)] if isinstance(graph, list) else []
+    if not any("for_each" in r for r in rows):
+        return PER_UNIT_STAGES, NAMED_CONSTRUCTION_STAGES
+    per_unit = tuple(r["slug"] for r in rows if r.get("for_each") == "unit-of-work")
+    named = tuple(r["slug"] for r in rows if r["slug"] not in per_unit
+                  and isinstance(r.get("phase"), str) and r["phase"].strip().lower() == "construction")
+    return per_unit, named
 
 
 def phase_in_state(text, stage):
@@ -707,15 +724,16 @@ def plain_title(event, state, project):
         return None, None
     name, phase = stage_graph(project).get(stage, ("", ""))
     stage_name = name or titled(stage)
+    per_unit_stages, named_stages = stage_sets(project)
     unit = claimed_unit(project, space, intent_uuid(project, space, intent))
-    if unit and stage in PER_UNIT_STAGES:
+    if unit and stage in per_unit_stages:
         session = is_unit_session(event, state, project, unit, stage)
         return (unit + SEPARATOR + stage_name if session else None), None
     phase = phase or phase_in_state(text, stage)
     if not phase:
         return None, None
     full = titled(phase) + SEPARATOR + stage_name
-    if phase.lower() != "construction" or unit or stage in NAMED_CONSTRUCTION_STAGES:
+    if phase.lower() != "construction" or unit or stage in named_stages:
         return full, None
     if main_checkout_on_main(project):
         return titled(phase), None  # not in a Unit's checkout: the phase alone
@@ -725,7 +743,7 @@ def plain_title(event, state, project):
     if answer == "unit":
         active = field(text, "Active Unit")
         candidate = directive_unit or (active if UNIT_NAME.match(active) else "")
-        return (candidate + SEPARATOR + stage_name if candidate and stage in PER_UNIT_STAGES else full), None
+        return (candidate + SEPARATOR + stage_name if candidate and stage in per_unit_stages else full), None
     pending = {"project": project, "stage": stage_name, "unit": directive_unit or field(text, "Active Unit")}
     return None, (pending if answer is None else None)
 
