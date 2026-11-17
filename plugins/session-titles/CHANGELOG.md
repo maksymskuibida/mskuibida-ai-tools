@@ -1,5 +1,14 @@
 # session-titles changelog
 
+## 0.5.0
+
+- The handle may be up to 15 characters (was 8) in every tier: the agent's feature name, validation, and the fallback (the
+  words joined when that fits, else two words 7 + 8, more the initials). A Jira key stays allowed as it is.
+- A handle changed later carries over: when a session is renamed so its title starts with a different valid `<handle>: `
+  (at most 15 characters, or a Jira key; anything else is ignored), the plugin stores it as final in `intent-handles.json`
+  for the intent, and every title of every session of the intent keeps it through later stage changes. A declined rename
+  changes nothing. Editing `intent-handles.json` by hand works as before.
+
 ## 0.4.1
 
 The intent handle names the ticket or the work, not the team.
