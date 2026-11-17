@@ -13,6 +13,9 @@ import tempfile
 import time
 import unittest
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks"))
+from session_titles import fallback_handle, find_ticket  # noqa: E402
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 PLUGIN = os.path.dirname(HERE)
 HOOK = os.path.join(PLUGIN, "hooks", "session_titles.py")
@@ -638,7 +641,7 @@ class HandleTests(Base):
                 self.set_handle(reply)
                 if os.path.exists(self.cache):
                     os.remove(self.cache)
-                self.assertEqual(self.title_of(self.prompt(reply or "x")), "daily-pa: Inception — Requirements Analysis")
+                self.assertEqual(self.title_of(self.prompt(reply or "x")), "dailpage: Inception — Requirements Analysis")
                 self.assertTrue(self.cached()[UUID]["fallback"])
                 self.states_reset()
 
@@ -648,7 +651,7 @@ class HandleTests(Base):
 
     def test_fallback_is_kept_until_the_retry_time_and_then_replaced(self):
         self.set_handle("garbled reply here")
-        self.assertEqual(self.title_of(self.prompt()), "daily-pa: Inception — Requirements Analysis")
+        self.assertEqual(self.title_of(self.prompt()), "dailpage: Inception — Requirements Analysis")
         self.set_handle("pgdaily")
         self.prompt("again")
         self.assertEqual(self.handle_calls(), 1)  # not asked again at once
@@ -662,7 +665,7 @@ class HandleTests(Base):
 
     def test_missing_agent_falls_back(self):
         self.handle_cmd = os.path.join(self.root, "missing.sh")
-        self.assertEqual(self.title_of(self.prompt()), "daily-pa: Inception — Requirements Analysis")
+        self.assertEqual(self.title_of(self.prompt()), "dailpage: Inception — Requirements Analysis")
 
     def test_another_session_of_the_intent_reuses_the_handle(self):
         self.prompt()
@@ -712,6 +715,96 @@ class HandleTests(Base):
             json.dump(state, f)
         self.assertEqual(self.title_of(self.prompt()), "pgdaily: Inception — Requirements Analysis")
         self.assertIsNone(self.prompt("again"))
+
+    # ---- tier 1: the Jira ticket key
+
+    def intent_with(self, description):
+        self.write(f"aidlc/spaces/default/intents/{INTENT}/project-description.json",
+                   json.dumps({"description": description}))
+
+    def handle_of_prompt(self):
+        return self.title_of(self.prompt()).split(": ")[0]
+
+    def test_ticket_key_in_the_description_wins_without_asking_the_agent(self):
+        self.intent_with("build ABC-123 for the shop")
+        self.assertEqual(self.handle_of_prompt(), "ABC-123")
+        self.assertEqual(self.handle_calls(), 0)
+        self.assertEqual(self.cached(), {UUID: "ABC-123"})
+
+    def test_other_spellings_become_jira_format(self):
+        for text in ("abc-123", "ABC_123", "abc123", "Abc 123", "see (abc-123)."):
+            with self.subTest(text=text):
+                if os.path.exists(self.cache):
+                    os.remove(self.cache)
+                self.intent_with(text)
+                self.assertEqual(self.handle_of_prompt(), "ABC-123")
+                self.states_reset()
+
+    def test_a_key_longer_than_eight_characters_is_kept(self):
+        self.intent_with("LONGPROJ-123456")
+        self.assertEqual(self.handle_of_prompt(), "LONGPROJ-123456")
+
+    def test_a_ticket_in_the_state_file_project_line_is_found(self):
+        self.write(os.path.relpath(os.path.join(self.intent_dir, "aidlc-state.md"), self.project),
+                   state_md("requirements-analysis") + "\n- **Project**: fix rail-4389 in the shop\n")
+        self.assertEqual(self.handle_of_prompt(), "RAIL-4389")
+
+    def test_the_slug_and_the_branch_are_looked_at_too(self):
+        self.assertEqual(find_ticket("", "", "261117-abc-12-thing", "work/XYZ-77-thing"), "ABC-12")
+        self.assertEqual(find_ticket("", "", "261117-thing", "work/xyz_77-thing"), "XYZ-77")
+
+    def test_description_beats_slug_beats_branch(self):
+        self.assertEqual(find_ticket("do ABC-1", "x-def-2", "ghi-3"), "ABC-1")
+        self.assertEqual(find_ticket("nothing", "x-def-2", "ghi-3"), "DEF-2")
+        self.assertEqual(find_ticket("nothing", "x", "ghi-3"), "GHI-3")
+
+    def test_things_that_only_look_like_keys_are_rejected(self):
+        for text in ("261117-uniform", "u19-pr-actions", "utf-8 text", "UTF-8", "v2 and v2.1", "phase 2", "step-3",
+                     "2026-11-17", "sha256", "released in 2024", "abc-1234567", "a-12", "ab1", "x12-34", "id 7",
+                     "abc-12d", "ee42d1b9"):
+            with self.subTest(text=text):
+                self.assertIsNone(find_ticket(text))
+
+    # ---- tier 2 and 3
+
+    def test_agent_is_told_to_name_the_work_not_the_team(self):
+        self.intent_with("make ids persistent")
+        self.prompt()
+        with open(self.handle_log, encoding="utf-8") as f:
+            seen = f.read()
+        self.assertIn("NOT a team", seen)
+        self.assertIn("make ids persistent", seen)
+        self.assertIn(INTENT, seen)
+
+    def test_fallback_is_compact_over_the_whole_slug(self):
+        self.assertEqual(fallback_handle("261117-uniform-persistent-id"), "upi")
+        self.assertEqual(fallback_handle("261016-daily-page"), "dailpage")
+        self.assertEqual(fallback_handle("261016-checkout"), "checkout")
+        self.assertEqual(fallback_handle("261016-shop-checkout-flow-v2-redesign-extra-words-x"), "scfvrewx")
+        self.assertEqual(fallback_handle("261016-"), "intent")
+
+    def test_old_fallbacks_are_made_again_at_once_and_plain_strings_stay(self):
+        self.intent_with("build ABC-123")
+        os.makedirs(self.states, exist_ok=True)
+        with open(self.cache, "w", encoding="utf-8") as f:
+            json.dump({UUID: {"handle": "uniform", "fallback": True, "at": time.time()}}, f)
+        self.assertEqual(self.handle_of_prompt(), "ABC-123")
+        self.states_reset()
+        with open(self.cache, "w", encoding="utf-8") as f:
+            json.dump({UUID: "uniform"}, f)
+        self.assertEqual(self.handle_of_prompt(), "uniform")
+
+    def test_a_new_fallback_waits_for_the_retry_time(self):
+        self.set_handle("")
+        self.prompt()
+        self.assertEqual(self.cached()[UUID]["rules"], 2)
+        self.assertEqual(self.handle_calls(), 1)
+        self.prompt("again")
+        self.assertEqual(self.handle_calls(), 1)
+
+    def test_the_agent_may_answer_with_a_ticket_key(self):
+        self.set_handle("rail-4389")
+        self.assertEqual(self.handle_of_prompt(), "RAIL-4389")
 
 
 class ManifestTests(unittest.TestCase):

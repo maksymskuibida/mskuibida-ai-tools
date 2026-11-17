@@ -19,6 +19,11 @@ so sessions of different intents can be told apart. The handle (at most 8 charac
 per intent by a Haiku agent from the intent's name and description and kept in <state folder>/intent-handles.json, so
 every session of the intent shares it; edit a value there to change a handle.
 
+The handle names the work, in this order: the intent's Jira ticket key (`RAIL-4389`: found in the project description,
+the state file's Project line, the folder name or the checkout's branch, in any spelling, always written in Jira format,
+and allowed to be longer than 8 characters), else the feature's short name from the Haiku agent, else a compact form of
+the whole folder name.
+
 A session counts as an AI-DLC session once it shows it runs the workflow: an `aidlc` engine, unit or claim command
 in Bash, an `aidlc*` skill, a prompt starting with `/aidlc`, or a binding file of its own. Other sessions in the
 same repository are left alone.
@@ -59,6 +64,15 @@ JUDGE_CMD_ENV = "AIDLC_SESSION_TITLES_JUDGE_CMD"  # replaces `claude -p --model 
 HANDLE_CMD_ENV = "AIDLC_SESSION_TITLES_HANDLE_CMD"  # replaces the handle agent's command; reads the prompt on stdin
 HANDLES_FILE = "intent-handles.json"  # in the state folder: {intent uuid or folder name: handle | {"handle", "fallback", "at"}}
 HANDLE = re.compile(r"^[a-z0-9][a-z0-9-]{0,7}$")
+HANDLE_RULES = 2  # a fallback written by older rules (no `rules` mark, or a lower one) is made again at the next run
+# A Jira key in any spelling: `RAIL-4389`, `rail_4389`, `Rail 4389`, `rail4389`. 2-10 letters, 1-6 digits, not part of a
+# longer word or number. The loose spellings (no hyphen or underscore) need 2+ digits.
+TICKET = re.compile(r"(?<![A-Za-z0-9])([A-Za-z]{2,10})([-_ ]?)(\d{1,6})(?![A-Za-z0-9])")
+# Words that are followed by a number without being a Jira project: encodings, standards, versions, ordinals.
+NOT_A_PROJECT = frozenset("""utf iso sha md rfc http https aes rsa ipv tcp udp ssl tls css html es ecma python node java
+    php ruby go py js ts vue ng ios mac win linux android pdf png jpg jpeg gif svg mp wcag api sdk pr mr id no nr v ver
+    version phase step stage unit units week day days month year page section item items task story points point level
+    tier mvp sprint release rev build test top option chapter part wave bolt epic sec min max""".split())
 HANDLE_SEPARATOR = ": "
 SEPARATOR = " — "
 RENAME_TOOL = "mcp__ccd_session_mgmt__set_session_title"
@@ -477,19 +491,55 @@ def answered(response):
 
 # ---------------------------------------------------------------- the intent handle
 
+def jira_key(match):
+    """`RAIL-4389` for a TICKET match that is one, else None: a project word that is not a known non-project, a year
+    is not a number, and a spelling without a hyphen or underscore needs 2+ digits."""
+    word, separator, number = match.group(1), match.group(2).strip(), match.group(3)
+    if word.lower() in NOT_A_PROJECT or (not separator and len(number) < 2):
+        return None
+    if len(number) == 4 and 1990 <= int(number) <= 2100 and word != word.upper():
+        return None
+    return word.upper() + "-" + number
+
+
+def find_ticket(*sources):
+    """The first Jira key, in Jira format, in the first of the sources that has one."""
+    for source in sources:
+        for match in TICKET.finditer(str(source or "")):
+            key = jira_key(match)
+            if key:
+                return key
+    return None
+
+
 def clean_handle(raw):
-    """The handle in the agent's reply (first line, trimmed, quotes and backticks off, lower-cased), None when it is not one."""
+    """The handle in the agent's reply (first line, trimmed, quotes and backticks off): a Jira key in Jira format, else
+    the lower-cased short word; None when it is neither."""
     lines = str(raw or "").strip().splitlines()
-    word = lines[0].strip().strip("`'\"* ").lower() if lines else ""
+    word = lines[0].strip().strip("`'\"* ") if lines else ""
+    found = TICKET.fullmatch(word)
+    key = jira_key(found) if found else None
+    if key:
+        return key
+    word = word.lower()
     return word if HANDLE.match(word) else None
 
 
 def fallback_handle(intent):
-    """A short form of the intent's folder name: the date prefix and the uuid tail dropped, cut to 8 characters."""
+    """A compact form of the whole folder name, the date prefix and the uuid tail dropped: one word cut to 8 characters,
+    two words 4 + 4, more the initials."""
     slug = re.sub(r"^\d{6,8}-", "", intent)
     slug = re.sub(r"-[0-9a-f]{16}$", "", slug)
-    slug = re.sub(r"[^a-z0-9-]+", "-", slug.lower())[:8].strip("-")
-    return slug if HANDLE.match(slug) else "intent"
+    words = [w for w in re.split(r"[^a-z0-9]+", slug.lower()) if w]
+    if not words:
+        compact = ""
+    elif len(words) == 1:
+        compact = words[0][:8]
+    elif len(words) == 2:
+        compact = words[0][:4] + words[1][:4]
+    else:
+        compact = "".join(w[0] for w in words)[:8]
+    return compact if HANDLE.match(compact) else "intent"
 
 
 def intent_description(intent_dir, text):
@@ -502,13 +552,34 @@ def intent_description(intent_dir, text):
     return field(text, "Project")[:300]
 
 
+def description_strings(intent_dir):
+    """Every text value in project-description.json, to look for a ticket key in."""
+    found = []
+
+    def walk(value):
+        if isinstance(value, str):
+            found.append(value)
+        elif isinstance(value, dict):
+            for item in value.values():
+                walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+
+    walk(read_json(os.path.join(intent_dir, "project-description.json")))
+    return " \n".join(found)
+
+
 def handle_prompt(intent, description):
     return (
         "Make a short handle for a software intent, so a developer can tell sessions of different intents apart at a "
         "glance in a list of session titles.\n\n"
         f"Intent folder: {intent}\nDescription: {description or 'none'}\n\n"
-        "Rules: at most 8 characters, only lowercase letters, digits and hyphen, a logical short name for the intent "
-        "(drop the date and filler words; abbreviate if it is longer, e.g. reviewdesk -> rvdesk). "
+        "The handle must name the feature or the work itself, NOT a team, organisation, product or project-wide name "
+        "that many intents share (a folder like `261117-uniform-persistent-id` is the work `persistent-id` of the team "
+        "`uniform`). If the text names a Jira ticket, reply with the ticket key in Jira format, e.g. ABC-123. "
+        "Otherwise: at most 8 characters, only lowercase letters, digits and hyphen, a logical short name for the "
+        "work (drop the date and filler words; abbreviate if it is longer, e.g. reviewdesk -> rvdesk). "
         "Reply with the handle only: no quotes, no explanation.")
 
 
@@ -549,25 +620,30 @@ def save_handles(handles):
         raise
 
 
-def intent_handle(intent_dir, intent, uuid, text):
-    """The handle every session of this intent shares: read from the cache, else made once by the agent and cached. A
-    value the agent could not give is a deterministic short form of the folder name, marked as a fallback and
-    replaced when the agent answers on a retry after JUDGE_RETRY_SECONDS."""
+def intent_handle(project, intent_dir, intent, uuid, text):
+    """The handle every session of this intent shares, read from the cache, else made and cached: the Jira ticket key
+    when one is found (final), else the feature's name from the agent (final), else a compact form of the folder name,
+    marked a fallback and made again when the agent answers on a retry after JUDGE_RETRY_SECONDS, and at once when it
+    was made by older rules."""
     key = uuid or intent
     entry = load_handles().get(key)
     if isinstance(entry, str) and clean_handle(entry):
         return clean_handle(entry)
     if isinstance(entry, dict) and clean_handle(entry.get("handle")) and (
-            not entry.get("fallback") or not isinstance(entry.get("at"), (int, float))
-            or time.time() - entry["at"] < JUDGE_RETRY_SECONDS):
+            not entry.get("fallback") or (entry.get("rules") == HANDLE_RULES and isinstance(entry.get("at"), (int, float))
+                                          and time.time() - entry["at"] < JUDGE_RETRY_SECONDS)):
         return clean_handle(entry["handle"])
-    made = ask_handle(handle_prompt(intent, intent_description(intent_dir, text)))
+    description = intent_description(intent_dir, text)
+    made = find_ticket(description_strings(intent_dir), field(text, "Project"), intent,
+                       git_out(project, "rev-parse", "--abbrev-ref", "HEAD"))
+    made = made or ask_handle(handle_prompt(intent, description))
     try:
         handles = load_handles()  # again: another session may have filled it while the agent was thinking
         current = handles.get(key)
         if isinstance(current, str) and clean_handle(current):
             return clean_handle(current)
-        handles[key] = made if made else {"handle": fallback_handle(intent), "fallback": True, "at": time.time()}
+        handles[key] = made if made else {"handle": fallback_handle(intent), "fallback": True,
+                                          "rules": HANDLE_RULES, "at": time.time()}
         save_handles(handles)
     except OSError:
         pass
@@ -582,7 +658,7 @@ def expected_title(event, state, project):
         return title, pending
     space, intent = selected_intent(project, str(event.get("session_id") or ""))
     intent_dir = os.path.dirname(state_file(project, space, intent))
-    handle = intent_handle(intent_dir, intent, intent_uuid(project, space, intent),
+    handle = intent_handle(project, intent_dir, intent, intent_uuid(project, space, intent),
                            read_text(state_file(project, space, intent)) or "")
     return handle + HANDLE_SEPARATOR + title, pending
 
