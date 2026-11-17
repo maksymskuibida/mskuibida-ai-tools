@@ -135,7 +135,22 @@ async function unit() {
   }
   const lanes = $(".vz-lanes");
   out.lanes = lanes ? { label: lanes.getAttribute("aria-label"), names: all(".vz-lanes .vz-lname").map((n) => n.firstChild.textContent), steps: all(".vz-lstep").length, rowSteps: all("#plan .row[id^=step-]").length } : null;
-  if (lanes) { const s = $(".vz-lstep"); const key = s.dataset.vzGo; click(w, s); await wait(50); out.laneJump = { key, open: !!$("#" + key) }; }
+  const stepRows = all("#plan .row.step");
+  if (stepRows.length) {
+    const head = stepRows[0].querySelector(".rowhead");
+    out.steps = {
+      numbers: stepRows.map((r) => +r.id.replace("step-", "")), expanded: stepRows.filter((r) => r.querySelector(".twist[aria-expanded=true]")).length,
+      bodies: all("#plan .row.step .rowbody").length, headParts: [...head.children].map((c) => ["twist", "sno", "rtitle", "layer", "dot"].find((k) => c.classList.contains(k)) || c.className),
+      twistAria: head.querySelector(".twist").getAttribute("aria-expanded"),
+    };
+    const id = stepRows[0].id, q = (sel) => $("#" + id + " " + sel);
+    click(w, q(".twist")); await wait(30);
+    const opened = q(".twist").getAttribute("aria-expanded");
+    click(w, q(".dot")); await wait(30);
+    const afterRead = { expanded: q(".twist").getAttribute("aria-expanded"), read: $("#" + id).classList.contains("read") };
+    click(w, q(".dot")); await wait(30);
+    out.stepRead = { opened, afterRead, afterUnread: { expanded: q(".twist").getAttribute("aria-expanded"), read: $("#" + id).classList.contains("read") } };
+  }
   const tl = $(".vz-tl");
   out.timeline = tl ? [...tl.querySelectorAll("li")].map((li) => li.textContent.replace(/\s+/g, " ").trim()) : null;
   if (tl) { const chip = $(".vz-tl [data-rvonly]"); if (chip) { click(w, chip); out.pressed = all(".vz-tl [data-rvonly]").map((c) => c.getAttribute("aria-pressed")); click(w, $(".vz-tl [data-rvonly]")); out.pressedAgain = all(".vz-tl [data-rvonly]").map((c) => c.getAttribute("aria-pressed")); } }

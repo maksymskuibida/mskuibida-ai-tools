@@ -167,6 +167,16 @@ class TestPlanStepForms(Base):
         _p, b, _i = self.plan_with("# Plan\n\n### Step 1: One\n- [ ] a\n- [ ] b\n\n### Step 2 - Two\n- c\n")
         self.assertEqual([(s["n"], s["title"], len(s["subs"])) for s in b["plan"]["steps"]], [(1, "One", 2), (2, "Two", 1)])
 
+    def test_steps_keep_the_plan_documents_own_order_not_a_grouping_by_layer(self):
+        """Steps come out one by one as the plan lists them, numbered by position; layers interleave and are only a label."""
+        _p, b, _i = self.plan_with(
+            "# Plan\n\n### Step 1: Slot model\n- [ ] add `src/slots.py`\n\n### Step 2: Tests for slots\n- [ ] add `tests/test_slots.py`\n\n"
+            "### Step 3: Pickup endpoint\n- [ ] add `src/api.py`\n\n### Step 4: Tests for the endpoint\n- [ ] add `tests/test_api.py`\n")
+        steps = b["plan"]["steps"]
+        self.assertEqual([s["n"] for s in steps], [1, 2, 3, 4])
+        self.assertEqual([s["title"] for s in steps], ["Slot model", "Tests for slots", "Pickup endpoint", "Tests for the endpoint"])
+        self.assertEqual([s["layer"] for s in steps], ["code", "tests", "api", "tests"], "layers alternate: not grouped")
+
     def test_a_draft_of_checkbox_steps_finalizes(self):
         path, b, _i = self.plan_with("# Plan\n\n- [ ] **Step 1: Only step.**\n  - [ ] do it\n")
         self.save(path, agent_pass(b))
