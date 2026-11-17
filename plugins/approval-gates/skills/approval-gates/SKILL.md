@@ -257,6 +257,14 @@ and ask in chat whether to act on them; the decision is the chat answer. A Reque
 the Unit's whole chain back for review (the engine floors every stage of the Unit); say so when the developer asks for
 a small change that the plan page would have been the cheaper place for. Never write `notes` or `picks`.
 
+**A point picked At Build and Test (1.38.0).** Each not-verified row has a third pick next to Test now and Later: `picks.<anchor>` = `buildtest`. It is not
+a gate answer of its own: the question keeps Approve / Request Changes / Test first. When the developer **approves** (and no Test first is pending), run
+`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/test_plan.py" defer --bundle <unit-end bundle.json> --picks-file <picks saved from the bundles/<id> row> --project-dir <project>`
+**before** reporting the approval to the engine: it records the Unit's not-verified points in `deferred-to-build-and-test.json` in the Unit's
+code-generation folder (`buildtest` rows are deferred, the others listed as still not verified). When the developer tells you in chat to leave everything for Build and Test
+(or the Unit's session was told to test nothing at its gate), add `--all`. Nothing is tested in the Unit and no Test first lock is held; say in one line which points go to Build and Test.
+A Test first answered with some rows at `buildtest` tests the others only; the default plan never covers a `buildtest` row.
+
 ## 7. Testing the not-verified points before the unit-end gate
 
 On the unit-end page every row of "Not verified yet" has a **Test now / Later** pick (stored as `picks.<row anchor>` =
@@ -275,7 +283,10 @@ no test plan.
    section has `agent` (what you will do) and the developer's steps, each with `do`, `criteria` (at least one short
    checkable sentence; the page numbers them under the step, A.1.1, A.1.2 …) and `verifies` (the V
    rows). Run `test_plan.py publish --plan <file> --bundle <bundle.json> --out <scratch>`; it refuses with one problem
-   per line until every id, step shape and Test-now row coverage holds.
+   per line until every id, step shape and Test-now row coverage holds. **Paste material.** Anything the developer must paste goes in a fenced block
+   in the step's `do`, headed by where it is pasted: ` ```Terminal ` (a shell), ` ```Claude Code ` (slash commands for the Claude Code prompt) or
+   ` ```Ask Claude ` (a prompt for a chat with Claude); the page gives each block a Copy button and shows the label as its header. A path, a value or a name to paste is inline `code` (click-to-copy).
+   Prose never goes in a block and a command never goes inline.
 3. **The artifact (once per developer).** `Artifact` → `action: "list"` → **AI-DLC test plans**. If none, publish
    `test-plan.html` once: `capabilities: {db: {}, user: {}}`, `icon: "checklist"`, description "Steps to check a Unit's
    not-verified points; Pass or Fail each, notes come back to Claude." Reuse its URL; republish from the file after a
@@ -310,6 +321,26 @@ no test plan.
    *Verified by you* (passed), *Still not verified* (picked Later, or failed and being fixed), *Failed, left as known*.
    Write the row, put the link in the text before the question, and ask the unit-end gate question again (Approve / Request
    Changes / Test first).
+
+## 7b. The Build and Test plan: every Unit's deferred points in one plan (1.38.0)
+
+At the **Build and Test** gate (the stage's own approval), before the gate question, **always offer one test plan** (`AskUserQuestion`, header "Test plan": **Test plan first** /
+**Skip the test plan**; skipping is the developer's call, say what stays unverified). It uses the same artifact, page, links and drive-in-chat steps as § 7 (steps 3 to 5), with these differences:
+
+1. **The points.** `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/test_plan.py" collect --project-dir <project>` prints every Unit's deferral record: the points deferred at its gate
+   (`choice: "buildtest"`) and those still not verified (`"later"`). Read the stage's build-and-test instruction documents (`construction/build-and-test/*.md`) for its
+   own **manual or not-automated checks**; each one is a point `build-and-test:M-<n>` with a one-line title.
+2. **The plan.** `kind: "build-and-test"`, `unit: "build-and-test"`, no `bundle`, id `<intent>-build-and-test-test-v<n>-<YYYYMMDDTHHMM>`, and a `sources` list: one
+   `{id: "<unit>:<point>", unit, point, title}` per point (`u1:V-3`, `build-and-test:M-1`). `now` and every step's `verifies` hold source ids, and every point is verified by a step.
+   Drop a point only when the developer says so. Write the plan, then `test_plan.py publish --plan <file> --project-dir <project> --out <scratch>` (it refuses a plan that
+   leaves out a deferred point); each point shows its Unit on the page.
+3. **Sections start where you must prepare something**, never per point. For a project that ships a release (a tag, a package, an app build): section A installs or builds from a
+   **throwaway tag or build** (not the real release) and holds the steps that need it; seeding test files or data is its own section when it is a separate preparation; the **last section cuts the real
+   release** and is reached only once the earlier sections have passed (its agent step says so). Use the label blocks of § 7 for every command or prompt.
+4. **Finish.** `test_plan.py finish --plan <file> --results <file> --project-dir <project>` writes `test-plan.md` and `test-plan.json` into the Build and Test stage folder and, per Unit,
+   `build-and-test-outcome.json` in its code-generation folder, plus each point's state in its deferral record: the passed points are verified in their Unit's records, the same way `--tested` does for a Unit.
+   Failed steps: ask which to fix as in § 7; something to fix goes back through the engine's normal Build and Test rejected report with the failures and notes in `--reason`; nothing to fix, the gate is asked as usual with the failures listed as left as known.
+   After a finish, re-run `unit_bundle.py draft --page unit-end --unit <unit> --tested <that Unit's build-and-test-outcome.json>` only when a Unit's page is presented again.
 
 ## Diagrams and visuals (1.33.0)
 

@@ -13,7 +13,12 @@
     plans/<id>   {plan, intent, unit, title, createdAt (ISO), status: "open"|"done", agentDone: ["A", …]}   written by the agent
       plan: {schema: "aidlc-test-plan/1", id, intent, unit, bundle, title, now: ["V-1", …], allByDefault,
              rows?: {"V-1": "title of the not-verified point"},
-             sections: [{key: "A", title, agent, steps: [{id: "A.1", do, expect, verifies: ["V-1"]}]}]}
+             kind?: "build-and-test", sources?: [{id: "u1:V-1", unit: "u1", point: "V-1", title}]   (Build and Test plan:
+               now / verifies / rows hold source ids; a point shows the Unit it came from, "u1 · V-1")
+             sections: [{key: "A", title, agent, steps: [{id: "A.1", do, criteria, verifies: ["V-1"]}]}]}
+      A step's `do` is text with, optionally, fenced blocks (```Terminal … ```: the word after the fence is the label of
+        where to paste it) and inline `code` for data to paste. Each fenced block has a Copy button, each inline code is
+        a button that copies it; both copy exactly the text. Labels in use: Terminal, Claude Code, Ask Claude.
       id:   <intent>-<unit>-test-v<n>-<YYYYMMDDTHHMM>
       agentDone: the keys of the sections whose agent step the agent has done. The agent updates it (ArtifactData
         update) when it finishes a section's agent step; the steps of a section open for the developer only then.
@@ -59,7 +64,7 @@ html { scroll-padding-top: 16px; }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.55 var(--body); -webkit-font-smoothing: antialiased; }
 #app { max-width: 1180px; margin: 0 auto; padding: 24px 16px 64px; display: flex; flex-direction: column; gap: 16px; }
 button { font: inherit; color: inherit; cursor: pointer; }
-button:focus-visible, textarea:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:focus-visible, textarea:focus-visible, a:focus-visible, .ic:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
 .msg { padding: 20px; } .msg p { margin: 6px 0 0; color: var(--muted); }
 a { color: var(--accent); }
@@ -115,6 +120,23 @@ h1 { margin: 0; font-size: 22px; line-height: 1.25; font-weight: 600; }
 .stephead { display: flex; gap: 12px; align-items: baseline; }
 .sid { font: 500 13px var(--mono); color: var(--accent-strong); flex: none; min-width: 30px; }
 .stephead p { margin: 0; font-weight: 500; }
+.stepdo { flex: 1; min-width: 0; max-width: 78ch; font-weight: 500; }
+.stepdo p { white-space: pre-line; } .stepdo p + p, .stepdo p + .cb, .stepdo .cb + p, .stepdo .cb + .cb { margin-top: 8px; }
+/* copy blocks: a fenced block of a step, headed by where to paste it */
+.cb { margin: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--raised); overflow: hidden; font-weight: 400; }
+.cb figcaption { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 34px; padding: 3px 6px 3px 12px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--raised) 60%, var(--line-soft)); }
+.cb .where { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.cb pre { margin: 0; padding: 10px 12px; overflow-x: auto; font: 400 13px/1.55 var(--mono); color: var(--fg); tab-size: 2; }
+.cb pre:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cp { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px solid var(--control); border-radius: 8px; background: var(--surface); color: var(--fg-2); font-size: 12.5px; font-weight: 500; }
+.cp svg { width: 14px; height: 14px; flex: none; }
+.cp:hover { border-color: var(--accent); color: var(--accent-strong); }
+.cp.copied { background: var(--ok-bg); border-color: var(--ok-line); color: var(--ok-fg); }
+.ic { display: inline; padding: 1px 6px; margin: 0 1px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--fg); font: 500 12.5px var(--mono); cursor: copy; overflow-wrap: anywhere; text-align: left; }
+.ic:hover { border-color: var(--accent); background: var(--accent-tint); }
+.ic.copied { background: var(--ok-bg); border-color: var(--ok-line); color: var(--ok-fg); }
+.ic.copied::after { content: attr(data-done); margin-left: 6px; font: 600 11px var(--body); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .expect { margin: 6px 0 0 42px; color: var(--fg-2); }
 .crit { margin: 8px 0 0 42px; padding: 0; list-style: none; display: grid; gap: 4px; color: var(--fg-2); }
 .crit li { display: flex; gap: 10px; align-items: baseline; }
@@ -157,6 +179,7 @@ h1 { margin: 0; font-size: 22px; line-height: 1.25; font-weight: 600; }
 </style>
 <div id="app"><div class="card msg"><b>Loading…</b></div></div>
 <div id="toast" role="status" hidden></div>
+<div id="copylive" class="sr" role="status" aria-live="polite"></div>
 <script>
 /* RENDER-START — no DOM below this line until RENDER-END */
 var PlanView = (function () {
@@ -238,9 +261,49 @@ var PlanView = (function () {
     }
     return st.expect ? '<p class="expect"><b>Expect</b>' + esc(st.expect) + "</p>" : "";  // a plan published before criteria
   }
+  /* A point of a Build and Test plan is named by its source: "u1 · V-3" is point V-3 of Unit u1. */
+  function sourceOf(plan, id) {
+    var list = plan.sources || [];
+    for (var i = 0; i < list.length; i++) if (list[i] && list[i].id === id) return list[i];
+    return null;
+  }
   function vChip(plan, id) {
-    var t = (plan.rows || {})[id];
-    return '<span class="vchip"' + (t ? ' title="' + esc(t) + '"' : "") + ">" + esc(id) + "</span>";
+    var t = (plan.rows || {})[id] || (sourceOf(plan, id) || {}).title, src = sourceOf(plan, id);
+    return '<span class="vchip"' + (t ? ' title="' + esc(t) + '"' : "") + ">" + esc(src ? src.unit + " · " + src.point : id) + "</span>";
+  }
+
+  /* ---- what a step says: text, fenced blocks (```label … ```), inline `code` ----
+     A fenced block is {label, text}; its label is the word(s) after the opening fence and names where to paste it. */
+  function parseDo(text) {
+    var out = [], buf = [], fence = null, lines = String(text == null ? "" : text).replace(/\r\n?/g, "\n").split("\n");
+    function flush() { var t = buf.join("\n").replace(/^\n+|\n+$/g, ""); if (t.trim()) out.push({ type: "text", text: t }); buf = []; }
+    lines.forEach(function (ln) {
+      var m = /^\s*```(.*)$/.exec(ln);
+      if (fence) {
+        if (m && !m[1].trim()) { out.push({ type: "block", label: fence.label, text: buf.join("\n") }); buf = []; fence = null; } else buf.push(ln);
+      } else if (m) { flush(); fence = { label: m[1].trim() }; }
+      else buf.push(ln);
+    });
+    if (fence) out.push({ type: "block", label: fence.label, text: buf.join("\n") });  /* an unclosed fence runs to the end */
+    else flush();
+    return out;
+  }
+  var COPY_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H3.8a1.8 1.8 0 0 0-1.8 1.8v4.9a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg>';
+  function inlineHtml(text) {
+    return String(text).split(/(`[^`\n]+`)/).map(function (part) {
+      if (part.length > 2 && part.charAt(0) === "`" && part.charAt(part.length - 1) === "`") {
+        var code = part.slice(1, -1);
+        return '<button type="button" class="ic" data-copy="inline" data-done="Copied" aria-label="Copy ' + esc(code) + '" title="Copy">' + esc(code) + "</button>";
+      }
+      return esc(part);
+    }).join("");
+  }
+  function doHtml(text) {
+    return '<div class="stepdo">' + parseDo(text).map(function (seg) {
+      if (seg.type === "text") return seg.text.split(/\n{2,}/).map(function (p) { return "<p>" + inlineHtml(p) + "</p>"; }).join("");
+      var label = seg.label;
+      return '<figure class="cb"><figcaption><span class="where">' + esc(label) + '</span><button type="button" class="cp" data-copy="block" aria-label="Copy ' + (label ? esc(label) + " " : "") + 'block"><span class="cpi">' + COPY_ICON + '</span><span class="cpt">Copy</span></button></figcaption><pre tabindex="0"><code>' + esc(seg.text) + "</code></pre></figure>";
+    }).join("") + "</div>";
   }
 
   function stepHtml(row, st, open, local) {
@@ -248,7 +311,7 @@ var PlanView = (function () {
     var cls = r.result === "pass" ? " pass" : (r.result === "fail" ? " fail" : "");
     var hint = r.result === "fail" ? (need ? "Say what went wrong. A Fail is saved with its note." : "") : (r.result === "pass" ? "Optional: anything worth remembering." : "");
     var dis = open ? "" : " disabled";
-    return '<div class="step' + cls + '" id="step-' + esc(st.id) + '"><div class="stephead"><span class="sid">' + esc(st.id) + "</span><p>" + esc(st.do) + "</p></div>" +
+    return '<div class="step' + cls + '" id="step-' + esc(st.id) + '"><div class="stephead"><span class="sid">' + esc(st.id) + "</span>" + doHtml(st.do) + "</div>" +
       expectHtml(st) +
       '<div class="verifies">' + (st.verifies || []).map(function (v) { return vChip(plan, v); }).join("") + "</div>" +
       '<div class="act"><div class="rb" role="group" aria-label="Result of ' + esc(st.id) + '">' +
@@ -301,7 +364,7 @@ var PlanView = (function () {
       }).join("");
   }
 
-  return { savable: savable, reconcile: reconcile, entryOf: entryOf, render: render, listHtml: listHtml, states: states, tally: tally, stepResult: stepResult, counted: counted, esc: esc };
+  return { savable: savable, reconcile: reconcile, entryOf: entryOf, render: render, listHtml: listHtml, states: states, tally: tally, stepResult: stepResult, counted: counted, esc: esc, parseDo: parseDo, doHtml: doHtml };
 })();
 if (typeof module !== "undefined") module.exports = PlanView;
 /* RENDER-END */
@@ -309,10 +372,39 @@ if (typeof module !== "undefined") module.exports = PlanView;
 <script>
 (function () {
   "use strict";
-  var app = document.getElementById("app"), toastEl = document.getElementById("toast");
+  var app = document.getElementById("app"), toastEl = document.getElementById("toast"), live = document.getElementById("copylive");
   var db = null, view = { id: "", row: null, local: {}, unsub: [], timer: 0, unsaved: false, saving: false };
 
   function toast(text) { toastEl.textContent = text; toastEl.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(function () { toastEl.hidden = true; }, 2600); }
+  /* Copy: navigator.clipboard where the artifact frame allows it, else a hidden textarea and execCommand, else the text is
+     selected for the viewer's own Ctrl/⌘+C. */
+  function copyText(text) {
+    function legacy() {
+      var ta = document.createElement("textarea"), keep = document.activeElement, ok = false;
+      ta.value = text; ta.setAttribute("readonly", ""); ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;pointer-events:none";
+      document.body.appendChild(ta); ta.select();
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      if (keep && keep.focus) try { keep.focus({ preventScroll: true }); } catch (e) { /* gone */ }
+      return ok;
+    }
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return legacy(); });
+    }
+    return Promise.resolve(legacy());
+  }
+  function selectContents(el) { var r = document.createRange(); r.selectNodeContents(el); var s = getSelection(); s.removeAllRanges(); s.addRange(r); }
+  function copyFrom(btn) {
+    var inline = btn.dataset.copy === "inline", src = inline ? btn : btn.closest(".cb").querySelector("pre code");
+    var text = src.textContent, label = btn.querySelector(".cpt");
+    copyText(text).then(function (ok) {
+      if (!ok) { selectContents(src); toast("Copying is blocked here. The text is selected: press Ctrl+C (⌘C on a Mac)."); return; }
+      btn.classList.add("copied"); if (label) label.textContent = "Copied";
+      live.textContent = ""; setTimeout(function () { live.textContent = "Copied"; }, 30);
+      clearTimeout(btn._t);
+      btn._t = setTimeout(function () { btn.classList.remove("copied"); if (label) label.textContent = "Copy"; }, 1800);
+    });
+  }
   function teardown() {
     if (view.unsaved) flush();
     clearTimeout(view.timer);
@@ -366,6 +458,8 @@ if (typeof module !== "undefined") module.exports = PlanView;
       else toast("No step is open for you yet: the agent has to finish its step first.");
       return;
     }
+    var cp = e.target.closest("[data-copy]");
+    if (cp) { copyFrom(cp); return; }
     var b = e.target.closest("button[data-act]");
     if (!b || !view.row || b.disabled) return;
     var step = b.dataset.step, cur = PlanView.stepResult(view.row, view.local, step), next = b.dataset.act;

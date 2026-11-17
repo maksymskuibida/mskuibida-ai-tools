@@ -438,7 +438,16 @@ those points through a guided test plan:
   *Still not verified* and *Failed, left as known*, and the gate is asked again. With fails, you choose which to fix
   (inline for one or two, a question form for more); fixes go back as Request Changes with the failures and your notes.
 
-Only the unit-end rhythm has a test plan; per-stage gates are unchanged. The contract is in
+**Test at Build and Test (1.38.0).** The third pick on a not-verified row, **At Build and Test**, approves the Unit with that point deferred: no
+lock, nothing tested in the Unit, and the point is recorded in `deferred-to-build-and-test.json` in the Unit's code-generation folder. At the Build and Test
+gate the agent offers one plan of every Unit's deferred and still-not-verified points plus the stage's own manual checks; each point shows the Unit it
+came from. For a release project it tests from a throwaway tag or build first and cuts the real release as the last section. When it is finished the
+outcome is written to the Build and Test folder, and each Unit's passed points are marked verified in its own records.
+
+**Copy buttons.** In every test plan a fenced block in a step has a Copy button and a header naming where to paste it (`Terminal`, `Claude Code`, `Ask Claude`); inline
+code is click-to-copy.
+
+Only the unit-end rhythm has a Unit test plan; per-stage gates are unchanged. The contract is in
 [`contract/README.md`](contract/README.md#the-test-plan-unit-end-page-only).
 
 ## Registry of published pages (1.24.0)

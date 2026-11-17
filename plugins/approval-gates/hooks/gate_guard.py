@@ -1821,7 +1821,7 @@ def record_answers(project, state, tool_input, response):
                     pub["test_first"] = time.time()  # the gate is asked again only about a page republished after the testing
                     changed = True
                 say("PostToolUse", "the developer chose Test first: that is neither Approve nor Request Changes, and the gate "
-                                   f"stays open. Read {where} with ArtifactData get: `picks.<V row anchor>` is `now` or `later` on each "
+                                   f"stays open. Read {where} with ArtifactData get: `picks.<V row anchor>` is `now`, `later` or `buildtest` on each "
                                    "not-verified row. Then follow the test-plan flow (SKILL.md § 7; the skill "
                                    "approval-gates:test-plan): write the plan, publish it in the AI-DLC test plans artifact, and "
                                    "go on from there. Report nothing to the engine until the unit-end gate is asked again.")

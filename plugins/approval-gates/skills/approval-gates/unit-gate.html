@@ -27,8 +27,10 @@
 
     bundles/<id>.notes[<row anchor>] = "text"          a note to the agent on a row or a step (step-<n>)
     bundles/<id>.picks[<row anchor>] = "do"|"leave"    the person's lean on a suggestion row
-                                       "now"|"later"   on a row of the `unverified` section: Test now or Later; the
-                                                       agent's test plan covers the rows picked Test now
+                                       "now"|"later"|"buildtest"   on a row of the `unverified` section: Test now, Later, or At Build and
+                                                       Test; the agent's test plan covers the rows picked Test now; the
+                                                       rows picked At Build and Test are recorded as deferred to the
+                                                       Build and Test stage's test plan when the Unit is approved
     A unit-end page presented after a test plan also holds the sections `verified` (Verified by you), `unverified`
     (Still not verified) and `failed` (Failed, left as known); see contract/README.md.
     data/users/<viewer>/reads-<intent>--<unit>--<page>  {marks: {<row anchor or step key>: <revision read>}}
@@ -243,6 +245,7 @@ a.aidlc-id:hover { color: var(--accent-strong); }
 .testpick button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .testpick button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-strong); }
 .testpick button[aria-pressed="true"][data-val="later"] { background: var(--low-bg); color: var(--low-fg); }
+.testpick button[aria-pressed="true"][data-val="buildtest"] { background: var(--ok-bg); color: var(--ok-fg); }
 .subs { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; line-height: 1.5; }
 .subs li { padding: 1px 4px; border-radius: 4px; }
 .subs .sv { margin-left: 8px; font-size: 11px; font-weight: 600; }
@@ -1776,7 +1779,7 @@ var GateView = (function () {
     readKey = readKey || key;
     var was = st.picks[key] === val;
     st.picks[key] = was ? "" : val;
-    if (was || !item || (val !== "now" && val !== "later" && val !== "do" && val !== "leave")) return false;
+    if (was || !item || (val !== "now" && val !== "later" && val !== "buildtest" && val !== "do" && val !== "leave")) return false;
     var open = isOpen(st, key, isRead(st, readKey, item));
     st.read[readKey] = Math.max(st.read[readKey] || 0, revOf(item));
     if (open) st.open[key] = true;
@@ -1802,7 +1805,7 @@ var GateView = (function () {
       if (x.isStep) return;
       var r = x.item, pick = (st.picks || {})[x.anchor], state = r._state || x.kind;
       if (r.suggestion && pick !== "do" && pick !== "leave") out.push({ key: x.key, anchor: x.anchor, kind: "suggestion", decision: true });
-      else if (state === "unverified" && pick !== "now" && pick !== "later") out.push({ key: x.key, anchor: x.anchor, kind: "test", decision: true });
+      else if (state === "unverified" && pick !== "now" && pick !== "later" && pick !== "buildtest") out.push({ key: x.key, anchor: x.anchor, kind: "test", decision: true });
       else if (r.coveredBy && !r.coveredBy.link && !r.coveredBy.acceptanceReason && !isRead(st, x.key, r)) out.push({ key: x.key, anchor: x.anchor, kind: "handled", decision: false });
     });
     return out;
@@ -1913,7 +1916,7 @@ var GateView = (function () {
   /* The pick on a not-verified row: Test now or Later. It decides which rows the agent's test plan covers. */
   function testPick(st, key) {
     var pick = st.picks[key];
-    return '<span class="testpick" role="group" aria-label="Test this point"><button type="button" data-act="pick" data-key="' + esc(key) + '" data-val="now" aria-pressed="' + (pick === "now") + '">Test now</button><button type="button" data-act="pick" data-key="' + esc(key) + '" data-val="later" aria-pressed="' + (pick === "later") + '">Later</button></span>';
+    return '<span class="testpick" role="group" aria-label="Test this point"><button type="button" data-act="pick" data-key="' + esc(key) + '" data-val="now" aria-pressed="' + (pick === "now") + '">Test now</button><button type="button" data-act="pick" data-key="' + esc(key) + '" data-val="later" aria-pressed="' + (pick === "later") + '">Later</button><button type="button" data-act="pick" data-key="' + esc(key) + '" data-val="buildtest" aria-pressed="' + (pick === "buildtest") + '" title="Approve the Unit now; this point goes into the test plan of the Build and Test stage">At Build and Test</button></span>';
   }
 
   /* Where a finding, requirement or NFR is handled: a linked row passes (a green chip that opens where), an accepted
@@ -2121,7 +2124,7 @@ var GateView = (function () {
     var w = walk(bundle), pk = st.picks || {}, nt = st.notes || {};
     var groups = [
       { id: "suggestions", title: "Suggestion picks", rows: w.filter(function (x) { return !x.isStep && x.item.suggestion && (pk[x.anchor] === "do" || pk[x.anchor] === "leave"); }).map(function (x) { return [x, pk[x.anchor] === "do" ? "Do it" : "Leave it"]; }) },
-      { id: "tests", title: "Test picks", rows: w.filter(function (x) { return !x.isStep && (x.item._state || x.kind) === "unverified" && (pk[x.anchor] === "now" || pk[x.anchor] === "later"); }).map(function (x) { return [x, pk[x.anchor] === "now" ? "Test now" : "Later"]; }) },
+      { id: "tests", title: "Test picks", rows: w.filter(function (x) { return !x.isStep && (x.item._state || x.kind) === "unverified" && (pk[x.anchor] === "now" || pk[x.anchor] === "later" || pk[x.anchor] === "buildtest"); }).map(function (x) { return [x, pk[x.anchor] === "now" ? "Test now" : (pk[x.anchor] === "buildtest" ? "At Build and Test" : "Later")]; }) },
       { id: "notes", title: "Notes", rows: [] }
     ];
     var picked = {}; groups.forEach(function (g) { g.rows.forEach(function (p) { picked[p[0].anchor] = 1; }); });
