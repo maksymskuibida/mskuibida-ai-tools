@@ -1,5 +1,16 @@
 # session-titles changelog
 
+## 0.4.1
+
+The intent handle names the ticket or the work, not the team.
+
+- Cause: an intent folder `261117-uniform-persistent-id` whose description says "build RAIL-4389" got the handle `uniform`
+  (the team's name) when the agent could not answer and the fallback cut the folder name to its first 8 characters.
+- Now: 1. a Jira ticket key found in the project description, the Project line, the folder name or the branch (any spelling,
+  always `RAIL-4389`, may exceed 8 characters; dates, versions, `u19`, `utf-8` and the like are not keys); 2. else the agent,
+  told to name the feature, not a team or product; 3. else a compact form of the whole folder name (`upi`), not its first word.
+- A fallback cached by 0.4.0 is made again at the next run (so `uniform` becomes `RAIL-4389`); a plain-string entry stays.
+
 ## 0.4.0
 
 Every title starts with a short handle of its intent: `<handle>: <title>`, e.g. `rvdesk: u19-pr-actions — Code Generation`.

@@ -15,13 +15,23 @@ Every title starts with a short handle of its intent, so sessions of different i
 
 ## The intent handle
 
-The handle is at most 8 characters of `a-z`, `0-9` and `-`, a logical short name for the intent. A Haiku agent
-(`claude -p --model haiku --effort low`, no tools) makes it once per intent from the intent's folder name and its
-description (`project-description.json`, else the state file's Project line), and the answer is cached in
-`~/.claude/aidlc-session-titles/intent-handles.json` (`AIDLC_SESSION_TITLES_DIR` moves the folder), keyed by the intent's
-uuid, so every session of the intent shares it and Haiku is not called on a prompt. A reply that is not a valid handle,
-or no answer at all, gives a short form of the folder name (date prefix dropped, cut to 8) marked `"fallback"`, and the
-agent is asked again after 10 minutes. `AIDLC_SESSION_TITLES_HANDLE_CMD` replaces the command (it reads the prompt on stdin).
+The handle names the work, in this order:
+
+1. **The Jira ticket key**, found without any agent in the intent's `project-description.json`, the state file's Project
+   line, the folder name and the checkout's branch (first the description, then the Project line, the folder, the branch).
+   Other spellings are accepted (`rail-4389`, `RAIL_4389`, `rail4389`, `Rail 4389`) and the handle is always `RAIL-4389`:
+   uppercase, hyphen, number. A key may be longer than 8 characters. A key is 2-10 letters and 1-6 digits; without a
+   hyphen or underscore it needs 2+ digits, and dates, years, versions, `u19`, `utf-8`, `phase 2` and the like are not keys.
+2. **The feature's name**: a Haiku agent (`claude -p --model haiku --effort low`, no tools) is given the folder name and the
+   description and told to name the work, not a team, organisation or product; at most 8 characters of `a-z`, `0-9` and `-`
+   (it may also answer with a ticket key).
+3. **A compact form of the whole folder name** (date prefix dropped): one word cut to 8 characters, two words 4 + 4, more the
+   initials. It is marked `"fallback"` and the agent is asked again after 10 minutes.
+
+The answer is cached in `~/.claude/aidlc-session-titles/intent-handles.json` (`AIDLC_SESSION_TITLES_DIR` moves the folder),
+keyed by the intent's uuid, so every session of the intent shares it and Haiku is not called on a prompt. A fallback made
+by an older version is made again at the next run. `AIDLC_SESSION_TITLES_HANDLE_CMD` replaces the command (it reads the
+prompt on stdin).
 
 To change a handle, edit its value in `intent-handles.json` (`{"<intent uuid>": "rvdesk"}`; a plain string is final) and
 the sessions take it at their next prompt or stage change. A session that already ran gets the prefix once, as a title
