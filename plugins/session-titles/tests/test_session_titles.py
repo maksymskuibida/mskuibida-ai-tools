@@ -636,12 +636,12 @@ class HandleTests(Base):
         self.assertEqual(self.title_of(self.prompt("go")), "pgdaily: u4-day-navigation — Functional Design")
 
     def test_invalid_replies_fall_back_to_the_folder_name(self):
-        for reply in ("", "far too long a handle", "has space", "bad_char", "waytoolongone"):
+        for reply in ("", "far too long a handle", "has space", "bad_char", "waytoolongonehandle"):
             with self.subTest(reply=reply):
                 self.set_handle(reply)
                 if os.path.exists(self.cache):
                     os.remove(self.cache)
-                self.assertEqual(self.title_of(self.prompt(reply or "x")), "dailpage: Inception — Requirements Analysis")
+                self.assertEqual(self.title_of(self.prompt(reply or "x")), "dailypage: Inception — Requirements Analysis")
                 self.assertTrue(self.cached()[UUID]["fallback"])
                 self.states_reset()
 
@@ -651,7 +651,7 @@ class HandleTests(Base):
 
     def test_fallback_is_kept_until_the_retry_time_and_then_replaced(self):
         self.set_handle("garbled reply here")
-        self.assertEqual(self.title_of(self.prompt()), "dailpage: Inception — Requirements Analysis")
+        self.assertEqual(self.title_of(self.prompt()), "dailypage: Inception — Requirements Analysis")
         self.set_handle("pgdaily")
         self.prompt("again")
         self.assertEqual(self.handle_calls(), 1)  # not asked again at once
@@ -665,7 +665,7 @@ class HandleTests(Base):
 
     def test_missing_agent_falls_back(self):
         self.handle_cmd = os.path.join(self.root, "missing.sh")
-        self.assertEqual(self.title_of(self.prompt()), "dailpage: Inception — Requirements Analysis")
+        self.assertEqual(self.title_of(self.prompt()), "dailypage: Inception — Requirements Analysis")
 
     def test_another_session_of_the_intent_reuses_the_handle(self):
         self.prompt()
@@ -778,7 +778,10 @@ class HandleTests(Base):
 
     def test_fallback_is_compact_over_the_whole_slug(self):
         self.assertEqual(fallback_handle("261117-uniform-persistent-id"), "upi")
-        self.assertEqual(fallback_handle("261016-daily-page"), "dailpage")
+        self.assertEqual(fallback_handle("261117-shop-checkout-ab"), "shopcheckoutab")
+        self.assertEqual(fallback_handle("261117-averyveryverylongsingleword"), "averyveryverylo")
+        self.assertEqual(fallback_handle("261117-checkout-redesignedpages"), "checkou" + "redesign")
+        self.assertEqual(fallback_handle("261016-daily-page"), "dailypage")
         self.assertEqual(fallback_handle("261016-checkout"), "checkout")
         self.assertEqual(fallback_handle("261016-shop-checkout-flow-v2-redesign-extra-words-x"), "scfvrewx")
         self.assertEqual(fallback_handle("261016-"), "intent")
@@ -805,6 +808,48 @@ class HandleTests(Base):
     def test_the_agent_may_answer_with_a_ticket_key(self):
         self.set_handle("rail-4389")
         self.assertEqual(self.handle_of_prompt(), "RAIL-4389")
+
+    # ---- the 15-character limit and a handle changed later
+
+    def test_a_feature_name_up_to_15_characters_is_valid(self):
+        self.set_handle("persistent-ids1")
+        self.assertEqual(self.handle_of_prompt(), "persistent-ids1")
+        self.states_reset()
+        self.set_handle("persistent-ids12")
+        self.assertEqual(self.handle_of_prompt(), "dailypage")
+
+    def test_a_hand_renamed_handle_is_adopted_and_kept(self):
+        self.assertEqual(self.title_of(self.prompt()), "pgdaily: Inception — Requirements Analysis")
+        self.renamed("mine: Inception — Requirements Analysis")
+        self.assertEqual(self.cached(), {UUID: "mine"})
+        self.set_state("units-generation")
+        self.assertEqual(self.title_of(self.prompt("go")), "mine: Inception — Units Generation")
+        self.assertEqual(self.handle_calls(), 1)
+
+    def test_a_second_session_of_the_intent_uses_the_adopted_handle(self):
+        self.prompt()
+        self.renamed("my-handle: Inception — Requirements Analysis")
+        self.write("aidlc/.aidlc-sessions/second-session.binding.json",
+                   json.dumps({"space": "default", "intent": INTENT, "boundAt": "2026-10-20T00:00:00Z"}))
+        out = self.run_hook({"hook_event_name": "UserPromptSubmit", "prompt": "go", "session_id": "second-session"})
+        self.assertEqual(self.title_of(out), "my-handle: Inception — Requirements Analysis")
+
+    def test_a_ticket_key_prefix_is_adopted(self):
+        self.prompt()
+        self.renamed("xyz-9: Inception — Requirements Analysis")
+        self.assertEqual(self.cached(), {UUID: "XYZ-9"})
+
+    def test_an_invalid_prefix_is_ignored(self):
+        self.prompt()
+        for title in ("has space: Inception — x", "waytoolongonehandle: Inception — x", "Inception — x", ": x"):
+            with self.subTest(title=title):
+                self.renamed(title)
+                self.assertEqual(self.cached(), {UUID: "pgdaily"})
+
+    def test_a_declined_rename_does_not_change_the_handle(self):
+        self.prompt()
+        self.renamed("mine: Inception — Requirements Analysis", response="Declined by the user", failure=True)
+        self.assertEqual(self.cached(), {UUID: "pgdaily"})
 
 
 class ManifestTests(unittest.TestCase):

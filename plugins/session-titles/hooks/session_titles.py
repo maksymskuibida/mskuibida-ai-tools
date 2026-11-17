@@ -15,13 +15,15 @@ else `Active Unit`, and only on a per-Unit stage. Stage and phase names come fro
 (.claude/tools/data/stage-graph.json), else the slug title-cased.
 
 Every title carries a short handle of its intent, `<handle>: <title>` (e.g. `rvdesk: u19-pr-actions — Code Generation`),
-so sessions of different intents can be told apart. The handle (at most 8 characters of a-z, 0-9 and `-`) is made once
+so sessions of different intents can be told apart. The handle (at most 15 characters of a-z, 0-9 and `-`) is made once
 per intent by a Haiku agent from the intent's name and description and kept in <state folder>/intent-handles.json, so
-every session of the intent shares it; edit a value there to change a handle.
+every session of the intent shares it; edit a value there to change a handle. A session renamed so that its title starts
+with a different valid `<handle>: ` (by the person, or by the assistant at their request) changes the intent's handle the
+same way: the new one is stored as final and every title of every session of the intent keeps it.
 
 The handle names the work, in this order: the intent's Jira ticket key (`RAIL-4389`: found in the project description,
 the state file's Project line, the folder name or the checkout's branch, in any spelling, always written in Jira format,
-and allowed to be longer than 8 characters), else the feature's short name from the Haiku agent, else a compact form of
+and allowed to be longer than 15 characters), else the feature's short name from the Haiku agent, else a compact form of
 the whole folder name.
 
 A session counts as an AI-DLC session once it shows it runs the workflow: an `aidlc` engine, unit or claim command
@@ -63,7 +65,7 @@ JUDGING_ENV = "AIDLC_SESSION_TITLES_JUDGING"  # set in the judge's own process s
 JUDGE_CMD_ENV = "AIDLC_SESSION_TITLES_JUDGE_CMD"  # replaces `claude -p --model haiku …`; reads the prompt on stdin
 HANDLE_CMD_ENV = "AIDLC_SESSION_TITLES_HANDLE_CMD"  # replaces the handle agent's command; reads the prompt on stdin
 HANDLES_FILE = "intent-handles.json"  # in the state folder: {intent uuid or folder name: handle | {"handle", "fallback", "at"}}
-HANDLE = re.compile(r"^[a-z0-9][a-z0-9-]{0,7}$")
+HANDLE = re.compile(r"^[a-z0-9][a-z0-9-]{0,14}$")
 HANDLE_RULES = 2  # a fallback written by older rules (no `rules` mark, or a lower one) is made again at the next run
 # A Jira key in any spelling: `RAIL-4389`, `rail_4389`, `Rail 4389`, `rail4389`. 2-10 letters, 1-6 digits, not part of a
 # longer word or number. The loose spellings (no hyphen or underscore) need 2+ digits.
@@ -526,19 +528,21 @@ def clean_handle(raw):
 
 
 def fallback_handle(intent):
-    """A compact form of the whole folder name, the date prefix and the uuid tail dropped: one word cut to 8 characters,
-    two words 4 + 4, more the initials."""
+    """A compact form of the whole folder name, the date prefix and the uuid tail dropped: the words joined
+    when that is 15 characters or less, else two words 7 + 8, more the initials."""
     slug = re.sub(r"^\d{6,8}-", "", intent)
     slug = re.sub(r"-[0-9a-f]{16}$", "", slug)
     words = [w for w in re.split(r"[^a-z0-9]+", slug.lower()) if w]
     if not words:
         compact = ""
+    elif len("".join(words)) <= 15:
+        compact = "".join(words)
     elif len(words) == 1:
-        compact = words[0][:8]
+        compact = words[0][:15]
     elif len(words) == 2:
-        compact = words[0][:4] + words[1][:4]
+        compact = words[0][:7] + words[1][:8]
     else:
-        compact = "".join(w[0] for w in words)[:8]
+        compact = "".join(w[0] for w in words)[:15]
     return compact if HANDLE.match(compact) else "intent"
 
 
@@ -578,7 +582,7 @@ def handle_prompt(intent, description):
         "The handle must name the feature or the work itself, NOT a team, organisation, product or project-wide name "
         "that many intents share (a folder like `261117-uniform-persistent-id` is the work `persistent-id` of the team "
         "`uniform`). If the text names a Jira ticket, reply with the ticket key in Jira format, e.g. ABC-123. "
-        "Otherwise: at most 8 characters, only lowercase letters, digits and hyphen, a logical short name for the "
+        "Otherwise: at most 15 characters, only lowercase letters, digits and hyphen, a logical short name for the "
         "work (drop the date and filler words; abbreviate if it is longer, e.g. reviewdesk -> rvdesk). "
         "Reply with the handle only: no quotes, no explanation.")
 
@@ -648,6 +652,31 @@ def intent_handle(project, intent_dir, intent, uuid, text):
     except OSError:
         pass
     return made or fallback_handle(intent)
+
+
+def adopt_handle(event, title):
+    """A session renamed so its title starts with a different valid handle changes its intent's handle: stored as final,
+    so every session of the intent keeps it. An invalid prefix is ignored."""
+    if HANDLE_SEPARATOR not in title:
+        return
+    new = clean_handle(title.split(HANDLE_SEPARATOR, 1)[0])
+    if not new:
+        return
+    for project in projects(event):
+        selected = selected_intent(project, str(event.get("session_id") or ""))
+        if not selected:
+            continue
+        space, intent = selected
+        key = intent_uuid(project, space, intent) or intent
+        try:
+            handles = load_handles()
+            current = handles.get(key)
+            if current != new:
+                handles[key] = new
+                save_handles(handles)
+        except OSError:
+            pass
+        return
 
 
 def expected_title(event, state, project):
@@ -819,6 +848,7 @@ def on_tool(event, state):
             state["declined"] = title
         else:
             state["applied"] = state["emitted"] = title  # the title in force, so a prompt at another stage emits again
+            adopt_handle(event, title)
         return True
     if tool == "AskUserQuestion":
         ti = event.get("tool_input") or {}
