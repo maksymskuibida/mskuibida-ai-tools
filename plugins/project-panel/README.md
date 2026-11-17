@@ -398,6 +398,15 @@ Until Units Generation has finished and produced Units, Construction's seven sta
 is listed with its stages but carries no count or ring (its row says `not included yet`, in `local only`'s amber), and the plan counts only the other phases. Once the Units exist
 (or when Units Generation is skipped), Construction counts again, as below.
 
+### Stages a plugin adds (0.29.0)
+
+An engine plugin can add stages (`aidlc-plugins/<plugin>/stages/<phase>/<slug>.md`); the engine merges them into the project's stage graph, `.claude/tools/data/stage-graph.json`. The panel reads that graph instead of upstream's fixed list:
+
+- **Per Unit:** the stages with `for_each: unit-of-work`, in graph order, are the Unit matrix's columns and the Unit's progress. A custom stage after code-generation counts: a Unit built by code-generation is not done until its **last stage that applies** (the last per-Unit stage it did not skip) settles; the last per-Unit stage's checkbox settles every Unit at once. A merge (`UNIT_MERGED`, or the table's `merged` column) still lands a Unit whichever stage it names, and code-generation's receipts and artifacts keep their meaning.
+- **Stage definitions:** the kind rule reads each stage's `produces` / `produces_kinds` from upstream's `aidlc-common/stages/construction` and from the plugin's own folder.
+- **Run once:** a custom stage that runs once shows in its phase list with the name the graph gives it.
+- **No graph** (or one without code-generation as a per-Unit stage): upstream's list, as before.
+
 ### The unit-end gate: awaiting and Request Changes (0.28.0)
 
 With `gate_rhythm: unit-end` one gate covers several stages and the engine leaves their cells as they were, so the
@@ -930,6 +939,7 @@ renderer: check the real pane too when spacing matters.
 - **0.4.0** — the `ledger` provider (WORKPLAN.md against PRs, product sections you pin).
 - **M2 (0.5.0)** — freshness: re-read on session start, branch change, writes to the `watch` files, turn end, a surface attaching, and an mtime poll; a provider's remote `fingerprint` poll (the ledger's PRs and default-branch tip); redraw only when the model changes; the desktop pane opens when the app attaches.
 - **0.6.0** — the pane redesign: header, Now card, Needs attention, Plan; three breakpoints, done-folding and the open-items cap, the status strip.
+- **0.29.0** — custom stages from the project's stage graph (`.claude/tools/data/stage-graph.json`): per-Unit stages and a Unit's last stage come from the graph (a custom stage after code-generation is in the Unit matrix and progress, and a Unit is done only when its last applicable stage settles; a merge still lands it), plugin stage folders are read for stage definitions, run-once custom stages show with their graph name; upstream's list when there is no graph.
 - **0.28.1** — tests pin each step of a Request Changes at a unit-end gate: right after the rejection, as each gate stage's new `UNIT_STARTED` / `UNIT_COMPLETED` arrives (counted done as soon as it completes), and back at `[?]`.
 - **0.28.0** — the unit-end gate: the `gate` column of `## Unit Progress` is read. Gate `[R]` (Request Changes) shows the Unit revising (`↻ revising` on the stage it is on, current in the Now card, later gate stages not done until their new receipts settle them), from the `GATE_REJECTED` / `STAGE_REVISING` receipts' `Gate Stages`; gate `[?]` shows the Unit awaiting its unit-end approval.
 - **0.26.0** — the Units list tells not-started Units apart: a Unit claimed in the engine's claim registry (`aidlc/.aidlc-claim-registry.json`, `claims.<unit>.status == "claimed"`) or at this checkout is in progress (`claimed`); a free one whose dependencies are all done gets an open circle in normal text; one waiting on Units not done gets a lock and dim text. A finished Unit stays done. No dependency data: the plain not-started look.
