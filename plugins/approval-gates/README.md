@@ -33,6 +33,12 @@ When the intent has no Units (no units-generation: Construction runs once for th
 plan page as a unit-end Unit, published in "AI-DLC unit approvals" and titled "Approve plan". Its completion gate stays a per-stage page in "AI-DLC
 approval gates". The page is built with `unit_bundle.py draft --page plan --unit intent`; `intent` stands for the whole intent.
 
+## Custom per-Unit stages (1.39.0)
+
+Engine plugins can add stages to a project's stage graph (`.claude/tools/data/stage-graph.json`). A stage with `for_each: "unit-of-work"` is part of every Unit; the last applicable
+one is where the Unit ends (Code Generation when the graph says nothing else). Under the unit-end rhythm the plan approval stays at Code Generation's plan, the unit-end gate is the gate of the last
+stage, the unit-end page lists the custom stages' documents as `built` rows, and a Unit counts as landed on its last stage. A run-once custom stage is a per-stage gate under its graph name. `unit-gate.html` is unchanged.
+
 ## A Unit with the unit-end rhythm
 
 A team Unit claimed with `--rhythm unit-end` (the `unit-claim` plugin asks for the rhythm before the claim) runs its

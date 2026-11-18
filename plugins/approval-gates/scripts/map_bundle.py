@@ -46,6 +46,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import stage_graph  # noqa: E402  (same folder: the per-Unit stages of the project's stage graph)
+
 SCHEMA = "aidlc-map/1"
 JUDGMENT_SCHEMA = "aidlc-map-judgment/1"
 KINDS = ("components", "units", "stories", "entities")
@@ -55,7 +57,21 @@ TITLES = {"components": "Component map", "units": "Unit map", "stories": "Story 
 # its names, and the stage that settles the Units. The Unit map also gates a Unit's last gate (see UNIT_MAP_STAGES).
 COMPONENT_STAGES = ("domain-design", "application-design")
 UNIT_STAGES = ("units-generation",)
-UNIT_LAST_STAGE = "code-generation"
+UNIT_LAST_STAGE = "code-generation"  # upstream's last per-Unit stage: the fallback when the stage graph names no other
+
+
+def project_of_root(root):
+    """The project folder of an intent's record folder (<project>/aidlc/spaces/<space>/intents/<intent>), or None."""
+    found = re.match(r"^(?P<p>.+?)/aidlc/spaces/[^/]+/intents/[^/]+/?$", str(root).replace(os.sep, "/"))
+    return found.group("p") if found else None
+
+
+def unit_last_stage(project=None, root=None):
+    """A Unit's last stage: the last applicable per-Unit stage of the project's stage graph, else Code Generation."""
+    project = project or project_of_root(root)
+    if not project:
+        return UNIT_LAST_STAGE
+    return stage_graph.last_stage(project, root) or UNIT_LAST_STAGE
 SUMMARY_MAX = 240
 LANDED, BUILDING, PLANNED = "landed", "building", "planned"
 SLUG = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$|^[a-z][a-z0-9]*[0-9][a-z0-9]*$")
@@ -576,15 +592,16 @@ class Units:
         for slug, u in self.by_slug.items():
             row = progress.get(slug)
             land, build = False, False
+            last_stage = unit_last_stage(root=self.root)
             if row:
-                if row.get("merged") == "x" or row.get("code-generation") == "x":
+                if row.get("merged") == "x" or row.get(last_stage) == "x":
                     land = True
                 if any(v in ("-", "?", "R") for k, v in row.items() if k not in ("unit", "owner")) \
                         or any(v == "x" for k, v in row.items() if k not in ("unit", "owner", "gate", "merged")):
                     build = True
             last = None
             for ev in receipts.get(slug, []):
-                if ev["event"] in ("UNIT_MERGED",) or (ev["event"] == "UNIT_COMPLETED" and ev["stage"] == UNIT_LAST_STAGE):
+                if ev["event"] in ("UNIT_MERGED",) or (ev["event"] == "UNIT_COMPLETED" and ev["stage"] == last_stage):
                     last = LANDED
                 elif ev["event"] == "UNIT_STARTED":
                     if last == LANDED:
@@ -878,14 +895,14 @@ def links(project, intent, kinds=None):
     return sorted(out, key=lambda x: KINDS.index(x["kind"]) if x["kind"] in KINDS else 9)
 
 
-def required_kinds(stage, page=None, rhythm=None):
+def required_kinds(stage, page=None, rhythm=None, project=None):
     """The map kinds the gate of this stage needs. `page` is the Unit page of a unit-end rhythm gate (plan | unit-end)."""
     kinds = []
     if stage in COMPONENT_STAGES:
         kinds.append("components")
     if stage in UNIT_STAGES:
         kinds.append("units")
-    if page == "unit-end" or (stage == UNIT_LAST_STAGE and page is None):
+    if page == "unit-end" or (stage == unit_last_stage(project) and page is None):
         kinds.append("units")
     return kinds
 

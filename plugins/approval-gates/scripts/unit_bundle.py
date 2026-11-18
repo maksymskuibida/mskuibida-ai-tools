@@ -57,6 +57,7 @@ sys.path.insert(0, HERE)
 
 import aidlc_ids  # noqa: E402  (the shared copy: the id map of the bundle's `ids`)
 import gate_bundle
+import stage_graph  # noqa: E402  (same folder: the per-Unit stages of the stage graph)
 import map_bundle  # noqa: E402  (same folder: record_root, load_graph, state_field, slugify)
 import handling  # noqa: E402
 import validate_bundle  # noqa: E402
@@ -249,6 +250,9 @@ class Unit:
         if not os.path.isdir(self.folder):
             raise BundleError(f"the Unit has no record folder: {self.folder}")
         self.graph = gate_bundle.load_graph(self.project) or {}
+        # The custom per-Unit stages the stage graph puts after Code Generation: approved with the Unit, so the unit-end
+        # page covers their documents.
+        self.after = stage_graph.stages_after_code(self.project, self.root)
 
     def stage_folder(self, stage):
         return os.path.join(self.folder, stage)
@@ -661,6 +665,18 @@ def unit_end_sections(unit, defs, questions):
                       "body": what or area, "where": files[0][:48] if files and files[0] else "", "whereIsPath": True,
                       "refs": make_refs(what, defs, "code-generation", questions),
                       "source": {"path": src, "key": "built:" + gate_bundle.slugify(area), "digest": digest(area, what, r.get("files", ""))}})
+    for stage in unit.after:
+        for path in unit.documents(stage):
+            text = read(path)
+            title = re.match(r"#\s+(.+)", text)
+            title = plain(title.group(1)) if title else humanize(os.path.splitext(os.path.basename(path))[0])
+            first = re.search(r"(?ms)^# .*?\n\s*\n(.+?)(?:\n\s*\n|\Z)", text)
+            body = plain(first.group(1)) if first else title
+            built.append({"id": f"B-{len(built) + 1}", "title": one_line(f"{unit.stage_name(stage)}: {title}"), "label": None,
+                          "body": body, "where": rel(path, unit.project)[-48:], "whereIsPath": True,
+                          "refs": make_refs(body, defs, stage, questions),
+                          "source": {"path": rel(path, unit.project), "key": f"built:{stage}:" + gate_bundle.slugify(os.path.basename(path)),
+                                     "digest": digest(text)}})
     return [
         {"key": "changes", "kind": "changes", "title": "Changed after plan approval", "short": "Changed",
          "hint": "The design stays as approved, except these", "refsLabel": "Was", "rows": changes,
@@ -825,7 +841,8 @@ def draft(args):
         "revision": revision,
         "revisions": [{"n": revision, "note": "first draft" if revision == 1 else "revision", "at": stamp.isoformat().replace("+00:00", "Z")}],
         "facts": [],
-        "stages": [{"slug": s, "name": unit.stage_name(s), "ran": s in ran} for s in DESIGN_STAGES],
+        "stages": [{"slug": s, "name": unit.stage_name(s), "ran": s in ran} for s in DESIGN_STAGES]
+                  + ([{"slug": s, "name": unit.stage_name(s), "ran": unit.ran(s)} for s in unit.after] if args.page == "unit-end" else []),
     }
     if label:
         header["unitLabel"] = label
@@ -874,7 +891,8 @@ def draft(args):
             bundle["verification"] = {"auto": auto}  # the points the code summary says its automated tests cover; the page's funnel starts there
         first = re.search(r"(?ms)^# .*?\n\s*\n(.+?)(?:\n\s*\n|\Z)", summary)
         header["lede"] = plain(first.group(1)) if first else ""
-        bundle["provenance"]["records"] = [rel(os.path.join(unit.stage_folder("code-generation"), "code-summary.md"), project)]
+        bundle["provenance"]["records"] = [rel(os.path.join(unit.stage_folder("code-generation"), "code-summary.md"), project)] \
+            + [rel(p, project) for st in unit.after for p in unit.documents(st)]
         bundle["provenance"]["previous"] = approved.get("id", "")
         todo += ["`changes`: keep the rows that change behaviour or the approved design; when none does, empty it and set asApproved",
                  "`built`: say each piece in plain words, label it core, main or minor, and add a `map` of how the pieces connect",

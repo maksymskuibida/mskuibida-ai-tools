@@ -12,9 +12,9 @@ There are two flows with different scripts, different rows and a different artif
 
 | The gate in hand | Flow |
 |---|---|
-| `"gate_rhythm": "unit-end"` **and** it is the Unit's Code Generation **plan approval** (Approve Plan) **or** its **unit-end gate** (`directive.unit_gate: "unit-end"`) | **Unit-end flow → § 5.** `unit_bundle.py`, a `bundles/<id>` row, the artifact **AI-DLC unit approvals**. Go straight there; do not read §§ 1–4 for it. |
+| `"gate_rhythm": "unit-end"` **and** it is the Unit's Code Generation **plan approval** (Approve Plan) **or** its **unit-end gate** (`directive.unit_gate: "unit-end"`; the gate of the Unit's **last stage**: Code Generation, or the last per-Unit stage the project's stage graph puts after it, such as a custom stage "approved with the Unit") | **Unit-end flow → § 5.** `unit_bundle.py`, a `bundles/<id>` row, the artifact **AI-DLC unit approvals**. Go straight there; do not read §§ 1–4 for it. |
 | The Code Generation **plan approval** (Approve Plan) of an intent with **no Units** (the directive carries no `unit` and `construction/` holds only stage folders, no Unit folder) | **Plan-page flow → § 5**, with `--unit intent` (the whole intent stands as the Unit; the page is titled "Approve plan"). Only the plan approval: that intent's Code Generation **completion gate** stays per-stage. |
-| Any other gate: every gate of a `per-stage` Unit or of a project with no claim, and every design-stage gate of a unit-end Unit (the stages that run with no approval between them) | **Per-stage flow → §§ 1–4.** `gate_bundle.py`, a `gates/<id>` row, the artifact **AI-DLC approval gates**. |
+| Any other gate: every gate of a `per-stage` Unit or of a project with no claim, and every design-stage gate of a unit-end Unit (the stages that run with no approval between them), and every run-once custom stage of the project's stage graph (no `for_each`; its graph name is the page's stage name) | **Per-stage flow → §§ 1–4.** `gate_bundle.py`, a `gates/<id>` row, the artifact **AI-DLC approval gates**. |
 
 A `gates/` row written for a unit-end Unit's plan approval or unit-end gate is the wrong page: the hook refuses
 the write and says so. The hook's message at the gate names the flow too; when it and this table disagree, the
