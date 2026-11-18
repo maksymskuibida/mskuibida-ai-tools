@@ -33,6 +33,10 @@ When the intent has no Units (no units-generation: Construction runs once for th
 plan page as a unit-end Unit, published in "AI-DLC unit approvals" and titled "Approve plan". Its completion gate stays a per-stage page in "AI-DLC
 approval gates". The page is built with `unit_bundle.py draft --page plan --unit intent`; `intent` stands for the whole intent.
 
+## The Units map at the plan approval (1.40.0)
+
+At the Units Generation plan approval (Approve Plan) the agent draws a **proposed** Units map from the plan (`units-proposal.json`, `map_bundle.py draft --proposal`) and links it before the question, so you see the decomposition before approving it. The page marks it "Proposed — plan not approved yet". After the Units are generated, the stage gate's map is the next revision of the same row and shows what moved since the plan. `maps.html` changed: republish it once.
+
 ## Custom per-Unit stages (1.39.0)
 
 Engine plugins can add stages to a project's stage graph (`.claude/tools/data/stage-graph.json`). A stage with `for_each: "unit-of-work"` is part of every Unit; the last applicable

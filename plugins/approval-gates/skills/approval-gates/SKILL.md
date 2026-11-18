@@ -370,12 +370,31 @@ the map was written from the records as they are now:
 | Gate | Map |
 |---|---|
 | `domain-design` (`application-design` in older engines): the stage that settles the components | `components` |
-| `units-generation` (and again whenever it is redone) | `units` |
+| `units-generation` **plan approval** (Step 4, Approve Plan) | `units`, **proposed**: drawn from the plan, before any `unit-of-work.md` exists (below) |
+| `units-generation` stage gate (Step 7, after the Units are generated; and again whenever it is redone) | `units`, from the generated records |
 | a Unit's end: the unit-end page, or a per-stage Unit's `code-generation` gate | `units`, with the status refreshed |
 
 A project whose records hold no components, or no Units, has nothing to map: `map_bundle.py draft` says so and the guard passes.
 The stories and entities maps are never required; build them when the story map or the components' entities are there
 (`map_bundle.py draft --kind all` lists the ones with something to map).
+
+**The proposed Units map (1.40.0).** The decomposition is decided at the Units Generation plan approval, so the developer sees
+the Units map there, not only afterwards. Before the Approve Plan question (and before the plan page, so its header links it):
+
+1. Write the plan's decomposition as `units-proposal.json` in the scratchpad (`aidlc-units-proposal/1`, contract/README.md): per
+   Unit its `id` (`u1-accounts`), `label` (`U1`), `name`, `kind`, one-line `purpose`, `needs` (`[{id, why}]`), the `stories` or
+   requirements it takes, and `points` when known.
+2. `map_bundle.py draft --kind units --proposal <that file> --out <folder>`, judge `judgment.json` (a summary and a group per
+   Unit, as below; the purpose is filled in as a start), `map_bundle.py finalize --kind units --proposal <that file> --out <folder>`,
+   then send its `writes` to the **AI-DLC maps** artifact. The row `maps/<intent>-units` is revision 1 with `proposed: true`; the
+   page shows "Proposed — plan not approved yet".
+3. Link it in the message before the question, and build the plan page after it (the header links the map).
+4. **Revise Plan** changes the decomposition: edit the proposal and run draft and finalize again (a new revision).
+5. After the Units are generated, the stage gate's map is built from the records as usual (below). It is the **next revision of
+   the same row**, so the page reads its changes as "since the approved plan": what moved, was added or dropped after approval.
+
+The guard refuses the Approve Plan question of `units-generation` (and the write of its plan page) until a proposed map was
+published from the proposal drafted last; the stage gate still needs the real map, and a proposed map never satisfies it.
 
 **Build it before the gate page**, so the page's header links it:
 

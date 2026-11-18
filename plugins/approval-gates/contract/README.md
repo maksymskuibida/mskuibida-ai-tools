@@ -345,6 +345,25 @@ its schema is [`map.schema.json`](map.schema.json) (`aidlc-map/1`).
 | `blocks[].status` | Units only: `landed` (the Unit Progress table's `merged` or last-stage cell is `[x]` — `code-generation`, or the Unit's last per-Unit stage in the project's stage graph (`scripts/stage_graph.py`) — or a `UNIT_MERGED` receipt, or a `UNIT_COMPLETED` receipt of that last stage not followed by a newer `UNIT_STARTED`), `building`, `planned` |
 | `ids` | the tooltips of the ids the map shows (`aidlc_ids.py refs`), as on every page |
 
+### The proposed Units map and `units-proposal.json` (1.40.0)
+
+At the Units Generation plan approval no `unit-of-work.md` exists, so the Units map is drawn from a file the agent writes
+(`aidlc-units-proposal/1`; in the scratchpad or the stage folder, passed with `map_bundle.py draft|finalize --kind units --proposal <file>`):
+
+```json
+{ "schema": "aidlc-units-proposal/1",
+  "units": [ { "id": "u2-billing", "label": "U2", "name": "Billing", "kind": "feature", "purpose": "One line of what it is for.",
+               "needs": [ { "id": "u1-accounts", "why": "bills belong to an account" } ],
+               "stories": ["US3", "US4"], "points": 5 } ] }
+```
+
+`id` is a slug, `label` a U-id (optional), `needs` ids are slugs or labels (an unknown one is left out with a warning), `points`
+optional. The row is the same `maps/<intent>-units`, with `proposed: true` and `basis: "plan"` (revision 1, every Unit planned).
+The map built after Units Generation from the records is the next revision of that row: it omits both fields and its
+`previous` carries `proposed: true` plus the snapshot of the proposal, so the page shows what moved since the approved plan.
+The guard holds the plan approval to a proposed row whose `digest` matches the proposal drafted last, and the stage gate to a
+row that is not proposed.
+
 A gate row (`gates/<id>`) and a Unit bundle carry `maps: [{kind, url, title}]` (url = `<maps artifact url>#<row id>`), filled by
 `gate_bundle.py draft` and `unit_bundle.py finalize` from the maps published for the intent; both pages show them in the header.
 The guard's rule (which gates need which map) is SKILL.md § 8. The page writes nothing to the row.

@@ -17,6 +17,8 @@
     "builtAt": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}" },
     "digest": { "type": "string", "pattern": "^[0-9a-f]{16}$", "description": "A hash of the records the row was built from (not of the judgment). The guard compares it with the records now: a different digest means the map is stale." },
     "sources": { "type": "array", "items": { "type": "string" }, "description": "The record files it was built from, relative to the intent folder." },
+    "proposed": { "const": true, "description": "Set only on a Units map drawn from the PLAN (map_bundle.py draft --proposal), before the plan is approved and unit-of-work.md exists. The page shows 'Proposed — plan not approved yet'. The next revision of the same row, built from the generated records, omits it." },
+    "basis": { "const": "plan", "description": "With `proposed`: what the map is drawn from." },
     "layerName": { "enum": ["Wave", "Layer"] },
     "groups": { "type": "array", "items": { "$ref": "#/$defs/group" } },
     "blocks": { "type": "array", "items": { "$ref": "#/$defs/block" } },
@@ -34,6 +36,7 @@
       "properties": {
         "revision": { "type": "integer", "minimum": 1 },
         "builtAt": { "type": "string" },
+        "proposed": { "const": true, "description": "The revision before this one was the proposed map: the page reads the changes as 'since the approved plan'." },
         "blocks": { "type": "object", "additionalProperties": { "$ref": "#/$defs/blockSnapshot" } },
         "rows": { "type": "object" },
         "cols": { "type": "object" },
