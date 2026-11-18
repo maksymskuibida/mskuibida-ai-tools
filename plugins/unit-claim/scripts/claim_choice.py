@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """The claim choice of a team Unit: which design stages run and which approval rhythm it is claimed with.
 
-    claim_choice.py stages   [--project-dir <dir>]                 the four design stages and their `condition:`
+    claim_choice.py stages   [--project-dir <dir>]                 the per-Unit stages a claim can leave out (the stage graph's, else the
+                                                                   four design stages) and their `condition:`
     claim_choice.py brief    --unit <u> [--project-dir <dir>]      what the recommendation reads: the stages, the
                                                                    Unit's entry in unit-of-work.md and its stories
     claim_choice.py status   --unit <u> [--project-dir <dir>]      the choice recorded for the Unit, or null; whether a
@@ -197,22 +198,29 @@ def mark_claimed(project, unit):
 
 # ---------------------------------------------------------------- the choice itself
 
-def slug_of(text):
-    """A design stage's slug from a label such as "NFR Design (Recommended)", or None."""
-    text = re.sub(r"\(recommended\)", "", str(text), flags=re.I).strip().lower()
-    text = re.sub(r"[^a-z]+", " ", text).strip()
-    for slug, name in NAMES.items():
-        if text in (name.lower(), slug.replace("-", " ")):
-            return slug
-    if text in ("infrastructure", "infra design", "infra"):
+def norm(text):
+    return re.sub(r"[^a-z0-9]+", " ", str(text).lower()).strip()
+
+
+def slug_of(text, stages=None):
+    """A per-Unit stage's slug from a label such as "NFR Design (Recommended)", or None. `stages` is the project's list
+    ([{slug, name, ...}], see stage_list); the four design stages without it."""
+    stages = stages or fallback_stages()
+    text = norm(re.sub(r"\(recommended\)", "", str(text), flags=re.I))
+    for stage in stages:
+        if text in (norm(stage["name"]), norm(stage["slug"])):
+            return stage["slug"]
+    known = {s["slug"] for s in stages}
+    if text in ("infrastructure", "infra design", "infra") and "infrastructure-design" in known:
         return "infrastructure-design"
-    if text in ("functional",):
+    if text in ("functional",) and "functional-design" in known:
         return "functional-design"
     return None
 
 
-def parse_stages(text):
+def parse_stages(text, stages=None):
     """[slugs] from a dialog answer ("Functional Design, NFR Design"), [] for none, None when it cannot be read."""
+    order = [s["slug"] for s in stages or fallback_stages()]
     if isinstance(text, list):
         parts = text
     else:
@@ -223,54 +231,109 @@ def parse_stages(text):
     for part in parts:
         if not str(part).strip():
             continue
-        slug = slug_of(part)
+        slug = slug_of(part, stages)
         if slug is None:
             return None
         if slug not in found:
             found.append(slug)
-    return [s for s in DESIGN_STAGES if s in found]
+    return [s for s in order if s in found]
 
 
-def with_needs(stages):
-    """(stages in engine order, [note]) with every stage a chosen stage needs added back."""
+def with_needs(stages, listed=None):
+    """(stages in the graph's order, [note]) with every stage a chosen stage needs added back."""
+    listed = listed or fallback_stages()
+    order = [s["slug"] for s in listed]
+    names = {s["slug"]: s["name"] for s in listed}
     chosen, notes = list(stages), []
     for stage, need in NEEDS.items():
-        if stage in chosen and need not in chosen:
+        if stage in chosen and need not in chosen and need in order:
             chosen.append(need)
-            notes.append(f"{NAMES[need]} was added back: {NAMES[stage]} needs it.")
-    return [s for s in DESIGN_STAGES if s in chosen], notes
+            notes.append(f"{names[need]} was added back: {names[stage]} needs it.")
+    return [s for s in order if s in chosen], notes
 
 
 def record_answer(project, unit, stages, rhythm):
-    """Write the Unit's answer. Returns (choice, notes)."""
-    stages, notes = with_needs(stages)
-    choice = {"unit": unit, "stages": stages, "rhythm": rhythm, "at": now()}
+    """Write the Unit's answer. Returns (choice, notes). The answer keeps the stages it was asked about (`offered`), so
+    what it leaves out stays the same even if the stage graph changes before the claim."""
+    listed = stage_list(project)
+    stages, notes = with_needs(stages, listed)
+    choice = {"unit": unit, "stages": stages, "offered": [s["slug"] for s in listed], "rhythm": rhythm, "at": now()}
     write(answer_path(project, unit), choice)
     return choice, notes
 
 
 def left_out(choice):
-    return [s for s in DESIGN_STAGES if s not in (choice or {}).get("stages", [])]
+    offered = (choice or {}).get("offered") or list(DESIGN_STAGES)
+    return [s for s in offered if s not in (choice or {}).get("stages", [])]
 
 
 def skip_command(stage, unit):
     return f'aidlc engine orchestrate report --stage {stage} --unit {unit} --result skipped --reason "{SKIP_REASON}"'
 
 
-def stage_info(project):
-    """[{slug, name, condition}] of the four design stages, the condition from the project's stage graph when it has one."""
-    graph = {}
+def fallback_stages():
+    return [{"slug": s, "name": NAMES[s], "condition": CONDITIONS[s], "execution": "CONDITIONAL", "custom": False}
+            for s in DESIGN_STAGES]
+
+
+def short(text, limit=160):
+    """A condition as a reason of one line: its first sentence, cut at a word when it is still long."""
+    text = " ".join(str(text or "").split())
+    first = re.match(r".*?[.!?](?=\s|$)", text)
+    text = first.group(0) if first else text
+    if len(text) <= limit:
+        return text
+    return text[:limit].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+
+
+def title_of(slug):
+    return NAMES.get(slug) or slug.replace("-", " ").title()
+
+
+def name_of(project, slug):
+    for stage in stage_list(project):
+        if stage["slug"] == slug:
+            return stage["name"]
+    return title_of(slug)
+
+
+def read_graph(project):
     try:
         with open(os.path.join(project, ".claude", "tools", "data", "stage-graph.json"), encoding="utf-8") as f:
             data = json.load(f)
-        graph = {s["slug"]: s for s in data if isinstance(s, dict) and isinstance(s.get("slug"), str)}
+        return [s for s in data if isinstance(s, dict) and isinstance(s.get("slug"), str)]
     except (OSError, ValueError, TypeError):
-        pass
+        return []
+
+
+def stage_list(project):
+    """[{slug, name, condition, execution, custom}] of the per-Unit stages a claim can leave out, in the project's stage
+    graph's order: the stages with for_each "unit-of-work" except code-generation, the project's own among them. The
+    engine's `claim --skip-stages` takes any of them, an ALWAYS one too (only code-generation stays), so they are all
+    offered; `execution` tells which run unless left out. A graph with no such stage, or none, gives the four design
+    stages with their names and conditions (the graph's, where it has them)."""
+    graph = read_graph(project)
+    per_unit = [s for s in graph if s.get("for_each") == "unit-of-work" and s["slug"] != "code-generation"]
     out = []
+    if per_unit:
+        for g in per_unit:
+            slug = g["slug"]
+            known = slug in NAMES
+            condition = g.get("condition") or CONDITIONS.get(slug, "")
+            out.append({"slug": slug, "name": g.get("name") or title_of(slug),
+                        "condition": condition if known else short(condition),
+                        "execution": str(g.get("execution") or "CONDITIONAL").upper(), "custom": not known})
+        return out
+    by_slug = {s["slug"]: s for s in graph}
     for slug in DESIGN_STAGES:
-        g = graph.get(slug) or {}
-        out.append({"slug": slug, "name": g.get("name") or NAMES[slug], "condition": g.get("condition") or CONDITIONS[slug]})
+        g = by_slug.get(slug) or {}
+        out.append({"slug": slug, "name": g.get("name") or NAMES[slug], "condition": g.get("condition") or CONDITIONS[slug],
+                    "execution": "CONDITIONAL", "custom": False})
     return out
+
+
+def stage_info(project):
+    return stage_list(project)
 
 
 def engine(project):
@@ -366,7 +429,7 @@ def main(argv=None):
             print(json.dumps({"unit": args.unit, "choice": choice, "used": bool(choice and choice.get("claimedAt")),
                               "ask": usable is None, "claimFlags": flags}, indent=2))
         elif args.cmd == "record":
-            stages = parse_stages(args.stages)
+            stages = parse_stages(args.stages, stage_list(project))
             if stages is None:
                 raise ChoiceError(f"cannot read the stages {args.stages!r}; name them by slug, comma-separated, or none")
             choice, notes = record_answer(project, args.unit, stages, args.rhythm)

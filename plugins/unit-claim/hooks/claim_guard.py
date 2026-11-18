@@ -221,9 +221,9 @@ def pre(event, project):
         choice = cc.choice_for(project, unit)
         if choice and stage in cc.left_out(choice):
             if cc.engine(project)["skipStages"]:
-                raise Refusal(f"{cc.NAMES.get(stage, stage)} was left out for {unit} and skipped at the claim. Don't start "
+                raise Refusal(f"{cc.name_of(project, stage)} was left out for {unit} and skipped at the claim. Don't start "
                               "it; run `aidlc engine orchestrate next` for the next stage that runs.")
-            raise Refusal(f"{cc.NAMES.get(stage, stage)} was left out for {unit} at the claim. Report it skipped for this "
+            raise Refusal(f"{cc.name_of(project, stage)} was left out for {unit} at the claim. Report it skipped for this "
                           f"Unit instead, then run `next`: {cc.skip_command(stage, unit)}")
 
 
@@ -248,7 +248,7 @@ def post(event, project):
             continue
         cc.mark_claimed(project, unit)
         out = cc.left_out(choice)
-        names = ", ".join(cc.NAMES[s] for s in out)
+        names = ", ".join(cc.name_of(project, s) for s in out)
         if not out:
             say("PostToolUse", f"{unit} is claimed with the {choice['rhythm']} rhythm; every design stage runs.")
         elif skip:
@@ -302,7 +302,7 @@ def prompt(event, project):
     choice = cc.open_choice_for(project, unit)
     if choice:
         say("UserPromptSubmit", f"{unit} has a recorded claim choice: "
-                                f"{', '.join(cc.NAMES[s] for s in choice['stages']) or 'no design stage'}; rhythm {choice['rhythm']}. "
+                                f"{', '.join(cc.name_of(project, s) for s in choice['stages']) or 'no design stage'}; rhythm {choice['rhythm']}. "
                                 f"Say so in one line and claim with `{cc.claim_flags(choice, cc.engine(project))}`.")
         return
     say("UserPromptSubmit", f"before claiming {unit}: {ask_line(unit)} The claim is refused until it is answered.")

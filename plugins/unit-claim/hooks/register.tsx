@@ -9,15 +9,19 @@ import type { EngineInterface, Register } from 'claude-code'
 const SOURCE = /^unit-claim:([A-Za-z0-9][A-Za-z0-9._-]*)$/
 const STAGES_LINE = /^Which design stages run for `([^`]+)`\?$/
 
-const STAGES = [
+// The per-Unit stages a claim can leave out come from the project's stage graph (`claim_choice.py stages`), its own
+// stages among them; these four are used when the script cannot say.
+type Stage = { slug: string; name: string; execution?: string }
+const FALLBACK_STAGES: Stage[] = [
   { slug: 'functional-design', name: 'Functional Design' },
   { slug: 'nfr-requirements', name: 'NFR Requirements' },
   { slug: 'nfr-design', name: 'NFR Design' },
   { slug: 'infrastructure-design', name: 'Infrastructure Design' },
-] as const
-const NAMES: readonly string[] = STAGES.map(s => s.name)
+]
+const COUNTS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten']
 const SUGGESTED = 'Suggested stages'
-const ALL = 'All four stages'
+const allLabel = (stages: Stage[]) => `All ${COUNTS[stages.length] ?? stages.length} stages`
+const namesOf = (stages: Stage[]) => stages.map(s => s.name)
 // What each rhythm the plugin knows means; one the engine adds later is offered with its name alone.
 const RHYTHM_NOTES: Record<string, string> = {
   'unit-end': 'Design stages run without a stop; you look at the plan page, then the unit-end page',
@@ -28,7 +32,7 @@ type Advice = { stage: string; why: string }
 type Recommendation = { run: Advice[]; skip: Advice[] } | { error: string }
 type Resolved = { ok: string[] } | { refused: string; suggestion?: string }
 type Refusal = { refused: string; suggestion?: string }
-type Claim = { recommendation: Recommendation; rhythms: string[]; refusals: Refusal[] }
+type Claim = { recommendation: Recommendation; rhythms: string[]; stages: Stage[]; refusals: Refusal[] }
 
 // Per Unit, while its dialog is open or asked again: the recommendation and the engine's rhythms are read once.
 const claims = new Map<string, Claim>()
@@ -68,7 +72,30 @@ async function rhythmsOf($: EngineInterface, cwd: string): Promise<string[]> {
   return (found.length >= 2 ? found : Object.keys(RHYTHM_NOTES)).sort((a, b) => Number(b === 'unit-end') - Number(a === 'unit-end'))
 }
 
-async function recommend($: EngineInterface, model: string, unit: string, cwd: string): Promise<Recommendation> {
+/** The stages a claim can leave out, read from the project's stage graph by `claim_choice.py stages`. */
+async function stagesOf($: EngineInterface, cwd: string): Promise<Stage[]> {
+  const script = `${$.plugin.root}/scripts/claim_choice.py`
+  const got = await run($, ['python3', script, 'stages'], cwd).catch(() => ({ code: 1, out: '', err: '' }))
+  let list: unknown
+  try {
+    list = JSON.parse(got.out)
+  } catch {
+    list = undefined
+  }
+  const stages = (Array.isArray(list) ? list : []).filter(
+    (s): s is Stage => !!s && typeof s.slug === 'string' && typeof s.name === 'string',
+  )
+
+  return stages.length ? stages : FALLBACK_STAGES
+}
+
+async function recommend(
+  $: EngineInterface,
+  model: string,
+  unit: string,
+  cwd: string,
+  stages: Stage[],
+): Promise<Recommendation> {
   const script = `${$.plugin.root}/scripts/claim_choice.py`
   const brief = await run($, ['python3', script, 'brief', '--unit', unit], cwd).catch(why => ({ code: 1, out: '', err: String(why) }))
   if (brief.code !== 0) return { error: `the Unit's brief could not be read (${brief.err.trim() || 'no output'})` }
@@ -79,10 +106,11 @@ async function recommend($: EngineInterface, model: string, unit: string, cwd: s
       'You decide which AI-DLC design stages a Unit of work needs. Judge each stage only against its own condition and ' +
       'what the Unit delivers. A stage that needs another (NFR Design needs NFR Requirements) is skipped when that one is.',
     prompt: [
-      'The Unit, its stories and the four design stages with their conditions, as JSON:',
+      `The Unit, its stories and the ${stages.length} per-Unit stages with their conditions, as JSON ` +
+        '(execution ALWAYS: the stage runs for every Unit unless the developer leaves it out; skip it only when this Unit clearly does not need it):',
       brief.out,
       '',
-      'Put every one of the four stages in exactly one list: run or skip. Give each a reason of one plain sentence, at',
+      `Put every one of the ${stages.length} stages in exactly one list: run or skip. Give each a reason of one plain sentence, at`,
       'most 20 words, saying what in this Unit makes the condition true or false. Answer with JSON only:',
       '{"run": [{"stage": "Functional Design", "why": "..."}], "skip": [{"stage": "NFR Requirements", "why": "..."}]}',
     ].join('\n'),
@@ -90,17 +118,17 @@ async function recommend($: EngineInterface, model: string, unit: string, cwd: s
   if (!reply.isAnswered) return { error: `the recommendation could not be made (${reply.reason})` }
   const json = jsonOf(reply.text) as { run?: Advice[]; skip?: Advice[] } | undefined
   const listed = [...(json?.run ?? []), ...(json?.skip ?? [])].map(a => a.stage)
-  if (!json || listed.length !== 4 || NAMES.some(name => !listed.includes(name))) {
-    return { error: 'the recommendation did not name each design stage once' }
+  if (!json || listed.length !== stages.length || namesOf(stages).some(name => !listed.includes(name))) {
+    return { error: 'the recommendation did not name each stage once' }
   }
 
   return { run: json.run ?? [], skip: json.skip ?? [] }
 }
 
-function resolverPrompt(stages: string | undefined, rhythm: string | undefined, rhythms: string[]): string {
+function resolverPrompt(stages: string | undefined, rhythm: string | undefined, rhythms: string[], known: Stage[]): string {
   return [
     'Resolve what a developer typed into known options. They may misspell, abbreviate or use other words.',
-    `Valid stages: ${NAMES.join(', ')}.`,
+    `Valid stages: ${namesOf(known).join(', ')}.`,
     `Valid rhythms: ${rhythms.join(', ')}.`,
     '',
     'Stages: split the input into the parts it names. Map a part to a stage only when it clearly means that stage.',
@@ -124,15 +152,16 @@ async function resolve(
   stages: string | undefined,
   rhythm: string | undefined,
   rhythms: string[],
+  known: Stage[],
 ): Promise<{ stages?: Resolved; rhythm?: Resolved }> {
   const failed: Resolved = { refused: 'Refused: the typed answer could not be resolved; please answer again.' }
-  const reply = await $.model.complete({ model, prompt: resolverPrompt(stages, rhythm, rhythms), maxTokens: 400 })
+  const reply = await $.model.complete({ model, prompt: resolverPrompt(stages, rhythm, rhythms, known), maxTokens: 400 })
   const json = reply.isAnswered ? (jsonOf(reply.text) as { stages?: Resolved; rhythm?: Resolved } | undefined) : undefined
   const out: { stages?: Resolved; rhythm?: Resolved } = {}
   if (stages !== undefined) {
     const s = json?.stages ?? failed
-    // The resolver is held to the four stages.
-    out.stages = 'ok' in s && s.ok.some(name => !NAMES.includes(name)) ? failed : s
+    // The resolver is held to the project's stages.
+    out.stages = 'ok' in s && s.ok.some(name => !namesOf(known).includes(name)) ? failed : s
   }
   if (rhythm !== undefined) {
     const r = json?.rhythm ?? failed
@@ -157,7 +186,7 @@ function questions(unit: string, claim: Claim) {
       multiSelect: false,
       options: [
         { label: SUGGESTED, description: 'run' in rec ? suggested.join(', ') || 'No design stage' : `No suggestion: ${rec.error}` },
-        { label: ALL, description: NAMES.join(', ') },
+        { label: allLabel(claim.stages), description: namesOf(claim.stages).join(', ') },
       ],
     },
     {
@@ -187,10 +216,11 @@ async function settle(
   const rec = claim.recommendation
   const pick = answers[stagesQuestion(unit)] ?? ''
   const pace = answers[rhythmQuestion(unit)] ?? ''
+  const ALL = allLabel(claim.stages)
   const typedStages = pick === SUGGESTED || pick === ALL ? undefined : pick
   const typedRhythm = claim.rhythms.includes(pace) ? undefined : pace
   const got =
-    typedStages === undefined && typedRhythm === undefined ? {} : await resolve($, model, typedStages, typedRhythm, claim.rhythms)
+    typedStages === undefined && typedRhythm === undefined ? {} : await resolve($, model, typedStages, typedRhythm, claim.rhythms, claim.stages)
 
   claim.refusals = [got.stages, got.rhythm].filter((r): r is Refusal => !!r && 'refused' in r)
   if (pick === SUGGESTED && 'error' in rec) {
@@ -206,11 +236,11 @@ async function settle(
 
   const names =
     pick === SUGGESTED ? ('run' in rec ? rec.run.map(a => a.stage) : [])
-    : pick === ALL ? [...NAMES]
+    : pick === ALL ? namesOf(claim.stages)
     : got.stages && 'ok' in got.stages ? got.stages.ok
     : []
   const rhythm = got.rhythm && 'ok' in got.rhythm ? (got.rhythm.ok[0] ?? pace) : pace
-  const slugs = STAGES.filter(s => names.includes(s.name)).map(s => s.slug)
+  const slugs = claim.stages.filter(s => names.includes(s.name)).map(s => s.slug)
   const script = `${$.plugin.root}/scripts/claim_choice.py`
   const recorded = await run(
     $,
@@ -226,7 +256,7 @@ async function settle(
     notes?: string[]
     claimFlags?: string
   }
-  const chosen = STAGES.filter(s => choice?.stages.includes(s.slug)).map(s => s.name)
+  const chosen = claim.stages.filter(s => choice?.stages.includes(s.slug)).map(s => s.name)
 
   return (
     `Recorded for ${unit}: ${chosen.join(', ') || 'no design stage'}; rhythm ${rhythm}. ` +
@@ -247,8 +277,9 @@ export const register: Register = (on, options) => {
     try {
       cwd = await $.session.cwd()
       if (!claim) {
-        const [recommendation, rhythms] = await Promise.all([recommend($, recommendModel, unit, cwd), rhythmsOf($, cwd)])
-        claim = { recommendation, rhythms, refusals: [] }
+        const [stages, rhythms] = await Promise.all([stagesOf($, cwd), rhythmsOf($, cwd)])
+        const recommendation = await recommend($, recommendModel, unit, cwd, stages)
+        claim = { recommendation, rhythms, stages, refusals: [] }
         claims.set(unit, claim)
       }
     } catch (why) {

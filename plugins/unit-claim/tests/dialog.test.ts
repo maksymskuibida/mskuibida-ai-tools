@@ -22,7 +22,7 @@ type World = {
 
 // Stands for the engine beneath the plugin: the dialog (answering with `answers`), the session's folder, the
 // processes the plugin runs (the engine's help, claim_choice.py) and the two models.
-function world(on: On, answers: Record<string, string>[], resolver = '{}'): World {
+function world(on: On, answers: Record<string, string>[], resolver = '{}', graph?: { slug: string; name: string }[], recommendation = RECOMMENDATION): World {
   const w: World = { opened: [], recorded: [], resolverSaw: [] }
   let round = 0
   on('tool.call', { tool: 'AskUserQuestion' }, (_, e) => {
@@ -34,6 +34,11 @@ function world(on: On, answers: Record<string, string>[], resolver = '{}'): Worl
   on('process.spawn', async function* (_, e) {
     if (e.argv[2] === 'engine') {
       yield { stream: 'stdout' as const, text: JSON.stringify({ rhythms: ['per-stage', 'unit-end'], skipStages: true }) }
+      return { value: { code: 0, signal: null } }
+    }
+    if (e.argv[2] === 'stages') {
+      if (!graph) return { value: { code: 1, signal: null } }
+      yield { stream: 'stdout' as const, text: JSON.stringify(graph) }
       return { value: { code: 0, signal: null } }
     }
     if (e.argv[2] === 'brief') {
@@ -56,7 +61,7 @@ function world(on: On, answers: Record<string, string>[], resolver = '{}'): Worl
   on('model.complete', (_, e) => {
     const prompt = String(e.prompt)
     if (e.model === 'claude-haiku-5-5') w.resolverSaw.push(prompt)
-    const text = e.model === 'claude-haiku-5-5' ? resolver : RECOMMENDATION
+    const text = e.model === 'claude-haiku-5-5' ? resolver : recommendation
 
     return { value: { isAnswered: true, text, usage: { input_tokens: 1, output_tokens: 1 } } } as never
   })
@@ -158,5 +163,22 @@ describe('the claim dialog', () => {
 
     expect(w.recorded).toEqual([])
     expect(result.context?.join(' ')).toContain('Refused')
+  })
+
+  test("a project's own per-Unit stage is offered, recommended on and recorded", async ($, on) => {
+    const graph = [
+      { slug: 'functional-design', name: 'Functional Design' },
+      { slug: 'demo-assessment', name: 'Demo Assessment' },
+    ]
+    const recommendation = JSON.stringify({
+      run: [{ stage: 'Demo Assessment', why: 'Its condition holds.' }],
+      skip: [{ stage: 'Functional Design', why: 'Nothing new.' }],
+    })
+    const w = world(on, [{ [STAGES_Q]: 'All two stages', [RHYTHM_Q]: 'unit-end' }], '{}', graph, recommendation)
+
+    await $.tool.call(placeholder(`unit-claim:${UNIT}`))
+
+    expect(w.opened[0]?.[0]?.options).toEqual(['Suggested stages', 'All two stages'])
+    expect(w.recorded).toEqual([['--unit', UNIT, '--stages', 'functional-design,demo-assessment', '--rhythm', 'unit-end']])
   })
 })
