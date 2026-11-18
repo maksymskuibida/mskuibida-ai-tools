@@ -399,6 +399,46 @@ def phase_in_state(text, stage):
     return ""
 
 
+def has_no_units(project, intent_dir, text):
+    """Whether the intent has no Units at all (express or bugfix scope, units-generation skipped): its Construction runs
+    once for the whole intent, so no checkout is ever a Unit's. True when the state marks units-generation SKIP or lists
+    it under "Stages to Skip", or the stage graph has no such stage, or there is neither a `unit-of-work.md` nor a Unit
+    Progress table and units-generation is not recorded as done."""
+    done = False
+    for line in text.splitlines():
+        row = STAGE_ROW.match(line.strip())
+        if row and row.group(1) == "units-generation":
+            if re.search(r"\bSKIP\b", line):
+                return True
+            done = line.strip().startswith("- [x]")
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if re.match(r"^\s*(?:#{1,6}\s+|[-*]\s+)?\**Stages to Skip", line, re.I):
+            if any("units-generation" in l for l in _skip_block(lines, index)):
+                return True
+    graph = stage_graph(project)
+    if graph and "units-generation" not in graph:
+        return True
+    if done or re.search(r"Unit Progress", text):
+        return False
+    for _root, _dirs, files in os.walk(intent_dir):
+        if "unit-of-work.md" in files:
+            return False
+    return True
+
+
+def _skip_block(lines, index):
+    """The "Stages to Skip" heading line and the list lines that follow it."""
+    block = [lines[index]]
+    for line in lines[index + 1:]:
+        if line.strip() == "" and len(block) > 1:
+            break
+        if re.match(r"^\s*#{1,6}\s", line):
+            break
+        block.append(line)
+    return block
+
+
 def titled(slug):
     return " ".join(word.capitalize() for word in re.split(r"[-_\s]+", slug) if word)
 
@@ -735,6 +775,8 @@ def plain_title(event, state, project):
     full = titled(phase) + SEPARATOR + stage_name
     if phase.lower() != "construction" or unit or stage in named_stages:
         return full, None
+    if has_no_units(project, intent_dir, text):
+        return full, None  # no Units: Construction runs once for the intent, in any checkout; nothing to ask
     if main_checkout_on_main(project):
         return titled(phase), None  # not in a Unit's checkout: the phase alone
     answer = state["checkouts"].get(project)

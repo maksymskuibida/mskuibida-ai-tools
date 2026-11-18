@@ -452,6 +452,73 @@ class CheckoutTests(Base):
         self.assertIn("AskUserQuestion", self.context_of(self.bash()))
 
 
+class NoUnitsTests(Base):
+    """An intent without Units (express or bugfix scope) runs Construction once, in an ordinary worktree branch: the
+    checkout question is never asked and the title is the phase stage."""
+
+    TITLE = "ABC-1: Construction — Code Generation"  # the handle is the ticket in the worktree branch name
+
+    def setUp(self):
+        super().setUp()
+        self.bind()
+        self.git("init", "-q", "-b", "main")
+        self.git("commit", "-q", "--allow-empty", "-m", "init")
+
+    def git(self, *args):
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=self.project,
+                       check=True, capture_output=True)
+
+    def no_units_state(self, extra="", skip_row="- [-] units-generation — SKIP"):
+        lines = ["# AI-DLC State Tracking", "", "## Current Status", "- **Current Stage**: code-generation", "",
+                 "## Stage Progress", "", "### INCEPTION PHASE", "- [x] requirements-analysis — EXECUTE"]
+        if skip_row:
+            lines.append(skip_row)
+        lines += ["", "### CONSTRUCTION PHASE", "- [-] code-generation — EXECUTE", "- [ ] build-and-test — EXECUTE", ""]
+        path = self.write(os.path.relpath(os.path.join(self.intent_dir, "aidlc-state.md"), self.project),
+                          "\n".join(lines) + extra)
+        later = time.time() + 5
+        os.utime(path, (later, later))
+
+    def test_skipped_units_generation_in_a_worktree_branch_is_titled_and_not_asked(self):
+        self.git("checkout", "-q", "-b", "claude/ABC-1-build-x")
+        self.no_units_state()
+        out = self.prompt()
+        self.assertEqual(self.title_of(out), self.TITLE)
+        self.assertNotIn("AskUserQuestion", self.context_of(out))
+
+    def test_stages_to_skip_list_counts(self):
+        self.git("checkout", "-q", "-b", "claude/ABC-1-x")
+        self.no_units_state(extra="\n## Stages to Skip\n- 2.7 (units-generation)\n", skip_row="")
+        self.assertEqual(self.title_of(self.prompt()), self.TITLE)
+
+    def test_no_records_file_and_no_progress_table_counts(self):
+        self.git("checkout", "-q", "-b", "claude/ABC-1-x")
+        self.no_units_state(skip_row="")
+        self.assertEqual(self.title_of(self.prompt()), self.TITLE)
+
+    def test_records_file_keeps_the_question(self):
+        self.git("checkout", "-q", "-b", "claude/ABC-1-x")
+        self.no_units_state(skip_row="")
+        self.write("aidlc/spaces/default/intents/%s/construction/unit-of-work.md" % INTENT, "# Units\n")
+        out = self.prompt()
+        self.assertIsNone(self.title_of(out))
+        self.assertIn("AskUserQuestion", self.context_of(out))
+
+    def test_scope_without_a_units_stage_in_the_graph(self):
+        self.git("checkout", "-q", "-b", "claude/ABC-1-x")
+        self.write(".claude/tools/data/stage-graph.json",
+                   json.dumps([g for g in GRAPH if g["slug"] != "units-generation"]))
+        self.no_units_state(skip_row="- [x] units-generation — EXECUTE")
+        self.assertEqual(self.title_of(self.prompt()), self.TITLE)
+
+    def test_stale_asked_state_does_not_block_the_title(self):
+        self.git("checkout", "-q", "-b", "claude/ABC-1-x")
+        self.set_state("functional-design")
+        self.prompt()  # a Unit intent: asked
+        self.no_units_state()
+        self.assertEqual(self.title_of(self.prompt("next")), self.TITLE)
+
+
 class SessionTests(Base):
     """When the hook acts, and how often."""
 
