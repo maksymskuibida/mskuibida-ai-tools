@@ -1,5 +1,16 @@
 # session-titles changelog
 
+## 0.6.1
+
+An intent without Units is never asked about its checkout.
+
+- Cause: on Construction in a worktree branch with no Unit claim the plugin asked "Is this session a Unit's checkout, or
+  something else?" even for express or bugfix intents, where Construction runs once for the whole intent.
+- Now an intent has no Units when `aidlc-state.md` marks units-generation `SKIP` or lists it under "Stages to Skip", when
+  the stage graph has no units-generation stage, or when there is no `unit-of-work.md` and no Unit Progress table and
+  units-generation is not recorded as done. Its sessions are titled `<phase> — <stage>` in any checkout or branch, and a
+  stale "asked" answer does not block that title. Intents with Units behave as before.
+
 ## 0.6.0
 
 Custom stages get correct titles.
