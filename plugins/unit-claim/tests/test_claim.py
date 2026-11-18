@@ -183,7 +183,7 @@ class TestAfterTheClaim(Case):
         _code, out, _err = self.post("Bash", {"command": f"aidlc unit claim {UNIT} --team A --rhythm unit-end"}, {"stdout": CLAIMED})
         said = self.context(out)
         for slug in ("nfr-requirements", "nfr-design", "infrastructure-design"):
-            self.assertIn(f'--stage {slug} --unit {UNIT} --result skipped --reason "skipped at claim by the developer"', said)
+            self.assertIn(f'--stage {slug} --unit {UNIT} --result skipped --reason "the person asked to skip it at claim"', said)
         self.assertNotIn("--stage functional-design", said)
 
     def test_a_left_out_stage_cannot_start(self):
@@ -195,6 +195,12 @@ class TestAfterTheClaim(Case):
         self.assertEqual(code, 0, err)
         code, _out, err = self.pre("Bash", {"command": f"aidlc engine state unit start --stage nfr-design --unit u5-other"})
         self.assertEqual(code, 0, err)
+
+
+class TestSkipReasonPrefix(unittest.TestCase):
+    def test_reason_starts_with_the_engine_person_asked_prefix(self):
+        # the engine refuses to skip a stage with written files unless the reason starts with this
+        self.assertTrue(cc.SKIP_REASON.startswith("the person asked to skip it"))
 
 
 class TestWorktrees(Case):
