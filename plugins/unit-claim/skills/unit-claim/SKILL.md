@@ -70,11 +70,12 @@ first stage that runs, and Unit Progress shows the skipped ones as `[S]`. The ho
 it for the Unit:
 
 ```
-aidlc engine orchestrate report --stage <slug> --unit <unit> --result skipped --reason "skipped at claim by the developer"
+aidlc engine orchestrate report --stage <slug> --unit <unit> --result skipped --reason "the person asked to skip it at claim"
 ```
 
-Then run `next`. `claim_choice.py skips --unit <unit>` prints these commands. Never skip a stage whose files for the
-Unit are already written: the engine refuses that, so tell the developer and run the stage.
+Then run `next`. `claim_choice.py skips --unit <unit>` prints these commands. The reason starts with the engine's
+person-asked prefix, so the engine accepts the skip even when the Unit's files for that stage are already written (a
+re-claim or `--reopen`). If the engine still refuses, tell the developer and run the stage.
 
 ## 4. Asking again
 

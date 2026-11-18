@@ -1,5 +1,13 @@
 # unit-claim changelog
 
+## 0.5.1
+
+The claim-time skip reason is accepted by the engine (marketplace 1.66.2).
+
+- **Reason.** `SKIP_REASON` is now "the person asked to skip it at claim". The engine refuses to skip a stage whose files
+  are already written unless the reason starts with "the person asked to skip it", so on a re-claim or `--reopen` the
+  developer's skip was refused and the stage re-ran. The developer did choose the skip in the dialog, so the prefix is true.
+
 ## 0.5.0
 
 The claim dialog knows a project's own per-Unit stages (marketplace 1.65.0).

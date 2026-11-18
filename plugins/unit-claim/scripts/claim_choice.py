@@ -49,7 +49,7 @@ CONDITIONS = {
 NEEDS = {"nfr-design": "nfr-requirements"}
 # The rhythms this plugin knows; the mod asks the pinned engine (`aidlc unit claim --help`) for the ones it accepts.
 RHYTHMS = ("per-stage", "unit-end")
-SKIP_REASON = "skipped at claim by the developer"
+SKIP_REASON = "the person asked to skip it at claim"
 
 
 class ChoiceError(Exception):

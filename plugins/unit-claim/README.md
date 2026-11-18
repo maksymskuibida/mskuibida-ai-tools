@@ -26,7 +26,7 @@ skips those stages **for that Unit only**, and the Unit starts at its first stag
 left-out stage is skipped when the engine's directive reaches it:
 
 ```
-aidlc engine orchestrate report --stage <slug> --unit <unit> --result skipped --reason "skipped at claim by the developer"
+aidlc engine orchestrate report --stage <slug> --unit <unit> --result skipped --reason "the person asked to skip it at claim"
 ```
 
 ## The stages come from the project's stage graph
