@@ -1,5 +1,15 @@
 # approval-gates changelog
 
+## 1.40.0
+
+The Units map is drawn at the Units Generation plan approval, before the plan is approved (marketplace 1.66.0). Templates changed: **`maps.html` changed** (a "Proposed — plan not approved yet" note, "proposed" in the tabs and the index, and "since the approved plan" on the next revision; republish it to the same URL once); `map.schema.json` gained `proposed`, `basis` and `previous.proposed`.
+
+- **`units-proposal.json`** (`aidlc-units-proposal/1`, contract/README.md): the agent writes the plan's Units (id, label, name, kind, purpose, needs with why, stories, points).
+  `map_bundle.py draft|finalize --kind units --proposal <file>` builds the map from it with the same judgment step (summary and group per Unit).
+- **One row, two revisions.** The proposed map is revision 1 of `maps/<intent>-units` (`proposed: true`, `basis: "plan"`). The map built after generation is the next revision of the same row, so the Step 7 page shows what moved since the approved plan.
+- **Guard.** The Units Generation Approve Plan question, and the write of its plan page, are refused until a proposed map was published from the proposal drafted last. The stage gate still needs the real map; a proposed map never satisfies it.
+- SKILL.md § 8 has the new table row and steps; the plan page links the map in its header as before.
+
 ## 1.39.0
 
 Custom per-Unit stages are part of a Unit (marketplace 1.65.0). Templates changed: none (`unit-gate.html` is untouched: the extra rows are `built` rows and the extra stages `header.stages` entries it already draws); new script: `stage_graph.py`.

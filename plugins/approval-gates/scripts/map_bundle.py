@@ -5,6 +5,12 @@ map and the entity map. Standard library only.
     map_bundle.py draft    --kind components|units|stories|entities|all --out <folder> [--project-dir <dir>]
     map_bundle.py finalize --kind ... --out <folder> [--previous <row.json>] [--project-dir <dir>]
     map_bundle.py check    [--kind ...] [--project-dir <dir>]
+    map_bundle.py draft|finalize --kind units --proposal <units-proposal.json> --out <folder>   (the proposed map, § 8)
+
+`--proposal` draws the Units map the PLAN proposes, before unit-of-work.md exists: the row `<intent>-units` is written with
+`proposed: true, basis: "plan"` as revision 1. After Units Generation the real map is the next revision of the same row, so
+the page shows what moved since the plan. draft keeps a copy of the proposal outside the project; the guard holds the Units
+Generation plan approval to a proposed map built from it.
 
 `draft` reads the records and writes, per kind, into `<out>/<kind>/`:
 
@@ -50,6 +56,7 @@ import stage_graph  # noqa: E402  (same folder: the per-Unit stages of the proje
 
 SCHEMA = "aidlc-map/1"
 JUDGMENT_SCHEMA = "aidlc-map-judgment/1"
+PROPOSAL_SCHEMA = "aidlc-units-proposal/1"
 KINDS = ("components", "units", "stories", "entities")
 GRAPH = ("components", "units")
 TITLES = {"components": "Component map", "units": "Unit map", "stories": "Story map", "entities": "Entity map"}
@@ -832,6 +839,65 @@ def records(root, kind):
     raise MapError(f"unknown map kind {kind}: use one of {', '.join(KINDS)}")
 
 
+def proposal_records(data):
+    """The Units map as the plan proposes it, before any unit-of-work.md exists: {kind, blocks, waves, sources, warnings,
+    proposed}. `data` is the units-proposal.json the agent wrote (contract/README.md). Nothing is landed or building."""
+    if not isinstance(data, dict) or data.get("schema") != PROPOSAL_SCHEMA or not isinstance(data.get("units"), list):
+        raise MapError(f"the proposal is not a units-proposal.json (its schema must be {PROPOSAL_SCHEMA}, with a `units` list)")
+    warnings, by_slug, labels = [], {}, {}
+    for n, u in enumerate(data["units"], 1):
+        if not isinstance(u, dict):
+            raise MapError(f"units[{n - 1}] of the proposal is not an object")
+        slug, label = str(u.get("id") or "").strip(), str(u.get("label") or "").strip()
+        if not SLUG.match(slug):
+            raise MapError(f"units[{n - 1}] of the proposal has no id in slug form (u1-accounts): {slug!r}")
+        if slug in by_slug:
+            raise MapError(f"the proposal lists {slug} twice")
+        if label and not UNIT_ID.match(label):
+            raise MapError(f"{slug}: label {label!r} is not a U-id (U3)")
+        by_slug[slug] = u
+        if label:
+            labels[label] = slug
+    blocks, needs = {}, {}
+    for slug, u in by_slug.items():
+        n = {}
+        for d in u.get("needs") or []:
+            d = {"id": d} if isinstance(d, str) else d
+            target = by_slug.get(str(d.get("id") or "")) and str(d["id"]) or labels.get(str(d.get("id") or ""), "")
+            if not target:
+                warnings.append(f"{slug} needs {d.get('id')!r}, which the proposal does not list; the edge is left out")
+            elif target != slug:
+                n[target] = one_line(str(d.get("why") or ""), 200)
+        needs[slug] = n
+    depth = {}
+
+    def lay(slug, seen=()):
+        if slug in depth:
+            return depth[slug]
+        if slug in seen:
+            warnings.append(f"the Units depend on each other in a circle through {slug}; the circle's last edge is ignored when laying out")
+            return 1
+        depth[slug] = 1 + max([lay(d, seen + (slug,)) for d in needs[slug]] or [0])
+        return depth[slug]
+    for slug in by_slug:
+        lay(slug)
+    for slug, u in by_slug.items():
+        pts = u.get("points")
+        stories = [str(x).strip() for x in u.get("stories") or [] if str(x).strip()]
+        blocks[slug] = {"id": slug, "label": str(u.get("label") or "").strip() or slug,
+                        "title": one_line(str(u.get("name") or ""), 160) or slug, "kind": str(u.get("kind") or "").strip().lower(),
+                        "layer": depth[slug], "points": pts if isinstance(pts, int) and not isinstance(pts, bool) and pts >= 0 else None,
+                        "pointsSource": "the plan" if isinstance(pts, int) and not isinstance(pts, bool) else "", "status": PLANNED,
+                        "stories": sorted(dict.fromkeys(stories), key=_story_key),
+                        "needs": [{"id": d, "why": w} for d, w in sorted(needs[slug].items())],
+                        "hint": first_sentence(str(u.get("purpose") or ""))}
+    order = sorted(blocks.values(), key=lambda b: (b["layer"], _num(b["label"]), b["id"]))
+    waves = [{"n": n, "title": f"Wave {n}", "units": [b["id"] for b in order if b["layer"] == n],
+              "points": sum(b["points"] or 0 for b in order if b["layer"] == n), "landed": 0}
+             for n in sorted({b["layer"] for b in order})]
+    return {"kind": "units", "blocks": order, "waves": waves, "sources": ["the units proposal"], "warnings": warnings, "proposed": True}
+
+
 def _num(label):
     m = re.search(r"\d+", label or "")
     return int(m.group(0)) if m else 10 ** 6
@@ -848,7 +914,7 @@ def has_subject(rec):
 def digest_of(rec):
     """A short hash of what the records say (not of the judgment): it changes when a block, an edge, a point count, a
     story or a Unit's status changes."""
-    body = {k: rec[k] for k in ("kind", "blocks", "rows", "cols", "cells") if k in rec}
+    body = {k: rec[k] for k in ("kind", "blocks", "rows", "cols", "cells", "proposed") if k in rec}
     return hashlib.sha1(json.dumps(body, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
 
 
@@ -865,6 +931,15 @@ def state_folder(project, intent):
     return os.path.join(base, "maps", re.sub(r"[^\w.-]", "_", intent) + "-" + hashlib.sha1(os.path.abspath(project).encode("utf-8")).hexdigest()[:8])
 
 
+def proposal_path(project, intent):
+    """Where draft keeps the proposal it built the proposed map from: what the guard holds the plan approval to."""
+    return os.path.join(state_folder(project, intent), "units.proposal.json")
+
+
+def load_proposal(path):
+    return proposal_records(read_json(path, "the proposal"))
+
+
 def published(project, intent):
     """{kind: {id, url, digest, revision, at}} of the maps written to the artifact for this intent."""
     try:
@@ -875,10 +950,10 @@ def published(project, intent):
         return {}
 
 
-def record_published(project, intent, kind, row_id, url, digest, revision, at=None):
+def record_published(project, intent, kind, row_id, url, digest, revision, at=None, proposed=False):
     folder = state_folder(project, intent)
     data = published(project, intent)
-    data[kind] = {"id": row_id, "url": str(url or "").rstrip("/"), "digest": digest, "revision": revision,
+    data[kind] = {"id": row_id, "url": str(url or "").rstrip("/"), "digest": digest, "revision": revision, "proposed": bool(proposed),
                   "at": at if at is not None else datetime.datetime.now(datetime.timezone.utc).timestamp()}
     write_json(os.path.join(folder, "published.json"), data)
     return data[kind]
@@ -907,6 +982,23 @@ def required_kinds(stage, page=None, rhythm=None, project=None):
     return kinds
 
 
+def plan_freshness(project):
+    """What the guard holds the Units Generation plan approval to: a proposed Units map built from the proposal the agent
+    last drafted. {kind, subject, digest, published, fresh, revision, url, proposed}. No proposal drafted: not published."""
+    _space, intent, _root = record_root(project)
+    path = proposal_path(project, intent)
+    p = published(project, intent).get("units") or {}
+    digest = None
+    if os.path.isfile(path):
+        try:
+            digest = digest_of(load_proposal(path))
+        except MapError:
+            digest = None
+    ok = bool(p) and bool(p.get("proposed")) and digest is not None and p.get("digest") == digest
+    return {"kind": "units", "subject": True, "blocks": 0, "digest": digest, "published": bool(p) and bool(p.get("proposed")), "fresh": ok,
+            "revision": p.get("revision"), "url": (p.get("url") or "") + (("#" + p["id"]) if p.get("id") else ""), "proposed": True}
+
+
 def freshness(project, kind):
     """What the guard holds a gate to: {subject, digest, published, fresh, revision, url}. A map is fresh when the row
     published last was built from the records as they are now."""
@@ -914,7 +1006,7 @@ def freshness(project, kind):
     digest, n = subject_digest(root, kind)
     p = published(project, intent).get(kind) or {}
     return {"kind": kind, "subject": digest is not None, "blocks": n, "digest": digest, "published": bool(p),
-            "fresh": digest is None or p.get("digest") == digest, "revision": p.get("revision"), "url": (p.get("url") or "") + (("#" + p["id"]) if p.get("id") else "")}
+            "fresh": digest is None or (p.get("digest") == digest and not p.get("proposed")), "revision": p.get("revision"), "url": (p.get("url") or "") + (("#" + p["id"]) if p.get("id") else "")}
 
 
 # ---------------------------------------------------------------- judgment
@@ -998,6 +1090,8 @@ def build_row(project, intent, root, kind, rec, j, previous, ids):
     row = {"schema": SCHEMA, "id": f"{intent}-{kind}", "intent": intent, "kind": kind, "title": TITLES[kind],
            "view": "graph" if kind in GRAPH else "matrix", "digest": digest, "sources": rec["sources"],
            "builtAt": now.isoformat().replace("+00:00", "Z")}
+    if rec.get("proposed"):
+        row["proposed"], row["basis"] = True, "plan"
     if row["view"] == "graph":
         groups = [{"key": g["key"], "label": g["label"]} for g in j["groups"]]
         used = {j["blocks"][b["id"]]["group"] for b in rec["blocks"]}
@@ -1026,7 +1120,7 @@ def build_row(project, intent, root, kind, rec, j, previous, ids):
     prev_row = previous
     if prev_row and isinstance(prev_row.get("revision"), int):
         before = snapshot(prev_row) if prev_row.get("view") == row["view"] and (prev_row.get("blocks") is not None or prev_row.get("rows") is not None) else None
-        if before is not None and before == snap:
+        if before is not None and before == snap and bool(prev_row.get("proposed")) == bool(row.get("proposed")):
             row["revision"] = prev_row["revision"]
             if prev_row.get("previous"):
                 row["previous"] = prev_row["previous"]
@@ -1034,6 +1128,8 @@ def build_row(project, intent, root, kind, rec, j, previous, ids):
         else:
             row["revision"] = prev_row["revision"] + 1
             row["previous"] = {"revision": prev_row["revision"], "builtAt": prev_row.get("builtAt", ""), **(before or {})}
+            if prev_row.get("proposed"):
+                row["previous"]["proposed"] = True
     else:
         row["revision"] = 1
     if ids:
@@ -1084,9 +1180,22 @@ def project_of(args):
 
 
 def kinds_of(args, root):
+    if getattr(args, "proposal", None):
+        return ["units"]
     if args.kind in (None, "all"):
         return [k for k in KINDS if has_subject(records(root, k))]
     return [args.kind]
+
+
+def records_for(args, project, intent, root, kind):
+    """The records a command maps: the proposal when --proposal names one (a copy is kept for the guard), else the records."""
+    if getattr(args, "proposal", None):
+        if kind != "units":
+            raise MapError("--proposal draws the Units map only: use --kind units")
+        rec = load_proposal(args.proposal)
+        write_json(proposal_path(project, intent), read_json(args.proposal, "the proposal"))
+        return rec
+    return records(root, kind)
 
 
 def draft(args):
@@ -1095,7 +1204,7 @@ def draft(args):
     out = os.path.abspath(args.out)
     report = []
     for kind in kinds_of(args, root):
-        rec = records(root, kind)
+        rec = records_for(args, project, intent, root, kind)
         folder = os.path.join(out, kind) if args.kind in (None, "all") else out
         subject = has_subject(rec)
         entry = {"kind": kind, "subject": subject, "blocks": len(rec["blocks"]) or len(rec.get("rows") or []),
@@ -1138,18 +1247,18 @@ def finalize(args):
     out = os.path.abspath(args.out)
     writes, results = [], []
     for kind in kinds_of(args, root):
-        rec = records(root, kind)
+        rec = records_for(args, project, intent, root, kind)
         folder = os.path.join(out, kind) if args.kind in (None, "all") else out
         if not has_subject(rec):
             results.append({"kind": kind, "subject": False})
             continue
-        cmd = f'python3 "{SELF}" finalize --kind {args.kind or "all"} --out {out}'
+        cmd = f'python3 "{SELF}" finalize --kind {args.kind or "all"} --out {out}' + (f' --proposal "{args.proposal}"' if getattr(args, "proposal", None) else "")
         j = None
         if kind in GRAPH:
             jpath = os.path.join(folder, "judgment.json")
             if not os.path.isfile(jpath):
                 return refuse(f"the {kind} map", "judgment.json is missing",
-                              [], [f"Run `python3 \"{SELF}\" draft --kind {kind} --out {out}`.", f"Do its todo list in {jpath}.", f"Run `{cmd}`."],
+                              [], [f"Run `python3 \"{SELF}\" draft --kind {kind} --out {out}" + (f' --proposal "{args.proposal}"' if getattr(args, "proposal", None) else "") + "`.", f"Do its todo list in {jpath}.", f"Run `{cmd}`."],
                               "finalize prints the row's id and the path of writes.json.")
             j = read_json(jpath, "the judgment")
             problems = problems_of(rec, j)
@@ -1216,9 +1325,17 @@ def main(argv=None):
         p.add_argument("--project-dir")
         if name != "check":
             p.add_argument("--out", required=True)
+        if name in ("draft", "finalize"):
+            p.add_argument("--proposal", help="units-proposal.json: draw the proposed Units map of the plan, before unit-of-work.md exists")
         if name == "finalize":
             p.add_argument("--previous", help="the row published last, when this machine kept none")
     args = ap.parse_args(argv)
+    if getattr(args, "proposal", None):
+        if args.kind in (None, "all", "units"):
+            args.kind = "units"
+        else:
+            ap.error("--proposal draws the Units map only: use --kind units")
+        args.proposal = os.path.abspath(args.proposal)
     try:
         return {"draft": draft, "finalize": finalize, "check": check}[args.command](args)
     except MapError as why:

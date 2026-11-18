@@ -19,7 +19,10 @@
       builtAt   ISO time;  digest  hash of the records it was built from (the guard compares it with the records)
       sources   the record files it was built from, relative to the intent folder
       ids       {"U3": {kind, title, text, doc, line}}  the tooltips of the ids the map shows (aidlc_ids.py refs)
-      previous  {revision, builtAt, blocks: {id: {label, title, summary, group, status, points, layer, needs: [id]}}}
+      proposed  true on a map drawn from the PLAN, before the plan is approved and unit-of-work.md exists (Units map only);
+      basis     "plan" with it. The next revision of the row, built from the generated records, has neither; its `previous`
+                then carries proposed: true and the page reads its changes as "since the approved plan"
+      previous  {revision, builtAt, proposed?, blocks: {id: {label, title, summary, group, status, points, layer, needs: [id]}}}
                 or, for a matrix, {revision, builtAt, rows: {id: {title, uncovered}}, cols: {...}, cells: ["row|col"]}:
                 the revision before this one, so the page marks what is new, changed or removed since
       graph:  groups [{key, label}], layerName ("Wave"|"Layer"), waves [{n, title, units, points, landed}] (Unit map),
@@ -149,6 +152,9 @@ kbd { font: 500 11.5px var(--mono); padding: 1px 5px; border: 1px solid var(--co
 .tag.ok { background: var(--ok-bg); color: var(--ok-fg); }
 
 /* the round strip */
+.propbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 12px; padding: 8px 14px; font-size: 13.5px; background: var(--warn-bg); color: var(--warn-fg); border-color: transparent; }
+.propbar b { font-weight: 600; } .propbar span { color: inherit; opacity: .85; }
+.tag.prop { background: var(--warn-bg); color: var(--warn-fg); }
 .rvbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 12px; padding: 8px 14px; font-size: 13.5px; border-color: color-mix(in srgb, var(--rnd-fg) 40%, var(--line)); }
 .rvbar b { font-weight: 600; }
 .rvbar .gone { display: flex; flex-wrap: wrap; gap: 4px 8px; width: 100%; }
@@ -1055,7 +1061,7 @@ var MapView = (function () {
   function tabsHtml(rows, row) {
     var mine = rows.filter(function (r) { return r.intent === row.intent; }).sort(function (a, b) { return KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind); });
     return '<nav class="tabs" aria-label="Maps of this intent: pick which one to look at">' + mine.map(function (r) {
-      return '<a class="tab" href="#' + esc(r.id) + '" data-kind-tab="' + esc(r.kind) + '" title="' + esc(r.title + ", round " + r.revision) + '"' + (r.id === row.id ? ' aria-current="page"' : "") + ">" + esc(KIND_NAME[r.kind] || r.kind) + " <small>r" + esc(r.revision) + "</small></a>";
+      return '<a class="tab" href="#' + esc(r.id) + '" data-kind-tab="' + esc(r.kind) + '" title="' + esc(r.title + ", round " + r.revision) + '"' + (r.id === row.id ? ' aria-current="page"' : "") + ">" + esc(KIND_NAME[r.kind] || r.kind) + " <small>r" + esc(r.revision) + (r.proposed ? " · proposed" : "") + "</small></a>";
     }).join("") + "</nav>";
   }
   function legendHtml(row, d, R) {
@@ -1103,15 +1109,20 @@ var MapView = (function () {
     return '<header id="map-head"><div class="bar-top"><div class="grow"><div class="crumbs"><a href="#" data-nav="">AI-DLC maps</a> · ' + esc(row.intent) + "</div><h1>" + esc(row.title) + "</h1></div>" +
       '<span class="hint">round ' + esc(row.revision) + " · built " + esc(String(row.builtAt || "").replace("T", " ").replace(/:\d\d(\.\d+)?Z?$/, "")) + "</span></div>" + statsHtml(row, d, R) + "</header>";
   }
+  function proposedHtml(row) {
+    if (!row.proposed) return "";
+    return '<section class="card propbar" id="map-proposed" role="note" aria-label="Proposed map"><b>Proposed — plan not approved yet</b><span>Drawn from the plan, before the Units are generated. After they are, this map is built again from the real records and shows what moved.</span></section>';
+  }
   function revisionHtml(row, d) {
     if (!d.has) return "";
+    var plan = !!(row.previous && row.previous.proposed) && !row.proposed;
     var c = d.counts, ghosts = d.removed.map(function (g) {
       return '<span class="ghost" data-removed="' + esc(g.id) + '" title="' + esc((g.summary || g.title || "") + " (removed in round " + row.revision + ")") + '">' + esc(g.id) + "</span>";
     }).join(""), graph = isGraph(row), parts;
     if (graph) parts = '<span class="tag rnd">' + c.new + ' new</span> <span class="tag rnd">' + c.changed + " changed</span>" + (c.landed ? ' <span class="tag ok">' + c.landed + " landed</span>" : "") + ' <span class="tag gone">' + c.removed + " removed</span>";
     else parts = (c.newCols ? '<span class="tag rnd">' + c.newCols + " new " + esc(noun(row.colsTitle, c.newCols)) + "</span> " : "") + (c.newRows ? '<span class="tag rnd">' + c.newRows + " new " + esc(noun(row.rowsTitle, c.newRows)) + "</span> " : "") +
       '<span class="tag rnd">' + c.links + " new " + noun("link", c.links) + '</span> <span class="tag gone">' + c.removed + " removed</span>" + ' <span class="why-n">' + c.dropped + " " + noun("link", c.dropped) + " no longer there</span>";
-    return '<section class="card rvbar" id="map-changes" aria-label="What changed in round ' + esc(row.revision) + '"><b>Round ' + esc(row.revision) + "</b> since round " + esc(d.rev) + ": " + parts + (ghosts ? '<div class="gone">' + ghosts + "</div>" : "") + "</section>";
+    return '<section class="card rvbar" id="map-changes" aria-label="What changed in round ' + esc(row.revision) + '"><b>Round ' + esc(row.revision) + "</b> since " + (plan ? "the approved plan (round " + esc(d.rev) + ")" : "round " + esc(d.rev)) + ": " + parts + (ghosts ? '<div class="gone">' + ghosts + "</div>" : "") + "</section>";
   }
   function emptyHtml() {
     return '<div class="card msg" id="map-empty"><b>Nothing to show in this map.</b><p>The records hold no blocks for it.</p></div>';
@@ -1125,7 +1136,7 @@ var MapView = (function () {
     else body = mview === "matrix" ? matrixHtml(row, st, d) : mlistHtml(row, st, d);
     var inlineOnly = graph ? (narrow || view === "list") : mview === "list";
     var panel = inlineOnly ? "" : '<aside class="card panel' + (open ? "" : " rail") + '" id="map-panel" aria-live="polite">' + (graph ? panelInner(row, st, d) : matrixPanel(row, st, d)) + "</aside>";
-    return '<div class="' + rt + '">' + headHtml(row, d, R) + barHtml(rows, row, st, d, narrow, R) + revisionHtml(row, d) +
+    return '<div class="' + rt + '">' + headHtml(row, d, R) + barHtml(rows, row, st, d, narrow, R) + proposedHtml(row) + revisionHtml(row, d) +
       '<div class="body' + (open && panel ? " open" : "") + '" id="map-body"' + (panel ? "" : ' style="grid-template-columns:minmax(0,1fr)"') + ">" + body + panel + "</div></div>";
   }
   function indexHtml(rows) {
@@ -1136,7 +1147,7 @@ var MapView = (function () {
       Object.keys(by).sort().reverse().map(function (k) {
         return '<section class="card idx"><h2>' + esc(k) + "</h2>" + by[k].sort(function (a, b) { return KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind); }).map(function (r) {
           var n = isGraph(r) ? (r.blocks || []).length + " blocks" : (r.rows || []).length + " " + noun(r.rowsTitle || "row", (r.rows || []).length).toLowerCase() + " by " + (r.cols || []).length + " " + noun(r.colsTitle || "column", (r.cols || []).length).toLowerCase();
-          return '<a class="irow" href="#' + esc(r.id) + '" data-nav="' + esc(r.id) + '"><b>' + esc(r.title) + "</b><small>" + esc(n) + " · round " + esc(r.revision) + " · " + esc(String(r.builtAt || "").slice(0, 16).replace("T", " ")) + "</small></a>";
+          return '<a class="irow" href="#' + esc(r.id) + '" data-nav="' + esc(r.id) + '"><b>' + esc(r.title) + "</b><small>" + esc(n) + " · round " + esc(r.revision) + (r.proposed ? " · proposed, plan not approved" : "") + " · " + esc(String(r.builtAt || "").slice(0, 16).replace("T", " ")) + "</small></a>";
         }).join("") + "</section>";
       }).join("");
   }
