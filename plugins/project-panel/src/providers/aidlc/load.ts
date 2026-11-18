@@ -31,7 +31,9 @@ import type { Derived, Two } from './truths'
 import { hasMoreThanBranch, sessionContext } from './session'
 import { readTwo } from './two'
 import { readUnitMatrix, withKinds } from './unit-matrix'
-import { PER_UNIT_STAGES, LAST_UNIT_STAGE, CLAIM_REGISTRY_FILE, UNIT_SCOPE_FILE, parseClaimRegistry, parseUnitGates, parseUnitMerged, parseUnitProgress, parseUnitScope, startOf, progressOf, readUnitFacts, readUnitList, stageStatusesFromRow, unitStageStatuses, withGates, withReceipts } from './units'
+import { lastStageOf, readUnitStages } from './stage-graph'
+import type { UnitStages } from './stage-graph'
+import { LAST_UNIT_STAGE, CLAIM_REGISTRY_FILE, UNIT_SCOPE_FILE, parseClaimRegistry, parseUnitGates, parseUnitMerged, parseUnitProgress, parseUnitScope, startOf, progressOf, readUnitFacts, readUnitList, stageStatusesFromRow, unitStageStatuses, withGates, withReceipts } from './units'
 import { NO_STAGE_POINTS, STAGE_POINTS_FILE, parseStagePoints, stagePointsOf } from './stage-points'
 import { isResumedAfter } from './park'
 import type { StagePoints } from './stage-points'
@@ -73,7 +75,9 @@ export async function loadAidlc(ctx: ProviderContext, detection: Detection): Pro
   const registryPath = join(workspace.aidlcDir, CLAIM_REGISTRY_FILE)
   const registry = selection.intent !== null && (await fsx.exists(registryPath)) ? await fsx.read(registryPath) : null
   const claims = parseClaimRegistry(registry, registry === null || selection.intent === null ? '' : await intentUuidOf(fsx, workspace, selection.space, selection.intent))
-  const units = text === null ? null : await unitsOf(ctx, workspace.root, selection.statePath, parsed, step, mode === 'stage', scopeMatches ? scope.unit : '', text, claims)
+  // The stages the project's stage graph runs once per Unit, and the names of the stages its plugins added.
+  const graph = await readUnitStages(fsx, workspace.root)
+  const units = text === null ? null : await unitsOf(ctx, workspace.root, selection.statePath, parsed, step, mode === 'stage', scopeMatches ? scope.unit : '', text, claims, graph)
   // Every stage is 1 story point unless the intent's stage-story-points.txt says otherwise (asked first: it is
   // usually not there).
   const stagePointsPath = join(parent(selection.statePath) ?? '', STAGE_POINTS_FILE)
@@ -81,7 +85,7 @@ export async function loadAidlc(ctx: ProviderContext, detection: Detection): Pro
     text === null || !(await fsx.exists(stagePointsPath))
       ? NO_STAGE_POINTS
       : parseStagePoints(await fsx.read(stagePointsPath), parsed.phases.flatMap(phase => phase.stages.map(stage => stage.slug)))
-  const sections = text === null ? [] : sectionsOf(parsed, step.stage, view, two, units, stagePoints)
+  const sections = text === null ? [] : sectionsOf(parsed, step.stage, view, two, units, stagePoints, graph)
   // The pages and forms the publishing plugins registered for this intent's stages, each shown where its stage is.
   if (ctx.linksDir !== undefined && ctx.linksDir !== '' && selection.intent !== null && sections.length > 0) {
     const { path, entries } = await readLinks(fsx, ctx.linksDir, workspace.root, selection.space, selection.intent)
@@ -91,6 +95,7 @@ export async function loadAidlc(ctx: ProviderContext, detection: Detection): Pro
       stages: new Map(parsed.phases.flatMap(phase => phase.stages.map(stage => [stage.slug, phase.key.toLowerCase()] as const))),
       units: new Set(units?.units.map(unit => unit.name) ?? []),
       claimed: units?.claimed ?? '',
+      unitEndStages: [lastStageOf(graph)],
     })
   }
   // A park the engine left behind after work resumed (the audit has a later start) holds nothing.
@@ -309,6 +314,7 @@ function sectionsOf(
   two: Two | null,
   units: UnitView | null,
   stagePoints: StagePoints,
+  graph: UnitStages,
 ): Section[] {
   const isWaitingOnUnits = unitsPending(parsed, units)
   // Every ring weighs by story points: a stage its own (1 unless the file says), a Unit its own.
@@ -320,7 +326,7 @@ function sectionsOf(
     const known = PHASE_ORDER.indexOf(phase.key)
     const phaseNo = known >= 0 ? known : PHASE_ORDER.length + index
     if (units && phase.key === 'CONSTRUCTION' && hasUnitRows(phase)) {
-      const list = unitSectionOf(phase, progress, currentStage, view, units, phaseNo, pointsOf)
+      const list = unitSectionOf(phase, progress, currentStage, view, units, phaseNo, pointsOf, graph)
       list.ordinal = String(phaseNo)
       if (units.claimed === '') return [list]
       // A Unit claimed at this checkout: Construction is that Unit's own walk through the per-unit stages, and every
@@ -333,7 +339,7 @@ function sectionsOf(
       list.isSupplement = true
       return [mine, list]
     }
-    const section = sectionOf(phase, progress, currentStage, view, phaseNo, pointsOf)
+    const section = sectionOf(phase, progress, currentStage, view, phaseNo, pointsOf, graph)
     section.ordinal = String(phaseNo)
     if (isWaitingOnUnits && phase.key === 'CONSTRUCTION') {
       // Construction is seven stages only on paper until Units Generation has cut the intent into Units: nothing of
@@ -375,11 +381,12 @@ const PHASE_ORDER: readonly string[] = ['INITIALIZATION', 'IDEATION', 'INCEPTION
 /** A stage's place in the plan: `<phase>.<stage>`, both counted from 1 in the state file's order (skipped rows count). */
 const ordinalOf = (phaseNo: number, stageNo: number): string => `${phaseNo}.${stageNo}`
 
-function stageItem(stage: ParsedStage, currentStage: string, view: Derived | null, ordinal: string): Item {
+function stageItem(stage: ParsedStage, currentStage: string, view: Derived | null, ordinal: string, graph?: UnitStages): Item {
   const facts = view?.items.get(stage.slug)
   return {
     id: stage.slug,
-    title: stage.slug,
+    // A stage a plugin added shows with the name the stage graph gives it; upstream's stages show their slug.
+    title: graph?.names.get(stage.slug) ?? stage.slug,
     ordinal,
     status: facts?.status ?? itemStatus(stage),
     isCurrent: stage.slug === currentStage,
@@ -399,8 +406,9 @@ function sectionOf(
   view: Derived | null,
   phaseNo: number,
   pointsOf: (item: Item) => number,
+  graph?: UnitStages,
 ): Section {
-  const items = phase.stages.map((stage, at) => stageItem(stage, currentStage, view, ordinalOf(phaseNo, at + 1)))
+  const items = phase.stages.map((stage, at) => stageItem(stage, currentStage, view, ordinalOf(phaseNo, at + 1), graph))
   const perUnit = phase.perUnit === '' || phase.perUnit === '[TBD]' ? '' : t('aidlc.phase.perUnit', { units: phase.perUnit })
   return withCounts(phase, progress, items, perUnit, pointsOf)
 }
@@ -530,6 +538,8 @@ async function isStillParked(fsx: ProviderContext['fsx'], intentDir: string, sin
 /** The Units of the intent and how far each has got, ready to become Construction's rows. */
 type UnitView = {
   units: Unit[]
+  /** The per-unit stages of the project's stage graph. */
+  stages: UnitStages
   progress: Map<string, UnitProgress>
   /** The Unit the session is on, by name; '' when none. */
   current: string
@@ -579,6 +589,7 @@ async function unitsOf(
   claimedUnit: string,
   stateText: string,
   claims: ReadonlySet<string>,
+  stages: UnitStages,
 ): Promise<UnitView | null> {
   const { fsx } = ctx
   const construction = parsed.phases.find(phase => phase.key === 'CONSTRUCTION')
@@ -587,17 +598,18 @@ async function unitsOf(
   const units = await readUnitList(fsx, intentDir)
   if (!units) return null
   const points = await resolvePoints(ctx, root, intentDir, units, canWrite)
-  const facts = await readUnitFacts(fsx, intentDir, units)
+  const facts = await readUnitFacts(fsx, intentDir, units, stages)
   // The engine's table, with the stages its receipts say started since it was last written.
   // A stage the Unit's kind does not owe is skipped, not done, though the engine's table marks it [x].
-  const table = withKinds(withGates(withReceipts(parseUnitProgress(stateText), facts.events), parseUnitGates(stateText), facts.gates ?? [], facts.events), units, await readUnitMatrix(fsx, root))
-  const progress = progressOf(units, parsed, facts, table, parseUnitMerged(stateText))
+  const table = withKinds(withGates(withReceipts(parseUnitProgress(stateText, stages), facts.events, stages), parseUnitGates(stateText), facts.gates ?? [], facts.events, stages), units, await readUnitMatrix(fsx, root, stages))
+  const progress = progressOf(units, parsed, facts, table, parseUnitMerged(stateText), stages)
   const named = [(parsed.fields['Active Unit'] ?? '').trim(), step.unit].find(name => units.some(unit => unit.name === name))
-  const working = PER_UNIT_STAGES.includes(step.stage)
+  const working = stages.perUnit.includes(step.stage)
     ? units.find(unit => ['active', 'paused'].includes(progress.get(unit.name)?.phase ?? ''))?.name
     : undefined
   return {
     units,
+    stages,
     progress,
     current: (units.some(unit => unit.name === claimedUnit) ? claimedUnit : undefined) ?? named ?? working ?? '',
     // The checkout's claim (the engine's scope file), not the state's Active Unit: the state is shared by every checkout
@@ -651,6 +663,7 @@ function unitSectionOf(
   units: UnitView,
   phaseNo: number,
   weightOf: (item: Item) => number,
+  graph: UnitStages,
 ): Section {
   const label = (name: string) => {
     const unit = units.units.find(one => one.name === name)
@@ -690,8 +703,8 @@ function unitSectionOf(
   })
   const onceItems = phase.stages
     .map((stage, at) => ({ stage, ordinal: ordinalOf(phaseNo, at + 1) }))
-    .filter(({ stage }) => !PER_UNIT_STAGES.includes(stage.slug))
-    .map(({ stage, ordinal }) => stageItem(stage, currentStage, view, ordinal))
+    .filter(({ stage }) => !units.stages.perUnit.includes(stage.slug))
+    .map(({ stage, ordinal }) => stageItem(stage, currentStage, view, ordinal, graph))
   const pointsOf = (unit: Unit) => units.points.get(unit.name)?.points ?? 0
   const doneUnits = units.units.filter(unit => units.progress.get(unit.name)?.phase === 'done')
   const donePoints = doneUnits.reduce((sum, unit) => sum + pointsOf(unit), 0)
@@ -729,17 +742,17 @@ function claimedSectionOf(
   // Claimed and on its way, but no receipt or artifact says which stage yet (a fresh claim): the workflow's own
   // Current Stage is the one this checkout is on.
   const isOnItsWay = known.phase === 'active' || known.phase === 'paused' || known.phase === 'planned'
-  const fallback = known.stage === '' && isOnItsWay && PER_UNIT_STAGES.includes(currentStage)
+  const fallback = known.stage === '' && isOnItsWay && units.stages.perUnit.includes(currentStage)
   const row = units.rows.get(unit.name)
   const isPaused = (known.phase === 'paused')
   // The engine's own row decides each stage where the state has one; else the receipts, with the workflow's Current
   // Stage for a fresh claim.
   const statuses = row
-    ? stageStatusesFromRow(row, isPaused)
-    : unitStageStatuses(fallback ? { phase: known.phase === 'paused' ? 'paused' : 'active', stage: currentStage, skipped: known.skipped } : known)
+    ? stageStatusesFromRow(row, isPaused, units.stages)
+    : unitStageStatuses(fallback ? { phase: known.phase === 'paused' ? 'paused' : 'active', stage: currentStage, skipped: known.skipped } : known, units.stages)
   const items: Item[] = phase.stages
     .map((stage, at) => ({ stage, ordinal: ordinalOf(phaseNo, at + 1) }))
-    .filter(({ stage }) => PER_UNIT_STAGES.includes(stage.slug))
+    .filter(({ stage }) => units.stages.perUnit.includes(stage.slug))
     .map(({ stage, ordinal }) => {
       const status = !stage.isExecuted || stage.marker === 'skipped' ? 'skipped' : (statuses.get(stage.slug) ?? 'planned')
       const isOn = status === 'active' || status === 'paused' || status === 'awaiting' || status === 'revising'
@@ -748,7 +761,7 @@ function claimedSectionOf(
       const isAwaiting = status === 'awaiting' || ((status === 'active' || status === 'paused') && itemStatus(stage) === 'awaiting')
       const item: Item = {
         id: stage.slug,
-        title: stage.slug,
+        title: units.stages.names.get(stage.slug) ?? stage.slug,
         ordinal,
         status: isAwaiting ? 'awaiting' : status === 'revising' ? 'revising' : isOn ? 'open' : status,
         isCurrent: isOn,

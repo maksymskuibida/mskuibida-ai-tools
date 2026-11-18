@@ -7,7 +7,7 @@ import { join } from '../../fsx'
 import type { Fsx } from '../../fsx'
 import { t } from '../../strings/en'
 import type { Item, ItemLink, Section } from '../../../types'
-import { LAST_UNIT_STAGE } from './units'
+import { BUILD_STAGE } from './stage-graph'
 
 export type LinkKind = 'gate' | 'unit-plan' | 'unit-end' | 'test-plan' | 'questions-form' | 'findings-form'
 
@@ -80,6 +80,8 @@ export type LinkWorld = {
   units: ReadonlySet<string>
   /** The Unit this checkout claimed, '' when none. */
   claimed: string
+  /** The stages that hold a Unit's unit-end pages: code-generation, and the last per-Unit stage of the project's stage graph. */
+  unitEndStages?: readonly string[]
 }
 
 /** Whether the entry names an intent, stage and Unit that exist, and a page its Unit's rhythm has. */
@@ -89,9 +91,10 @@ export function isShown(entry: LinkEntry, world: LinkWorld): boolean {
   if (phase === undefined) return false
   if (entry.phase !== '' && phase !== '' && entry.phase !== phase) return false
   if (entry.unit !== '' && !world.units.has(entry.unit)) return false
-  if (UNIT_PAGES.includes(entry.kind) && (entry.unit === '' || entry.stage !== LAST_UNIT_STAGE)) return false
+  const holdsPages = entry.stage === BUILD_STAGE || (world.unitEndStages?.includes(entry.stage) ?? false)
+  if (UNIT_PAGES.includes(entry.kind) && (entry.unit === '' || !holdsPages)) return false
   // A Unit under the unit-end rhythm has no page per design stage: its gate pages are the plan and unit-end pages.
-  if (entry.kind === 'gate' && entry.rhythm === 'unit-end' && entry.stage !== LAST_UNIT_STAGE) return false
+  if (entry.kind === 'gate' && entry.rhythm === 'unit-end' && !holdsPages) return false
   return true
 }
 

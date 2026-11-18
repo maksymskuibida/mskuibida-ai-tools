@@ -6,11 +6,10 @@
 // and takes those cells as skipped.
 import { join } from '../../fsx'
 import type { Fsx } from '../../fsx'
-import { PER_UNIT_STAGES } from './units'
+import { DEFAULT_UNIT_STAGES, INSTALL_DIRS } from './stage-graph'
+import type { UnitStages } from './stage-graph'
 import type { Unit, UnitCell } from './units'
 
-/** Where a runtime installs the engine's stage files under a workspace, by agent; the first one present counts. */
-const INSTALL_DIRS = ['.claude', '.aidlc', '.kiro', '.codex', '.cursor', '.github']
 const STAGES_DIR = join('aidlc-common', 'stages', 'construction')
 
 /** One stage's artifacts, and the kinds each is for where the stage names some (an artifact it does not name is for every kind). */
@@ -66,17 +65,35 @@ export function stageApplies(matrix: UnitMatrix, stage: string, kind: string): b
   return kinds === null || entry.produces.some(name => kinds.get(name)?.includes(kind) ?? true)
 }
 
-/** The per-unit stage files of the workspace's engine install. */
-export async function readUnitMatrix(fsx: Fsx, root: string): Promise<UnitMatrix> {
+/**
+ * The per-unit stage files of the workspace's engine install: upstream's (`aidlc-common/stages/construction`) and the
+ * ones engine plugins add (`aidlc-plugins/<plugin>/stages/<phase>/`, under the install dir or the workspace root).
+ */
+export async function readUnitMatrix(fsx: Fsx, root: string, stages: UnitStages = DEFAULT_UNIT_STAGES): Promise<UnitMatrix> {
   const matrix: UnitMatrix = new Map()
   for (const dir of INSTALL_DIRS) {
     const stagesDir = join(root, dir, STAGES_DIR)
     if (!(await fsx.exists(stagesDir))) continue
-    for (const stage of PER_UNIT_STAGES) {
-      const path = join(stagesDir, `${stage}.md`)
-      const text = (await fsx.exists(path)) ? await fsx.read(path) : null
-      const parsed = text === null ? null : parseStageProduces(text)
-      if (parsed !== null) matrix.set(stage, parsed)
+    // A stage's file: upstream's folder first, then each plugin's folder for the stage's phase.
+    const pluginDirs: string[] = []
+    for (const base of [join(root, dir, 'aidlc-plugins'), join(root, 'aidlc-plugins')]) {
+      for (const entry of await fsx.list(base)) if (entry.kind === 'dir') pluginDirs.push(join(base, entry.name))
+    }
+    for (const stage of stages.perUnit) {
+      const known = stages.graph.find(one => one.slug === stage)
+      const phase = known?.phase === undefined || known.phase === '' ? 'construction' : known.phase
+      const candidates = [
+        join(stagesDir, `${stage}.md`),
+        ...pluginDirs.filter(one => known?.plugin === undefined || known.plugin === '' || one.endsWith(`/${known.plugin}`)).map(one => join(one, 'stages', phase, `${stage}.md`)),
+      ]
+      for (const path of candidates) {
+        const text = (await fsx.exists(path)) ? await fsx.read(path) : null
+        const parsed = text === null ? null : parseStageProduces(text)
+        if (parsed !== null) {
+          matrix.set(stage, parsed)
+          break
+        }
+      }
     }
     return matrix
   }
