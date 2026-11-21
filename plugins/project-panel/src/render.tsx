@@ -24,7 +24,7 @@ import { header } from './render/header'
 import { breakpoint } from './render/kit'
 import type { Ctx, El, Handlers, Kit } from './render/kit'
 import { actionsRow, nowCard } from './render/now'
-import { orphanGates, plan } from './render/plan'
+import { orphanGates, overallText, plan } from './render/plan'
 import { isPhased, stepper } from './render/stepper'
 
 export type { Handlers, Kit } from './render/kit'
@@ -109,4 +109,35 @@ export function renderPane(
       {footer}
     </Box>
   )
+}
+
+/**
+ * The pane's small form (`placement: 'widget'`, a minimized pane on the desktop app): what reads at a glance, since
+ * clicks may not reach it. The plan's title and where it stands; either is hidden when empty.
+ */
+export function renderGlance(table: Kit, model: PanelModel | null): El {
+  const { Box, Text } = table
+  const title = model?.header.title ?? ''
+  const summary = model === null ? '' : overallText(model).summary
+  return (
+    <Box flexDirection="column" paddingX={1}>
+      {title !== '' && (
+        <Text bold wrap="truncate-end">
+          {title}
+        </Text>
+      )}
+      {summary !== '' && (
+        <Text dimColor wrap="truncate-end">
+          {summary}
+        </Text>
+      )}
+    </Box>
+  )
+}
+
+/** The status line's text while the pane is closed ('' when there is nothing to say). */
+export function closedStatus(model: PanelModel | null): string {
+  if (model === null) return ''
+  const { summary } = overallText(model)
+  return t('status.closed', { title: model.header.title, summary }).trim()
 }

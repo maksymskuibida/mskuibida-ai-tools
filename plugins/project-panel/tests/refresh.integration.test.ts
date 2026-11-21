@@ -283,6 +283,21 @@ describe('stop and resume', () => {
     expect(stats).toBeGreaterThan(0)
   })
 
+  test('a pane behind another pane\'s tab is open and placed, not on screen: the poll stops until it is shown', async ($, on) => {
+    const { calls, clock } = await boot($, on)
+    const row = calls.panes[0] as PaneRow
+    row.isShown = false
+    await clock.advance(10_000)
+    expect(await idle(calls, clock)).toEqual([0, 0, 0])
+
+    row.isShown = true
+    const ui = await $.ui.mount({ ...MOUNT, surface: 'desktop' })
+    await clock.advance(600)
+    const [stats] = await idle(calls, clock)
+    expect(stats).toBeGreaterThan(0)
+    await ui.unmount()
+  })
+
   test('a pane that is not placed stops the poll; drawing it resumes', async ($, on) => {
     const { calls, clock } = await boot($, on)
     const row = calls.panes[0] as PaneRow

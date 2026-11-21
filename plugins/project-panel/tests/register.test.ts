@@ -167,6 +167,7 @@ describe('the reopen bar', () => {
     requestId: 'band',
     props: {
       hasSurvey: false,
+      isCollapsed: false,
       isWorking: false,
       maxRows: 5,
       bodyColumns: 80,
@@ -225,6 +226,18 @@ describe('the reopen bar', () => {
 
     const ui = await $.ui.mount({ ...BAR, surface: 'desktop' })
     expect(await ui.find({ key: 'reopen' })).toBeUndefined()
+    await ui.unmount()
+  })
+})
+
+describe('the pane as a desktop widget', () => {
+  test('a minimized pane draws a glance: the plan title and where it stands, none of the full pane', async ($, on) => {
+    serveSession(on, { surfaces: ['desktop'] })
+    await $.session.start(start('desktop'))
+    const ui = await $.ui.mount({ ...MOUNT, props: { ...MOUNT.props, placement: 'widget' as const }, surface: 'desktop' })
+
+    expect((await ui.findAll({ type: 'Text' })).length).toBeGreaterThan(0)
+    expect(await ui.find({ key: 'section:INCEPTION' })).toBeUndefined()
     await ui.unmount()
   })
 })

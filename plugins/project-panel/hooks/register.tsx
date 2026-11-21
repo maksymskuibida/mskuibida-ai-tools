@@ -5,7 +5,7 @@ import type { Fsx, FsxEntry, ProviderContext, ProviderHost } from '../types'
 import { buildModel, fingerprintOf, runAction } from '../src/model'
 import { createRefreshEngine } from '../src/refresh'
 import type { RefreshEngine, RefreshPorts, Snapshot } from '../src/refresh'
-import { renderPane } from '../src/render'
+import { closedStatus, renderGlance, renderPane } from '../src/render'
 import type { Handlers } from '../src/render'
 import { pressAction } from '../src/render/press'
 import { steadyPresses } from '../src/render/steady'
@@ -150,16 +150,31 @@ function refreshPortsOf($: EngineInterface, settings: Settings): RefreshPorts {
     run: (argv, init) => $.process.run(argv, init).then(({ exitCode, stdout }) => ({ exitCode, stdout })),
     publish: async model => {
       await update($, modelAtom, () => model)
+      await syncStatus($)
     },
     invalidate: async () => {
       $.ui.invalidate('ui.render')
     },
     isVisible: async () => {
       // The pane list only holds open panes (a person's close removes it), so a closed flag is no veto here.
+      // On screen is placed AND the one shown: a pane behind another's tab is open and placed, not seen.
       if (settings.panel === 'off') return false
       const panes = await $.ui.panes()
-      return panes.some(pane => pane.id === PANE && pane.isPlaced)
+      return panes.some(pane => pane.id === PANE && pane.isPlaced && pane.isShown)
     },
+  }
+}
+
+/**
+ * The status line under the prompt, the bar's fallback: while the person has closed the pane it says where the plan
+ * stands and that /panel brings it back; otherwise it is cleared. Never throws (a status is no reason to fail a read).
+ */
+async function syncStatus($: EngineInterface): Promise<void> {
+  try {
+    const isClosed = await read($, closedAtom)
+    $.ui.status(isClosed ? closedStatus(await read($, modelAtom)) || undefined : undefined)
+  } catch {
+    // The bar still shows.
   }
 }
 
@@ -222,6 +237,7 @@ async function openForDesktop($: EngineInterface, settings: Settings): Promise<v
 /** Opens the pane on the person's ask (`/panel` or the reopen bar): clears the closed flag, opens, wakes the engine. */
 async function openAsked($: EngineInterface, running: RefreshEngine): Promise<boolean> {
   await update($, closedAtom, () => false)
+  await syncStatus($)
   const opened = await $.ui.open({ id: PANE, title: t('pane.title') })
   await running.wake().catch(() => undefined)
   return opened.isPlaced
@@ -326,7 +342,10 @@ export const register: Register = (on, options) => {
   // A person closing the pane: remembered, so `auto` does not reopen it this session.
   on('ui.close', { id: PANE }, async ($, e, next) => {
     const closed = await next(e)
-    if (e.origin.kind === 'person') await update($, closedAtom, () => true).catch(() => undefined)
+    if (e.origin.kind === 'person') {
+      await update($, closedAtom, () => true).catch(() => undefined)
+      await syncStatus($)
+    }
     // The pane is gone, whoever closed it: nothing to keep fresh.
     slot.engine?.stop()
     return closed
@@ -376,6 +395,8 @@ export const register: Register = (on, options) => {
   // needs no /panel. Gone again once the pane is open (openAsked clears the flag, which redraws the bar).
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (settings.panel === 'off' || e.props.hasSurvey) return next(e)
+    // A collapsed band draws nothing: yield, the status line carries the same words.
+    if (e.props.isCollapsed) return next(e)
     const [model, isClosed] = await Promise.all([read($, modelAtom), read($, closedAtom)])
     if (model === null || !isClosed) return next(e)
 
@@ -410,6 +431,9 @@ export const register: Register = (on, options) => {
     // A pane being drawn is a pane on screen: let a stopped engine notice (no state is written here).
     slot.engine?.noteRendered(now)
     void slot.engine?.wake().catch(() => undefined)
+
+    // A minimized pane on the desktop app is a small widget where clicks may not reach: a glance, not the full pane.
+    if (e.props.placement === 'widget') return renderGlance($.ui.resolve(e), model)
 
     const tree = renderPane($.ui.resolve(e), e.surface, e.props.bodyColumns, model, expanded, handlersOf($, settings, slot),
     // M2 hook point data: the clock the header's "checked {ago}" reads.

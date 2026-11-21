@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Engine } from 'claude-code/testing'
 
-import { renderPane } from '../src/render'
+import { closedStatus, renderPane } from '../src/render'
 import { CARD_FILL, CARD_LINE, tint } from '../src/render/kit'
 import { iconSource } from '../src/render/look'
 import { foldRow, foldedDone, openCap } from '../src/render/item'
@@ -1999,4 +1999,14 @@ describe('the plan heading label', () => {
       await ui.unmount()
     })
   }
+})
+
+describe('the closed pane\'s status line', () => {
+  test('says the plan title and where it stands, and /panel; nothing without a plan', () => {
+    const model = stageModel()
+    const line = closedStatus(model)
+    expect(line).toContain(model.header.title)
+    expect(line).toContain('/panel')
+    expect(closedStatus(null)).toBe('')
+  })
 })
