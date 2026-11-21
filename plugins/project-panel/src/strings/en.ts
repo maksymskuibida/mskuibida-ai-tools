@@ -27,6 +27,8 @@ export const en = {
 
   'reopen.hint': 'Project panel is closed.',
   'reopen.button': 'Open panel',
+  // The status line under the prompt while the pane is closed: the plan's title and where it stands.
+  'status.closed': '{title} · {summary} · /panel',
 
   'header.refresh': 'Refresh',
   'header.checked': 'checked {ago}',

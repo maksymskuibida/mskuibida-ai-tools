@@ -24,7 +24,7 @@ const STRIP_FROM_ITEMS = 10
 export const PLAN_KEY = '#plan'
 
 /** The overall percent and the line that says it: the provider's own label, else "50% done, 11 of 22". */
-function overallText(model: PanelModel): { value: number | undefined; summary: string } {
+export function overallText(model: PanelModel): { value: number | undefined; summary: string } {
   const { percent, counts } = model.overall
   // One value for the ring and the summary; a percent that is no number draws neither.
   const value = percent !== undefined && Number.isFinite(percent) ? clampPercent(percent) : undefined
