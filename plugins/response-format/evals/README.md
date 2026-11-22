@@ -12,10 +12,10 @@ while work is still running, then the one that completes the job.
 
 | Case | Resumes from | Prompt | Expected |
 |---|---|---|---|
-| `supervision-1-first-notification` | request + agents launched | notification 1 of 4 | at most one short plain line; no sections, no emoji headings; chapter tool not called |
-| `supervision-2-second-notification` | … + notification 1 and its one-line reply | notification 2 of 4 | same |
-| `supervision-3-third-notification` | … + notification 2 and its reply | notification 3 of 4 | same |
-| `supervision-4-hand-back` | … + notification 3 and its reply | notification 4 of 4 — job complete | chapter tool called exactly once, then ONE report: `Needs you` first, all four MRs in a table, every MR a full-URL markdown link and no bare `!242`, the open doubt restated rather than pointed at, MR 243's unseen pipeline and the agents' verdicts not rounded up into facts |
+| `supervision-1-first-notification` | request + agents launched | notification 1 of 4 | no text at all; chapter tool not called |
+| `supervision-2-second-notification` | … + notification 1 (no reply: mid-flight writes nothing) | notification 2 of 4 | same |
+| `supervision-3-third-notification` | … + notification 2 | notification 3 of 4 | same |
+| `supervision-4-hand-back` | … + notification 3 | notification 4 of 4 — job complete | chapter tool called exactly once, then ONE report: `Needs you` first, all four MRs in a table, every MR a full-URL markdown link and no bare `!242`, the open doubt restated rather than pointed at, MR 243's unseen pipeline and the agents' verdicts not rounded up into facts |
 
 Run it with `claude plugin eval` ([docs](https://code.claude.com/docs/en/plugin-evals.md)) from the
 plugin root. First regenerate the `session-tools/` fixture, which is not committed (see below), then
@@ -53,7 +53,7 @@ How it is put together, and why:
   pass. Replay cases run single-arm, where it is scored like the rest.
 - **Each case is one turn.** The harness sends one prompt per run, so "three quiet turns, then one
   report" is four cases over a shared, growing history rather than one four-turn run. The history
-  of case 4 therefore contains *ideal* mid-flight replies, not whatever cases 1–3 produced.
+  of case 4 therefore contains the *ideal* mid-flight turns (no reply at all), not whatever cases 1–3 produced.
 
 Results go to `evals/results/`. A replay run also writes the resumed session's transcript
 (`<session-id>.jsonl`) beside the `history.jsonl` it started from. Both are gitignored.

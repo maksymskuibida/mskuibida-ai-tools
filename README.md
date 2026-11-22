@@ -82,7 +82,7 @@ git ls-remote --tags https://github.com/maksymskuibida/mskuibida-ai-tools.git
 
 | Plugin | What it does |
 |---|---|
-| [`response-format`](plugins/response-format) | One self-contained, fully linked report — Needs you / Done / Next / Risks — at hand-back or when you are needed; one plain line mid-flight. Applies automatically on enable, from the next session. |
+| [`response-format`](plugins/response-format) | One self-contained, fully linked report — Needs you / Done / Next / Risks — at hand-back or when you are needed; nothing at all mid-flight. Applies automatically on enable, from the next session. |
 | [`model-fit`](plugins/model-fit) | A mod (needs a Claude Code build with function-hooks support). Before the first real task of a session a quick Haiku check asks whether the session model fits it; on a mismatch a Switch or Stay dialog appears before anything runs, and Switch runs the task on the other model at once. |
 | [`mac-cleanup`](plugins/mac-cleanup) | Where your disk went, and what to remove: one walk of the whole volume, read-only investigators per area, the amount it could not verify, and a page in your private **Mac cleanup** artifact to pick Remove or Keep per item, re-checked at removal. Orphaned git worktrees go through their own gates. Formerly `worktree-cleanup`. |
 | [`project-panel`](plugins/project-panel) | A side pane for any repo with a plan — sections, items, progress rings and the gates that block the next item. Providers: AI-DLC v2 (which intent this session works on, every phase and stage) and a task ledger read against its PRs; each open PR's review state, and the `pr-review` command it asks of you. Opens with `/panel`. |

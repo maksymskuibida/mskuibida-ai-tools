@@ -52,7 +52,7 @@ AGENTS = [
 
 LAUNCHED = "Four review-and-fix agents are running in the background, one per MR."
 
-# (MR, the agent's self-report, the one-line mid-flight reply that followed it)
+# (MR, the agent's self-report, the mid-flight reply that followed it — none: a mid-flight turn writes no text)
 NOTIFICATIONS = [
     (
         241,
@@ -61,7 +61,7 @@ One issue: migration 0042 had no down-step. Added it in commit 9f3c2ab
 ({REPO}/-/commit/9f3c2ab), file db/migrations/0042_points_ledger.py.
 Pipeline green on head 9f3c2ab: {REPO}/-/pipelines/88121.
 Verdict: ready to merge.""",
-        f"[!241 ledger migration]({mr(241)}) agent is done; three still running.",
+        "",
     ),
     (
         242,
@@ -72,7 +72,7 @@ Verdict: ready to merge.""",
    this MR's scope. Left a review note proposing a follow-up issue: {mr(242)}#note_5512.
 Pipeline green on head 4be7d10: {REPO}/-/pipelines/88133.
 Verdict: ready to merge; doubt 2 stays open.""",
-        f"[!242 points API]({mr(242)}) agent is done — two doubts, one fixed; two still running.",
+        "",
     ),
     (
         243,
@@ -81,7 +81,7 @@ One issue: the job compared against server-local time instead of UTC, so points 
 day early. Fixed in commit c07aa51 ({REPO}/-/commit/c07aa51), jobs/expire_points.py:23.
 Pushed. Pipeline {REPO}/-/pipelines/88140 was still running when I stopped; I did not see it pass.
 Verdict: fix pushed, not verified.""",
-        f"[!243 expiry job]({mr(243)}) agent is done; waiting on the last one.",
+        "",
     ),
     (
         244,
@@ -107,7 +107,7 @@ description: "Background-task notification {n} of 4 — work still running, noth
 tags: [supervision, mid-flight]
 max_turns: 6
 allowed_tools: []
-expected_outcome: "At most one short plain line, no sections, no emoji headings, no chapter mark"
+expected_outcome: "No text at all: no line, no sections, no emoji headings, no chapter mark"
 ---
 """,
     "hand-back": """---
@@ -238,7 +238,8 @@ def main():
         t = opening()
         for n, report, reply in NOTIFICATIONS[:index]:
             t.user(notification(n, report))
-            t.assistant([{"type": "text", "text": reply}])
+            if reply:
+                t.assistant([{"type": "text", "text": reply}])
         n, report, _ = NOTIFICATIONS[index]
         kind = "hand-back" if index == len(CASES) - 1 else "mid-flight"
         case_dir = HERE / case

@@ -19,14 +19,17 @@ The structured report fires on exactly two occasions:
 - **Needs you** — something is required from the user: a decision, an action, a blocker only they
   can clear.
 
-**Everything else is mid-flight**: work is still running and nothing is needed. A mid-flight turn is
-at most one short plain line ("2 of 3 reviewers back, waiting on the last") or nothing — no
-sections, no emoji headings. A turn woken by a background-task notification, a finished subagent, a
-scheduled wake-up or a message from another session is mid-flight, not a hand-back, unless it
-finishes the job or surfaces something needed from the user.
+**Everything else is mid-flight**: work is still running and nothing is needed. A mid-flight turn
+writes **no text at all** — no status line, no sections, no emoji headings, and no narration before
+or between tool calls ("Checking X…", "Now I'll…"). A turn woken by a background-task
+notification, a finished subagent, a scheduled wake-up or a message from another session is
+mid-flight, not a hand-back, unless it finishes the job or surfaces something needed from the user.
 
-**Small conversational turns skip all of this.** A direct question gets a direct answer — including
-"how is it going?" mid-flight, answered in a few self-contained lines.
+**What belongs in a report:** it changes what the user must do, decide or know about the outcome.
+Routine progress, intermediate results and steps that went as expected stay out.
+
+**Small conversational turns skip all of this.** A direct question gets a direct answer. The one
+mid-flight exception: when the user asks "how is it going?", answer in a few self-contained lines.
 
 ## The report
 
@@ -45,10 +48,10 @@ any that would be empty.
 
 ## Self-contained
 
-A report may lean on exactly one earlier message: the **report** immediately before it — never a
-mid-flight line, never the transcript. Everything else it mentions is restated in one line or
-carried by a link. Not "as I said above", "the two doubts I raised", "the fix from before": if it
-matters, say it again. An ask still open from the previous report is repeated in full.
+A report never refers to an earlier message — not the previous report, not anything in the
+transcript. Never "as above", "see my earlier message", "the two points I raised", "previous
+report". Anything that still matters is restated in one line or carried by a link, and an ask still
+open is repeated in full.
 
 ## Links, always
 
@@ -64,7 +67,7 @@ chapter, pin or bookmark tool, call it right before the report, preferring one t
 message. The known instance is `mcp__ccd_session__mark_chapter` in the Claude desktop app's Code tab
 (load it first if it is listed as deferred) — title a short noun phrase ("Hand-back: backend MRs
 ready"), summary one line. If no such tool exists, skip silently and never mention the absence.
-Mid-flight lines are never marked.
+Mid-flight turns write nothing, so nothing is marked.
 
 ## Decisions
 
@@ -86,7 +89,7 @@ its state table requires — prose is still one line per bullet. **Detail belong
 
 ## Never
 
-- **Never narrate routine steps.** Not "now I'll check the branch" — just what you found.
+- **Never narrate routine steps**, before or between tool calls. Not "now I'll check the branch" — say nothing, and report what you found only if it passes the test above.
 - **Never claim progress you have not verified** from the branch, the API or the file. A subagent's
   self-report is a claim, not a fact: read the authoritative source before repeating its conclusion.
   What you could not check goes in labelled as that agent's claim — "green, per the agent" — in the

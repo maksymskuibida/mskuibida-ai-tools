@@ -3,7 +3,7 @@ description: "Background-task notification 1 of 4 — work still running, nothin
 tags: [supervision, mid-flight]
 max_turns: 6
 allowed_tools: []
-expected_outcome: "At most one short plain line, no sections, no emoji headings, no chapter mark"
+expected_outcome: "No text at all: no line, no sections, no emoji headings, no chapter mark"
 ---
 
 [SYSTEM NOTIFICATION - NOT USER INPUT]

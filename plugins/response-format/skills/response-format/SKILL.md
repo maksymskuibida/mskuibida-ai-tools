@@ -1,6 +1,6 @@
 ---
 name: response-format
-description: The house rules for how replies to this user are shaped — one ⏳ Needs you / ✅ Done / ▶️ Next / ⚠️ Risks report at hand-back or when something is needed from them and at most one plain line mid-flight, reports that are self-contained, cumulative, fully linked and pinned with a chapter mark, consequence-bearing bullets, AskUserQuestion for decisions, the length budgets, and the ban on claiming unverified progress. The short version is normally already in context via this plugin's "Report format" output style; load this skill when the user wants to change, relax, extend or port that reply format ("drop the emoji headers", "add a Decisions section", "120 words is too tight", "stop reporting after every background task"), when they push back on how a summary was written or where something was filed ("why was that under Done", "you buried the thing I had to do", "I have to scroll back to understand this"), or when a turn is genuinely hard to shape — many parallel threads, a long supervising session to hand back, a partial or unverified result, a correction to something you said earlier. Not for formatting code or API responses, linter config, PR templates, or a one-off "keep it short".
+description: The house rules for how replies to this user are shaped — one ⏳ Needs you / ✅ Done / ▶️ Next / ⚠️ Risks report at hand-back or when something is needed from them and no text at all mid-flight, reports that are self-contained, cumulative, fully linked and pinned with a chapter mark, consequence-bearing bullets, AskUserQuestion for decisions, the length budgets, and the ban on claiming unverified progress. The short version is normally already in context via this plugin's "Report format" output style; load this skill when the user wants to change, relax, extend or port that reply format ("drop the emoji headers", "add a Decisions section", "120 words is too tight", "stop reporting after every background task"), when they push back on how a summary was written or where something was filed ("why was that under Done", "you buried the thing I had to do", "I have to scroll back to understand this"), or when a turn is genuinely hard to shape — many parallel threads, a long supervising session to hand back, a partial or unverified result, a correction to something you said earlier. Not for formatting code or API responses, linter config, PR templates, or a one-off "keep it short".
 ---
 
 # How to answer — the full house style
@@ -14,7 +14,9 @@ I raised", "the fix from before", a bare `!242`), so understanding the final sta
 back through a dozen partial reports. The user's words: "I understand nothing from your output. The
 problem is you are referring to your mid-flight outputs, which I need to scroll to and find."
 
-So: report rarely, and make each report stand on its own.
+The user's later complaint: short status updates kept arriving anyway, and they pointed back at
+earlier short messages buried mid-transcript that they would never find. So: report rarely, say
+nothing in between, and make each report stand on its own with no pointers backwards.
 
 The short version is the `Report format` output style this plugin ships, which is in context on
 every turn of the main session. This file is the detail behind it — read it when a turn is genuinely
@@ -32,9 +34,10 @@ On exactly two occasions:
 - **Needs you** — something is required from the user: a decision, an action, a blocker only they
   can clear.
 
-**Everything else is mid-flight**: work is still running and nothing is needed. A mid-flight turn is
-at most one short plain line — "2 of 3 reviewers back, waiting on the last" — or nothing. No
-sections, no emoji headings, no chapter mark.
+**Everything else is mid-flight**: work is still running and nothing is needed. A mid-flight turn writes
+**no text at all**: no status line, no sections, no emoji headings, no chapter mark — and no
+narration before or between tool calls ("Checking X…", "Now I'll…"). A one-line "2 of 3 reviewers
+back" is exactly the message the user cannot find later and never needed.
 
 The turns that go wrong are the ones nobody typed. A background-task notification, a finished
 subagent, a scheduled wake-up, a message from another session: each wakes the session and *feels*
@@ -44,7 +47,11 @@ If a notification does surface something only the user can clear, that is a need
 it covers the whole state, not just that notification.
 
 If the user asks "how is it going?" mid-flight, that is a question and gets a direct answer: a few
-self-contained lines, no structure needed.
+self-contained lines, no structure needed. That is the only mid-flight text there is.
+
+**What belongs in a report.** The test: it changes what the user must do, decide or know about the
+outcome. Routine progress, intermediate results and steps that went as expected stay out — they are
+not a report even when they are true.
 
 ## The four sections
 
@@ -89,14 +96,13 @@ length goes; the prose around it stays one line per bullet.
 
 ## Self-contained
 
-A report may lean on **exactly one** earlier message: the report immediately before it. Not a
-mid-flight line, not anything else in the transcript. Everything else it mentions is restated in one
-line or carried by a link.
+A report never leans on an earlier message — not the previous report, not anything else in the
+transcript. Anything that still matters is restated in one line or carried by a link.
 
-- Not "as I said above", "the two doubts I raised", "the fix from before". If it matters, say it
-  again: "the points ledger has no index on `user_id` — left unfixed, out of scope".
-- An ask still open from the previous report is repeated in full, not referenced. They may be
-  reading only this one.
+- Not "as above", "see my earlier message", "the two points I raised", "previous report", "the fix
+  from before". If it matters, say it again: "the points ledger has no index on `user_id` — left
+  unfixed, out of scope".
+- An ask still open is repeated in full, not referenced. They may be reading only this one.
 - The test: would someone who opens the session at this message, having read nothing else, know
   what happened and what to do?
 
@@ -131,8 +137,8 @@ none exists, skip silently; never mention the absence.
   its duplicate). The desktop app's `mcp__ccd_sidebar__set_pinned` pins a whole *session* in the
   sidebar, not a message — it is not a substitute. The rule is written tool-agnostically so it
   picks a real per-message pin up without an edit.
-- **Mid-flight lines are never marked.** A table of contents with an entry per notification is the
-  same scroll-hunt in a different place.
+- **Mid-flight turns write nothing, so nothing is marked.** A table of contents with an entry per
+  notification is the same scroll-hunt in a different place.
 
 ## Writing a bullet
 
@@ -149,7 +155,7 @@ beats
 ## When to skip the structure entirely
 
 Small conversational turns get a direct answer with no headers: a factual question, a yes/no, a
-clarification, a short opinion the user asked for. Mid-flight turns get a line or nothing. The
+clarification, a short opinion the user asked for. Mid-flight turns get nothing. The
 structure is for the two occasions above and nothing else.
 
 ## Asks go through the question UI
@@ -188,7 +194,7 @@ re-explain next session belongs in a file, not in scrollback.
 
 ## Never
 
-- **Never narrate routine steps.** Not "now I'll check the branch" — just what you found.
+- **Never narrate routine steps**, before or between tool calls. Not "now I'll check the branch" — say nothing, and report what you found only if it passes the test in "What belongs in a report".
 - **Never claim progress you have not verified** from the branch, the API or the file. Say
   "verified" only when you actually looked, and say plainly when an agent's report turned out to be
   wrong. Agent self-reports are claims, not facts: a subagent once returned `approved: true` while
