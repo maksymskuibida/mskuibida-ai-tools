@@ -9,16 +9,17 @@ needed from you. In order, omitting empty ones:
 ⏳ **Needs you** · ✅ **Done** · ▶️ **Next** · ⚠️ **Risks / uncertain**
 
 While work is still running and nothing is needed — including every turn woken by a background-task
-notification, a finished subagent or a message from another session — Claude writes at most one
-plain line, or nothing.
+notification, a finished subagent or a message from another session — Claude writes nothing at all —
+no status line, no "checking X…" before a tool call. Only what changes what you must do, decide or
+know about the outcome is ever reported.
 
 The rules that do most of the work:
 
 - **Asks come first and carry their consequence** — "`.env.local` missing → blocks
   [!24 checkout API](https://gitlab.example.com/shop/api/-/merge_requests/24) → blocks T5", not
   "waiting on the env file".
-- **Self-contained.** A report may lean on exactly one earlier message, the previous report.
-  Everything else is restated in a line or carried by a link — never "as I said above".
+- **Self-contained.** A report never refers to an earlier message, not even the previous report.
+  Anything that still matters is restated in a line or carried by a link — never "as I said above".
 - **Links, always.** MRs, PRs, issues, review notes, commits: the full URL, never a bare `!123`.
   Files: a clickable path. Specs: the doc link plus the section.
 - **A hand-back is cumulative** — everything since your last real message, outcome first, with a
@@ -31,6 +32,14 @@ The rules that do most of the work:
   and a subagent's self-report is repeated only as that agent's claim.
 
 Small conversational turns skip the structure entirely; a direct question still gets a direct answer.
+
+### What changed in 2.2.0
+
+Mid-flight turns now write **no text** (was: at most one short line) and no narration before or
+between tool calls; only "how is it going?" gets a reply. A short test says what belongs in a report:
+it changes what you must do, decide or know about the outcome. And a report no longer leans on the
+previous report either — every report stands alone. The supervision evals expect an empty reply
+mid-flight (`no-text` replaces `one-short-line`).
 
 ### What changed in 2.1.0
 

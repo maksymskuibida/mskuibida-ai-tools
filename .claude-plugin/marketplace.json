@@ -4,13 +4,13 @@
     "name": "Maksym Skuibida"
   },
   "description": "Maksym Skuibida's personal Claude Code tooling — small, opinionated plugins.",
-  "version": "1.67.0",
+  "version": "1.68.0",
   "plugins": [
     {
       "name": "response-format",
       "source": "./plugins/response-format",
-      "description": "A house style for Claude's replies: one self-contained, fully linked, ask-first report at hand-back or when you are needed, quiet mid-flight, decisions through the question UI, and a hard bias against unverified claims.",
-      "version": "2.1.0"
+      "description": "A house style for Claude's replies: one self-contained, fully linked, ask-first report at hand-back or when you are needed, silent mid-flight, decisions through the question UI, and a hard bias against unverified claims.",
+      "version": "2.2.0"
     },
     {
       "name": "mac-cleanup",
