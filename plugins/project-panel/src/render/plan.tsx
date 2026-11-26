@@ -349,7 +349,7 @@ function sectionBody(ctx: Ctx, section: Section, id: string, gates: Gate[], expa
         </Box>
       )}
       {graph !== undefined && graph.nodes.length > 0 && viewToggle(ctx, graph.key, isGraph)}
-      {isGraph && graph !== undefined && graphView(ctx, graph.key, graph.nodes, expanded)}
+      {isGraph && graph !== undefined && graphView(ctx, graph.key, graph.nodes, expanded, section.items)}
       {atTop.map(gate => gateCard(ctx, gate))}
       {hidden.size > 0 && foldButton(ctx, `more:${id}`, `✓ ${moreText}`, () => ctx.handlers.onToggle(`${id}#all`, true))}
       {less !== '' && foldButton(ctx, `less:${id}`, less, () => ctx.handlers.onToggle(`${id}#all`, false))}

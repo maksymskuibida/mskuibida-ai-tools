@@ -1,68 +1,71 @@
-// The Units graph: the Units grouped by dependency wave, one small circle each, beside the list.
+// The Units graph: the Units grouped by dependency wave, each with the list row's own marker, beside the list.
 import { t } from '../strings/en'
-import type { UnitGraphNode, UnitGraphState } from '../../types'
+import type { Item, UnitGraphNode, UnitGraphState } from '../../types'
 import { clip, safely } from './kit'
 import type { Bp, Ctx, El } from './kit'
-import { RING_ARC, RING_DONE, RING_TRACK } from './ring'
-import { rangeOf, wavesOf } from './waves'
+import { statusMarker } from './item'
+import { needsOf, rangeOf, wavesOf } from './waves'
 
-const DOT = 16
 /** The ring that marks the Unit claimed at this checkout; apart from every state colour. */
 export const MINE_RING = '#4f8cff'
 const LABEL_CLIP: Record<Bp, number> = { S: 12, M: 18, L: 26 }
 const STATES: UnitGraphState[] = ['blocked', 'ready', 'claimed', 'finished']
+const MARK = 14
 
-/** One Unit's circle: outlined muted (blocked), accent outline (ready), accent fill (in progress), success fill (finished). */
-export function dotSource(state: UnitGraphState, isMine: boolean): string {
-  const mid = DOT / 2
-  const r = 4.5
-  const look: Record<UnitGraphState, string> = {
-    blocked: `fill="none" stroke="${RING_TRACK}" stroke-opacity="0.7" stroke-width="1.5"`,
-    ready: `fill="none" stroke="${RING_ARC}" stroke-width="1.6"`,
-    claimed: `fill="${RING_ARC}" stroke="${RING_ARC}" stroke-width="1.6"`,
-    finished: `fill="${RING_DONE}" stroke="${RING_DONE}" stroke-width="1.6"`,
-  }
-  const mine = isMine ? `<circle cx="${mid}" cy="${mid}" r="7" fill="none" stroke="${MINE_RING}" stroke-width="1.4"/>` : ''
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${DOT}" height="${DOT}" viewBox="0 0 ${DOT} ${DOT}">${mine}<circle cx="${mid}" cy="${mid}" r="${r}" ${look[state]}/></svg>`
+/** The "yours" ring as an image: drawn over the Unit's own marker, same size. */
+export function mineSource(): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${MARK}" height="${MARK}" viewBox="0 0 ${MARK} ${MARK}"><circle cx="${MARK / 2}" cy="${MARK / 2}" r="${MARK / 2 - 0.5}" fill="none" stroke="${MINE_RING}" stroke-width="1.4"/></svg>`
 }
 
-const GLYPH: Record<UnitGraphState, { glyph: string; color: string | undefined; isDim: boolean }> = {
-  blocked: { glyph: '○', color: undefined, isDim: true },
-  ready: { glyph: '○', color: 'claude', isDim: false },
-  claimed: { glyph: '●', color: 'claude', isDim: false },
-  finished: { glyph: '●', color: 'success', isDim: false },
+/** What a node stands for when its row is not in the section's items: a plain planned row. */
+function stand(node: UnitGraphNode): Item {
+  const isDone = node.state === 'finished'
+  return { id: node.id, title: node.label, status: isDone ? 'done' : node.state === 'claimed' ? 'open' : 'planned', readiness: node.state === 'blocked' ? 'blocked' : 'ready' } as Item
 }
 
-function dot(ctx: Ctx, state: UnitGraphState, isMine: boolean, alt: string): El {
+/** The Unit's marker: the list row's own (statusMarker), with the "yours" ring laid over it. */
+function marker(ctx: Ctx, item: Item, isMine: boolean, alt: string): El {
   const { Box, Text, Svg } = ctx.kit
+  const base = statusMarker(ctx, item)
+  if (!isMine) return base
   if (Svg) {
     return (
       <Box flexShrink={0}>
-        <Svg source={dotSource(state, isMine)} alt={alt} width={DOT} height={DOT} />
+        {base}
+        <Box position="absolute" left={0} top={0}>
+          <Svg source={mineSource()} alt={alt} width={MARK} height={MARK} />
+        </Box>
       </Box>
     )
   }
-  const look = GLYPH[state]
   return (
     <Box flexShrink={0} gap={0}>
-      <Text color={look.color} dimColor={look.isDim}>
-        {look.glyph}
-      </Text>
-      {isMine && <Text color="claude">◆</Text>}
+      {base}
+      <Text color="claude">◆</Text>
     </Box>
   )
 }
 
-function unitCell(ctx: Ctx, node: UnitGraphNode): El {
+function unitCell(ctx: Ctx, node: UnitGraphNode, nodes: readonly UnitGraphNode[], items: Map<string, Item>): El {
   const { Box, Text } = ctx.kit
   const state = t(`units.graph.${node.state}`)
   const alt = node.isMine ? t('units.graph.mineAlt', { unit: node.label, state }) : t('units.graph.alt', { unit: node.label, state })
+  const needs = needsOf(node, nodes)
   return (
-    <Box key={'unit:' + node.id} gap={1} flexShrink={0}>
-      {dot(ctx, node.state, node.isMine, alt)}
-      <Text dimColor={node.state === 'blocked'} bold={node.isMine} wrap="truncate-end">
-        {clip(node.label, LABEL_CLIP[ctx.bp])}
-      </Text>
+    <Box key={'unit:' + node.id} flexDirection="column" flexShrink={0}>
+      <Box gap={1}>
+        {marker(ctx, items.get(node.id) ?? stand(node), node.isMine, alt)}
+        <Text dimColor={node.state === 'blocked'} bold={node.isMine} wrap="truncate-end">
+          {clip(node.label, LABEL_CLIP[ctx.bp])}
+        </Text>
+      </Box>
+      {needs.length > 0 && (
+        <Box paddingLeft={2}>
+          <Text dimColor wrap="truncate-end">
+            {clip(t('units.graph.needs', { units: needs.join(', ') }), LABEL_CLIP[ctx.bp] + 8)}
+          </Text>
+        </Box>
+      )}
     </Box>
   )
 }
@@ -79,46 +82,51 @@ function foldLink(ctx: Ctx, key: string, label: string, press: () => void | Prom
   )
 }
 
-/** The small legend: the four states, then the "yours" marker. */
-function legend(ctx: Ctx): El {
+/** The small legend: the states present, each drawn with the marker of a row in that state, then the "yours" marker. */
+function legend(ctx: Ctx, nodes: readonly UnitGraphNode[], items: Map<string, Item>): El {
   const { Box, Text } = ctx.kit
+  const mine = nodes.find(node => node.isMine)
   return (
     <Box paddingLeft={2} gap={2} flexWrap="wrap">
-      {STATES.map(state => (
-        <Box key={'legend:' + state} gap={1}>
-          {dot(ctx, state, false, t(`units.graph.${state}`))}
-          <Text dimColor>{t(`units.graph.${state}`)}</Text>
+      {STATES.map(state => {
+        const first = nodes.find(node => node.state === state)
+        if (first === undefined) return false
+        return (
+          <Box key={'legend:' + state} gap={1}>
+            {marker(ctx, items.get(first.id) ?? stand(first), false, t(`units.graph.${state}`))}
+            <Text dimColor>{t(`units.graph.${state}`)}</Text>
+          </Box>
+        )
+      })}
+      {mine !== undefined && (
+        <Box key="legend:mine" gap={1}>
+          {marker(ctx, items.get(mine.id) ?? stand(mine), true, t('units.graph.mine'))}
+          <Text dimColor>{t('units.graph.mine')}</Text>
         </Box>
-      ))}
-      <Box key="legend:mine" gap={1}>
-        {dot(ctx, 'ready', true, t('units.graph.mine'))}
-        <Text dimColor>{t('units.graph.mine')}</Text>
-      </Box>
+      )}
     </Box>
   )
 }
 
-/** The List / Graph switch on the Units heading's row. */
+/** The List / Graph switch: a segmented pair; the view on is the primary button (accent) and bold, the other dim. */
 export function viewToggle(ctx: Ctx, key: string, isGraph: boolean): El {
-  const { Box, Text, Button } = ctx.kit
+  const { Box, Button } = ctx.kit
   const part = (label: string, isOn: boolean, id: string, press: () => void | Promise<void>) => (
-    <Button plain key={id} onPress={safely(press)}>
-      <Text bold={isOn} dimColor={!isOn}>
-        {label}
-      </Text>
+    <Button key={id} variant={isOn ? 'primary' : 'secondary'} dimColor={!isOn} onPress={safely(press)}>
+      {isOn ? `● ${label}` : label}
     </Button>
   )
   return (
-    <Box paddingLeft={2} gap={1}>
+    <Box paddingLeft={2} gap={0}>
       {part(t('units.view.list'), !isGraph, `glist:${key}`, () => ctx.handlers.onToggle(`${key}#graph`, false))}
-      <Text dimColor>·</Text>
       {part(t('units.view.graph'), isGraph, `graph:${key}`, () => ctx.handlers.onToggle(`${key}#graph`, true))}
     </Box>
   )
 }
 
 /** The waves in the default range, and the folds for those before and after it. */
-export function graphView(ctx: Ctx, key: string, nodes: UnitGraphNode[], expanded: Record<string, boolean>): El {
+export function graphView(ctx: Ctx, key: string, nodes: UnitGraphNode[], expanded: Record<string, boolean>, rows: readonly Item[] = []): El {
+  const items = new Map(rows.map(row => [row.id, row]))
   const { Box, Text } = ctx.kit
   const waves = wavesOf(nodes)
   const range = rangeOf(waves)
@@ -140,7 +148,7 @@ export function graphView(ctx: Ctx, key: string, nodes: UnitGraphNode[], expande
             <Text dimColor>{t('units.graph.wave', { n: String(from + offset + 1) })}</Text>
           </Box>
           <Box flexWrap="wrap" columnGap={2} flexShrink={1}>
-            {row.map(node => unitCell(ctx, node))}
+            {row.map(node => unitCell(ctx, node, nodes, items))}
           </Box>
         </Box>
       ))}
@@ -148,7 +156,7 @@ export function graphView(ctx: Ctx, key: string, nodes: UnitGraphNode[], expande
         foldLink(ctx, `${isLate ? 'unlater' : 'later'}:${key}`, t(isLate ? 'units.graph.hideLater' : 'units.graph.showLater', { count: String(later) }), () =>
           ctx.handlers.onToggle(`${key}#late`, !isLate),
         )}
-      {legend(ctx)}
+      {legend(ctx, nodes, items)}
     </Box>
   )
 }

@@ -84,3 +84,32 @@ export function rangeOf(waves: readonly (readonly UnitGraphNode[])[]): WaveRange
   const last = Math.min(waves.length - 1, (touched < 0 ? first : Math.max(touched, first)) + WAVES_AFTER_TOUCHED)
   return { first, last }
 }
+
+/** One dependency: `from` (the Unit waited on) → `to` (the Unit that waits). Only dependencies that name a Unit of the list. */
+export type Edge = { from: string; to: string }
+
+/** Every dependency edge among the Units, in list order of the waiting Unit, then of its `dependsOn`; each pair once. */
+export function edgesOf(nodes: readonly UnitGraphNode[]): Edge[] {
+  const known = new Set(nodes.map(node => node.name))
+  const out: Edge[] = []
+  for (const node of nodes) {
+    const seen = new Set<string>()
+    for (const dep of node.dependsOn) {
+      if (!known.has(dep) || dep === node.name || seen.has(dep)) continue
+      seen.add(dep)
+      out.push({ from: dep, to: node.name })
+    }
+  }
+  return out
+}
+
+/** The short names of what `node` waits on (its row's first word, "U3"), in `dependsOn` order, for the "needs …" text. */
+export function needsOf(node: UnitGraphNode, nodes: readonly UnitGraphNode[]): string[] {
+  const byName = new Map(nodes.map(one => [one.name, one]))
+  return edgesOf(nodes)
+    .filter(edge => edge.to === node.name)
+    .map(edge => {
+      const label = byName.get(edge.from)!.label
+      return label.split(' ')[0] ?? label
+    })
+}

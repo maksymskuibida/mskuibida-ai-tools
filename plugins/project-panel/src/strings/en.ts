@@ -104,6 +104,7 @@ export const en = {
   'units.graph.claimed': 'in progress',
   'units.graph.finished': 'finished',
   'units.graph.mine': 'yours',
+  'units.graph.needs': 'needs {units}',
   'units.graph.mineAlt': '{unit}, {state}, yours',
   'units.graph.alt': '{unit}, {state}',
   'stepper.alt': 'Phases: {phases}',
