@@ -187,10 +187,12 @@ describe('the Units graph, drawn', () => {
       }
     })
 
-    test(`the graph shows the waves, the legend, yours and what each Unit needs, on ${surface}`, async ($, on) => {
+    test(`the graph shows the waves, yours and what each Unit needs, on ${surface}`, async ($, on) => {
       const ui = await drawGraph($, on, surface, true)
       const texts = await shown(ui)
-      expect(texts).toEqual(expect.arrayContaining(['Wave 1', 'Wave 2', 'Wave 3', 'api-shell', 'billing', 'reports', 'blocked', 'ready', 'in progress', 'finished', 'yours']))
+      expect(texts).toEqual(expect.arrayContaining(['Wave 1', 'Wave 2', 'Wave 3', 'api-shell', 'billing', 'reports']))
+      // No legend: the markers are the list's own.
+      for (const word of ['yours']) expect(texts).not.toContain(word)
       expect(texts).toContain('needs api-shell')
       expect(texts).toContain('needs billing, api-shell')
       if (surface === 'terminal') expect(texts).toContain('◆')
