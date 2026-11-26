@@ -135,8 +135,11 @@ def active_space(project):
     return cursor(project, "active-space") or "default"
 
 
+NO_INTENT = "no-intent"
+
+
 def intent_of(project):
-    return cursor(project, "spaces", active_space(project), "intents", "active-intent") or "no-intent"
+    return cursor(project, "spaces", active_space(project), "intents", "active-intent") or NO_INTENT
 
 
 def project_key(project):
@@ -146,6 +149,18 @@ def project_key(project):
 def answer_path(project, unit):
     safe = re.sub(r"[^A-Za-z0-9._-]", "_", unit)
     return os.path.join(data_dir(), "answers", project_key(project), intent_of(project), safe + ".json")
+
+
+def stored_path(project, unit):
+    """Where the Unit's answer is read from: the active intent's folder, else (the dialog was answered before an intent
+    was active, so the answer sits under `no-intent`) the `no-intent` answer when it is still open. A used `no-intent`
+    answer is never picked up: one answer serves one claim."""
+    path = answer_path(project, unit)
+    if os.path.exists(path) or intent_of(project) == NO_INTENT:
+        return path
+    early = os.path.join(os.path.dirname(os.path.dirname(path)), NO_INTENT, os.path.basename(path))
+    answer = load(early)
+    return early if answer and not answer.get("claimedAt") else path
 
 
 # ---------------------------------------------------------------- reading and writing
@@ -175,7 +190,7 @@ def now():
 def choice_for(project, unit):
     """{"unit", "stages": [...], "rhythm", "at", "claimedAt"?} recorded for the Unit, or None. A used answer (one whose
     claim went through, `claimedAt` set) is still the Unit's choice for the rest of that claim: its skips and refusals."""
-    answer = load(answer_path(project, unit))
+    answer = load(stored_path(project, unit))
     if answer and isinstance(answer.get("stages"), list) and answer.get("rhythm") in RHYTHMS:
         return answer
     return None
@@ -193,7 +208,13 @@ def mark_claimed(project, unit):
     choice = choice_for(project, unit)
     if choice and not choice.get("claimedAt"):
         choice["claimedAt"] = now()
-        write(answer_path(project, unit), choice)
+        old = stored_path(project, unit)
+        write(answer_path(project, unit), choice)  # into the active intent's folder, where a no-intent answer moves
+        if old != answer_path(project, unit):
+            try:
+                os.remove(old)
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------- the choice itself
@@ -442,10 +463,11 @@ def main(argv=None):
                 raise ChoiceError(f"no claim choice for {args.unit} yet")
             print("\n".join(skip_command(s, args.unit) for s in left_out(choice)))
         elif args.cmd == "forget":
-            try:
-                os.remove(answer_path(project, args.unit))
-            except FileNotFoundError:
-                pass
+            for path in {answer_path(project, args.unit), stored_path(project, args.unit)}:
+                try:
+                    os.remove(path)
+                except FileNotFoundError:
+                    pass
             print(json.dumps({"forgotten": args.unit}))
     except ChoiceError as why:
         print(f"claim_choice.py: {why}", file=sys.stderr)

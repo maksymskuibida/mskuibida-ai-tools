@@ -1,5 +1,16 @@
 # unit-claim changelog
 
+## 0.5.2
+
+An answer given before an intent is active survives `aidlc engine intent switch` (marketplace 1.69.0).
+
+- **Lookup.** The answer is kept per intent. Answered in a fresh worktree with no `active-intent`, it was saved under
+  `no-intent`, and after the switch the lookup went to the intent's folder: `status` showed no choice, the guard refused
+  the claim and the dialog was asked twice. When the intent's folder has no answer, the lookup now falls back to an *open*
+  `no-intent` answer (no `claimedAt`) for the same Unit. The claim moves it into the intent's folder as it marks it used.
+  A used answer never serves a second claim, and the fallback never picks one up.
+- **Skill.** Before the dialog, make sure an intent is active; run the engine's intent switch if it is not.
+
 ## 0.5.1
 
 The claim-time skip reason is accepted by the engine (marketplace 1.66.2).

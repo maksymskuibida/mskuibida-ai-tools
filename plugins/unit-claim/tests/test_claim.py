@@ -358,6 +358,69 @@ class TestEveryClaimAsks(Case):
         self.assertIn(f'"source": "unit-claim:{UNIT}"', self.context(out))
 
 
+class TestAnswerSurvivesIntentSwitch(Case):
+    """The dialog is answered before any intent is active; `aidlc engine intent switch` then sets one. The answer
+    recorded under `no-intent` still serves that one claim."""
+
+    def setUp(self):
+        super().setUp()
+        self.cursor = os.path.join(self.project, "aidlc", "spaces", "default", "intents", "active-intent")
+        os.remove(self.cursor)
+
+    def switch(self):
+        with open(self.cursor, "w") as f:
+            f.write(INTENT + "\n")
+
+    def status(self):
+        return json.loads(self.run_script("status", "--unit", UNIT).stdout)
+
+    def used_claim(self):
+        return self.post("Bash", {"command": f"aidlc unit claim {UNIT} --team A --rhythm unit-end"}, {"stdout": CLAIMED})
+
+    def test_status_finds_the_answer_after_the_switch(self):
+        self.answer()
+        self.assertFalse(self.status()["ask"])
+        self.switch()
+        status = self.status()
+        self.assertEqual((status["ask"], status["used"]), (False, False))
+        self.assertTrue(status["claimFlags"].startswith("--rhythm unit-end"))
+
+    def test_the_guard_allows_the_claim_after_the_switch(self):
+        self.answer()
+        self.switch()
+        self.assertEqual(self.claim()[0], 0)
+
+    def test_the_claim_marks_it_used_and_moves_it(self):
+        self.answer()
+        self.switch()
+        self.used_claim()
+        moved = cc.answer_path(self.project, UNIT)
+        self.assertIn(INTENT, moved)
+        self.assertTrue(os.path.exists(moved))
+        self.assertIn("claimedAt", json.load(open(moved)))
+        self.assertFalse(os.path.exists(os.path.join(os.path.dirname(os.path.dirname(moved)), "no-intent", UNIT + ".json")))
+        self.assertEqual((self.status()["used"], self.status()["ask"]), (True, True))
+
+    def test_a_second_claim_asks_again(self):
+        self.answer()
+        self.switch()
+        self.used_claim()
+        code, _out, err = self.claim()
+        self.assertEqual(code, 2)
+        self.assertIn(f'"source": "unit-claim:{UNIT}"', err)
+
+    def test_a_used_no_intent_answer_is_not_picked_up(self):
+        self.answer()
+        path = cc.answer_path(self.project, UNIT)
+        choice = json.load(open(path))
+        choice["claimedAt"] = "2026-01-01T00:00:00Z"
+        cc.write(path, choice)
+        self.switch()
+        status = self.status()
+        self.assertEqual((status["choice"], status["ask"]), (None, True))
+        self.assertEqual(self.claim()[0], 2)
+
+
 class TestHelpIsAClaim(Case):
     """The engine ignores --help/-h on `unit claim <unit>` and claims for real: it is checked like any claim."""
 
