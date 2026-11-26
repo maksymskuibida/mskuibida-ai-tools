@@ -9,7 +9,6 @@ import { needsOf, rangeOf, wavesOf } from './waves'
 /** The ring that marks the Unit claimed at this checkout; apart from every state colour. */
 export const MINE_RING = '#4f8cff'
 const LABEL_CLIP: Record<Bp, number> = { S: 12, M: 18, L: 26 }
-const STATES: UnitGraphState[] = ['blocked', 'ready', 'claimed', 'finished']
 const MARK = 14
 
 /** The "yours" ring as an image: drawn over the Unit's own marker, same size. */
@@ -82,32 +81,6 @@ function foldLink(ctx: Ctx, key: string, label: string, press: () => void | Prom
   )
 }
 
-/** The small legend: the states present, each drawn with the marker of a row in that state, then the "yours" marker. */
-function legend(ctx: Ctx, nodes: readonly UnitGraphNode[], items: Map<string, Item>): El {
-  const { Box, Text } = ctx.kit
-  const mine = nodes.find(node => node.isMine)
-  return (
-    <Box paddingLeft={2} gap={2} flexWrap="wrap">
-      {STATES.map(state => {
-        const first = nodes.find(node => node.state === state)
-        if (first === undefined) return false
-        return (
-          <Box key={'legend:' + state} gap={1}>
-            {marker(ctx, items.get(first.id) ?? stand(first), false, t(`units.graph.${state}`))}
-            <Text dimColor>{t(`units.graph.${state}`)}</Text>
-          </Box>
-        )
-      })}
-      {mine !== undefined && (
-        <Box key="legend:mine" gap={1}>
-          {marker(ctx, items.get(mine.id) ?? stand(mine), true, t('units.graph.mine'))}
-          <Text dimColor>{t('units.graph.mine')}</Text>
-        </Box>
-      )}
-    </Box>
-  )
-}
-
 /** The List / Graph switch: a segmented pair; the view on is the primary button (accent) and bold, the other dim. */
 export function viewToggle(ctx: Ctx, key: string, isGraph: boolean): El {
   const { Box, Button } = ctx.kit
@@ -156,7 +129,6 @@ export function graphView(ctx: Ctx, key: string, nodes: UnitGraphNode[], expande
         foldLink(ctx, `${isLate ? 'unlater' : 'later'}:${key}`, t(isLate ? 'units.graph.hideLater' : 'units.graph.showLater', { count: String(later) }), () =>
           ctx.handlers.onToggle(`${key}#late`, !isLate),
         )}
-      {legend(ctx, nodes, items)}
     </Box>
   )
 }
