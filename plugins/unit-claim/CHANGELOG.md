@@ -2,7 +2,7 @@
 
 ## 0.5.2
 
-An answer given before an intent is active survives `aidlc engine intent switch` (marketplace 1.69.0).
+An answer given before an intent is active survives `aidlc engine intent switch` (marketplace 1.70.0).
 
 - **Lookup.** The answer is kept per intent. Answered in a fresh worktree with no `active-intent`, it was saved under
   `no-intent`, and after the switch the lookup went to the intent's folder: `status` showed no choice, the guard refused
