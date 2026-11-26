@@ -253,6 +253,22 @@ export type Item = {
   isLinksOpen?: boolean
 }
 
+/** Where a Unit stands, for the graph: the list's own readiness and status, folded to four. */
+export type UnitGraphState = 'blocked' | 'ready' | 'claimed' | 'finished'
+
+/** One Unit in the graph view; `id` is its row's item id in the same section. */
+export type UnitGraphNode = {
+  id: string
+  /** The Unit's name, which `dependsOn` of the others names. */
+  name: string
+  /** What the circle is labelled with (the row's title: `U3 u3-day-page`). */
+  label: string
+  dependsOn: string[]
+  state: UnitGraphState
+  /** The Unit this checkout has claimed: marked apart from its state. */
+  isMine: boolean
+}
+
 export type Section = {
   id: string
   title: string
@@ -292,6 +308,8 @@ export type Section = {
    * and count, left out of the plan's totals.
    */
   isDetail?: boolean
+  /** The section's Units, in list order, for the graph view beside the list. Absent = no Units, no toggle. */
+  unitGraph?: { /** Keys the person's view and fold choices (per intent). */ key: string; nodes: UnitGraphNode[] }
   items: Item[]
 }
 

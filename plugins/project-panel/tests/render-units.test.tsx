@@ -117,3 +117,56 @@ describe('stage points, drawn', () => {
     })
   }
 })
+
+describe('the Units graph, drawn', () => {
+  const node = (name: string, state: 'blocked' | 'ready' | 'claimed' | 'finished', dependsOn: string[] = [], isMine = false) => ({
+    id: `unit:${name}`,
+    name,
+    label: name,
+    dependsOn,
+    state,
+    isMine,
+  })
+  const graphModel = (): PanelModel => {
+    const model = claimedModel()
+    const units = model.sections.find(one => one.id === 'UNITS')!
+    units.isCollapsed = false
+    units.unitGraph = {
+      key: 'UNITS@default/shop',
+      nodes: [node('api-shell', 'ready'), node('billing', 'claimed', ['api-shell'], true), node('reports', 'blocked', ['billing']), node('setup', 'finished')],
+    }
+    return model
+  }
+  const buttons = async (ui: unknown) => ((await (ui as Probe).findAll({ type: 'Button' })) as Found[]).map(b => String(b.props.key))
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    test(`the list stays by default, with a List / Graph switch, on ${surface}`, async ($, on) => {
+      const ui = await draw($, on, graphModel(), surface)
+      expect(await buttons(ui)).toEqual(expect.arrayContaining(['graph:UNITS@default/shop', 'glist:UNITS@default/shop']))
+      expect(await shown(ui)).not.toContain('Wave 1')
+      await ui.unmount()
+    })
+
+    test(`the graph shows the waves and the legend when chosen, and marks yours, on ${surface}`, async ($, on) => {
+      on('clock.now', async () => ({ value: new Date(2026, 8, 4, 12, 3, 0).getTime() }))
+      on('state.get', async (_$, e, next) => {
+        const held = await next(e)
+        if (e.plugin !== 'project-panel') return held
+        if (e.key === 'expanded') return { value: { value: { 'UNITS@default/shop#graph': true }, version: 0 } }
+        if (e.key === 'model') return { value: { value: graphModel(), version: 0 } }
+        return held
+      })
+      const ui = await $.ui.mount({ ...MOUNT, surface, props: { ...MOUNT.props, bodyColumns: 60 } })
+      const texts = await shown(ui)
+      expect(texts).toEqual(expect.arrayContaining(['Wave 1', 'Wave 2', 'Wave 3', 'api-shell', 'billing', 'reports', 'blocked', 'ready', 'in progress', 'finished', 'yours']))
+      if (surface === 'terminal') expect(texts).toContain('◆')
+      await ui.unmount()
+    })
+  }
+
+  test('a section without Units has no switch', async ($, on) => {
+    const ui = await draw($, on, claimedModel(), 'desktop')
+    expect((await buttons(ui)).some(key => key.startsWith('graph:'))).toBe(false)
+    await ui.unmount()
+  })
+})

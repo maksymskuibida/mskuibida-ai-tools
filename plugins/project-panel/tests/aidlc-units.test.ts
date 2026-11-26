@@ -708,6 +708,19 @@ describe('the claim is the checkout\'s scope file', () => {
     expect(unitList(model).items.find(item => item.isCurrent)?.id).toBe('unit:api-billing')
   })
 
+  test('the graph nodes mirror the list rows, and only the unit claimed at this checkout is yours', async () => {
+    const section = unitList(await load(world([], claimOf('api-billing'))))
+    const graph = section.unitGraph!
+    expect(graph.nodes.map(node => node.id)).toEqual(section.items.filter(item => item.id.startsWith('unit:')).map(item => item.id))
+    expect(graph.nodes.filter(node => node.isMine).map(node => node.name)).toEqual(['api-billing'])
+    expect(graph.key).toContain('@')
+    // Whatever its state, the claimed Unit stays marked.
+    expect(graph.nodes.find(node => node.isMine)!.state).not.toBe('blocked')
+    expect(graph.nodes.find(node => node.name === 'web-billing')!.dependsOn).toEqual(['api-billing', 'web-shell'])
+    // No claim here: nobody is marked.
+    expect(unitList(await load(world([], {}))).unitGraph!.nodes.some(node => node.isMine)).toBe(false)
+  })
+
   test('a claim in another space, or of another intent, is not this one\'s', async () => {
     expect((await load(world([], claimOf('api-billing', 'other')))).sections.some(one => one.id === 'UNITS')).toBe(false)
     const registry = { [`${s.ROOT}/aidlc/spaces/default/intents/intents.json`]: JSON.stringify([{ uuid: 'another-uuid', dirName: s.INTENT, slug: 'x' }]) }

@@ -4,6 +4,7 @@ import type { Gate, PanelModel, Section } from '../../types'
 import { CARD_FILL, isRich, safely, uniqueIds } from './kit'
 import { emptyRing, pill } from './look'
 import type { Ctx, El } from './kit'
+import { graphView, viewToggle } from './graph'
 import { foldGutters, foldRow, gateCard, itemRow, openCap } from './item'
 import { linksBlock } from './links'
 import { clampPercent, mixOf, ring, strip } from './ring'
@@ -315,7 +316,11 @@ function sectionBody(ctx: Ctx, section: Section, id: string, gates: Gate[], expa
   const afterIndex = (index: number) => gates.filter(gate => gate.afterItemId !== undefined && owner.get(gate.afterItemId) === index)
 
   // Done-folding: a long section hides the done items nobody needs to see, but only behind a row that can bring them back.
-  const cap = LONG_AFTER[ctx.bp]
+  // The Units graph replaces the Unit rows (not the stages that run once) while the person has it on.
+  const graph = section.unitGraph
+  const isGraph = graph !== undefined && graph.nodes.length > 0 && expanded[`${graph.key}#graph`] === true
+  const graphIds = new Set(isGraph ? graph.nodes.map(node => node.id) : [])
+  const cap = isGraph ? Number.POSITIVE_INFINITY : LONG_AFTER[ctx.bp]
   const isAll = expanded[`${id}#all`] === true
   const folding = foldRow(section.items, index => afterIndex(index).length > 0, cap, isAll, count => t('section.doneFold', { count: String(count) }))
   const { hidden } = folding
@@ -324,7 +329,7 @@ function sectionBody(ctx: Ctx, section: Section, id: string, gates: Gate[], expa
 
   // The open-items cap, after done-folding: the first few and the current one, behind a row that shows the rest.
   const isRest = expanded[`${id}#rest`] === true
-  const visible = section.items.map((_, index) => index).filter(index => !hidden.has(index))
+  const visible = section.items.map((_, index) => index).filter(index => !hidden.has(index) && !graphIds.has(section.items[index]!.id))
   const capped = openCap(visible, index => section.items[index]!.isCurrent, OPEN_CAP[ctx.bp], isRest, count =>
     t('section.moreItems', { count: String(count) }),
   )
@@ -343,6 +348,8 @@ function sectionBody(ctx: Ctx, section: Section, id: string, gates: Gate[], expa
           </Text>
         </Box>
       )}
+      {graph !== undefined && graph.nodes.length > 0 && viewToggle(ctx, graph.key, isGraph)}
+      {isGraph && graph !== undefined && graphView(ctx, graph.key, graph.nodes, expanded)}
       {atTop.map(gate => gateCard(ctx, gate))}
       {hidden.size > 0 && foldButton(ctx, `more:${id}`, `✓ ${moreText}`, () => ctx.handlers.onToggle(`${id}#all`, true))}
       {less !== '' && foldButton(ctx, `less:${id}`, less, () => ctx.handlers.onToggle(`${id}#all`, false))}
