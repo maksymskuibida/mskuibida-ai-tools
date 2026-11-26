@@ -62,6 +62,13 @@ export function pressAction(model: PanelModel | null, expanded: Record<string, b
 
   const folds: [string, string, boolean][] = [
     ['more:', '#all', true],
+    // The Units graph: its view, and the waves folded away before and after the default range.
+    ['graph:', '#graph', true],
+    ['glist:', '#graph', false],
+    ['earlier:', '#early', true],
+    ['unearlier:', '#early', false],
+    ['later:', '#late', true],
+    ['unlater:', '#late', false],
     ['less:', '#all', false],
     ['restless:', '#rest', false],
     ['rest:', '#rest', true],

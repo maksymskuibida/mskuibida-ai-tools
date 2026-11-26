@@ -20,6 +20,8 @@ import type {
   ProviderContext,
   Section,
   SectionStatus,
+  UnitGraphNode,
+  UnitGraphState,
 } from '../../../types'
 import { detectWorkspace } from './detect'
 import { readBranch } from './git'
@@ -86,6 +88,8 @@ export async function loadAidlc(ctx: ProviderContext, detection: Detection): Pro
       ? NO_STAGE_POINTS
       : parseStagePoints(await fsx.read(stagePointsPath), parsed.phases.flatMap(phase => phase.stages.map(stage => stage.slug)))
   const sections = text === null ? [] : sectionsOf(parsed, step.stage, view, two, units, stagePoints, graph)
+  // The graph's folds are remembered per intent.
+  for (const section of sections) if (section.unitGraph) section.unitGraph.key = `${section.unitGraph.key}@${selection.space}/${selection.intent ?? ''}`
   // The pages and forms the publishing plugins registered for this intent's stages, each shown where its stage is.
   if (ctx.linksDir !== undefined && ctx.linksDir !== '' && selection.intent !== null && sections.length > 0) {
     const { path, entries } = await readLinks(fsx, ctx.linksDir, workspace.root, selection.space, selection.intent)
@@ -701,6 +705,12 @@ function unitSectionOf(
     if (word !== undefined) item.statusWord = word
     return item
   })
+  // The graph view reads the same rows: a Unit's state is its row's, so the two views cannot disagree.
+  const nodes: UnitGraphNode[] = units.units.map((unit, at) => {
+    const row = unitItems[at]!
+    const state: UnitGraphState = row.status === 'done' ? 'finished' : row.status !== 'planned' ? 'claimed' : row.readiness === 'ready' ? 'ready' : 'blocked'
+    return { id: row.id, name: unit.name, label: row.title, dependsOn: unit.dependsOn, state, isMine: unit.name === units.claimed }
+  })
   const onceItems = phase.stages
     .map((stage, at) => ({ stage, ordinal: ordinalOf(phaseNo, at + 1) }))
     .filter(({ stage }) => !units.stages.perUnit.includes(stage.slug))
@@ -720,6 +730,7 @@ function unitSectionOf(
   // The phase's points (its Units' and its run-once stages') are the count; the Units done stand beside them.
   const sideCount = t('aidlc.units.done', { done: String(doneUnits.length), total: count })
   if (sideCount !== '') section.sideCount = sideCount
+  if (nodes.length > 0) section.unitGraph = { key: section.id, nodes }
   return section
 }
 
