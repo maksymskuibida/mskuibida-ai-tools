@@ -24,6 +24,10 @@ Run `claim_choice.py status --unit <unit>`.
 
 ## 2. Open the claim dialog
 
+First make sure an intent is active: `aidlc/spaces/<space>/intents/active-intent` exists. If it is missing, run
+`aidlc engine intent switch <intent>` before the dialog, so the answer is saved under that intent. (An answer saved
+before an intent was active is still found afterwards, once, but don't rely on it.)
+
 One `AskUserQuestion` call, nothing more:
 
 - `metadata`: `{"source": "unit-claim:<unit>"}`
