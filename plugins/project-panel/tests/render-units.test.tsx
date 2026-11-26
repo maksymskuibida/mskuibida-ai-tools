@@ -4,6 +4,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Engine } from 'claude-code/testing'
 
+import { iconSource } from '../src/render/look'
 import { phasesOf } from '../src/render/stepper'
 import { MOUNT, item, section, seedModel, stageModel } from './world'
 import type { PanelModel, Section } from '../types'
@@ -127,17 +128,44 @@ describe('the Units graph, drawn', () => {
     state,
     isMine,
   })
+  const rows = () => [
+    item('unit:api-shell', 'planned', { title: 'api-shell', readiness: 'ready' }),
+    item('unit:billing', 'open', { title: 'billing' }),
+    item('unit:reports', 'planned', { title: 'reports', readiness: 'blocked' }),
+    item('unit:setup', 'done', { title: 'setup' }),
+  ]
   const graphModel = (): PanelModel => {
     const model = claimedModel()
     const units = model.sections.find(one => one.id === 'UNITS')!
     units.isCollapsed = false
+    units.items = rows()
     units.unitGraph = {
       key: 'UNITS@default/shop',
-      nodes: [node('api-shell', 'ready'), node('billing', 'claimed', ['api-shell'], true), node('reports', 'blocked', ['billing']), node('setup', 'finished')],
+      nodes: [node('api-shell', 'ready'), node('billing', 'claimed', ['api-shell'], true), node('reports', 'blocked', ['billing', 'api-shell']), node('setup', 'finished')],
     }
     return model
   }
   const buttons = async (ui: unknown) => ((await (ui as Probe).findAll({ type: 'Button' })) as Found[]).map(b => String(b.props.key))
+  // Hooks register once per test; `view.isGraph` is what the person's saved choice reads at each mount.
+  const view = { isGraph: false }
+  const hooks = (on: On) => {
+    on('clock.now', async () => ({ value: new Date(2026, 8, 4, 12, 3, 0).getTime() }))
+    on('state.get', async (_$, e, next) => {
+      const held = await next(e)
+      if (e.plugin !== 'project-panel') return held
+      if (e.key === 'expanded') return { value: { value: { 'UNITS@default/shop#graph': view.isGraph }, version: 0 } }
+      if (e.key === 'model') return { value: { value: graphModel(), version: 0 } }
+      return held
+    })
+  }
+  const mountGraph = ($: Engine, surface: Surface, isGraph: boolean) => {
+    view.isGraph = isGraph
+    return $.ui.mount({ ...MOUNT, surface, props: { ...MOUNT.props, bodyColumns: 60 } })
+  }
+  const drawGraph = async ($: Engine, on: On, surface: Surface, isGraph: boolean) => {
+    hooks(on)
+    return mountGraph($, surface, isGraph)
+  }
 
   for (const surface of ['terminal', 'desktop'] as const) {
     test(`the list stays by default, with a List / Graph switch, on ${surface}`, async ($, on) => {
@@ -147,22 +175,59 @@ describe('the Units graph, drawn', () => {
       await ui.unmount()
     })
 
-    test(`the graph shows the waves and the legend when chosen, and marks yours, on ${surface}`, async ($, on) => {
-      on('clock.now', async () => ({ value: new Date(2026, 8, 4, 12, 3, 0).getTime() }))
-      on('state.get', async (_$, e, next) => {
-        const held = await next(e)
-        if (e.plugin !== 'project-panel') return held
-        if (e.key === 'expanded') return { value: { value: { 'UNITS@default/shop#graph': true }, version: 0 } }
-        if (e.key === 'model') return { value: { value: graphModel(), version: 0 } }
-        return held
-      })
-      const ui = await $.ui.mount({ ...MOUNT, surface, props: { ...MOUNT.props, bodyColumns: 60 } })
+    test(`the switch marks the view on: List is primary in the list, Graph in the graph, on ${surface}`, async ($, on) => {
+      hooks(on)
+      for (const isGraph of [false, true]) {
+        const ui = await mountGraph($, surface, isGraph)
+        const found = (await (ui as Probe).findAll({ type: 'Button' })) as Found[]
+        const variant = (key: string) => found.find(b => String(b.props.key) === key)?.props.variant
+        expect(variant('glist:UNITS@default/shop')).toBe(isGraph ? 'secondary' : 'primary')
+        expect(variant('graph:UNITS@default/shop')).toBe(isGraph ? 'primary' : 'secondary')
+        await ui.unmount()
+      }
+    })
+
+    test(`the graph shows the waves, the legend, yours and what each Unit needs, on ${surface}`, async ($, on) => {
+      const ui = await drawGraph($, on, surface, true)
       const texts = await shown(ui)
       expect(texts).toEqual(expect.arrayContaining(['Wave 1', 'Wave 2', 'Wave 3', 'api-shell', 'billing', 'reports', 'blocked', 'ready', 'in progress', 'finished', 'yours']))
+      expect(texts).toContain('needs api-shell')
+      expect(texts).toContain('needs billing, api-shell')
       if (surface === 'terminal') expect(texts).toContain('◆')
       await ui.unmount()
     })
   }
+
+  test('terminal: the graph draws the list rows\' own glyphs for every state, the blocked one included', async ($, on) => {
+    hooks(on)
+    const list = await mountGraph($, 'terminal', false)
+    const listText = (await shown(list)).join('|')
+    await list.unmount()
+    const ui = await mountGraph($, 'terminal', true)
+    const texts = await shown(ui)
+    for (const glyph of ['⊘', '○', '◐', '✓']) {
+      expect(listText).toContain(glyph)
+      expect(texts).toContain(glyph)
+    }
+    await ui.unmount()
+  })
+
+  test('desktop: the graph draws the same icons as the list rows for every state', async ($, on) => {
+    hooks(on)
+    const sources = async (isGraph: boolean) => {
+      const ui = await mountGraph($, 'desktop', isGraph)
+      const all = (await (ui as Probe).findAll({ type: 'Svg' })) as Found[]
+      await ui.unmount()
+      return new Set(all.map(el => String(el.props.source)))
+    }
+    const inList = await sources(false)
+    const inGraph = await sources(true)
+    for (const kind of ['blocked', 'ready', 'live', 'done'] as const) {
+      const source = iconSource(kind, kind === 'live' ? '◐' : '')
+      expect(inList.has(source)).toBe(true)
+      expect(inGraph.has(source)).toBe(true)
+    }
+  })
 
   test('a section without Units has no switch', async ($, on) => {
     const ui = await draw($, on, claimedModel(), 'desktop')

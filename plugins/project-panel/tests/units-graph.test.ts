@@ -1,8 +1,8 @@
 // The Units graph's arithmetic: waves, the default range, and the counts behind "Show earlier / later".
 import { describe, expect, test } from 'claude-code/testing'
 
-import { dotSource, MINE_RING } from '../src/render/graph'
-import { rangeOf, wavesOf } from '../src/render/waves'
+import { MINE_RING, mineSource } from '../src/render/graph'
+import { edgesOf, needsOf, rangeOf, wavesOf } from '../src/render/waves'
 import type { UnitGraphNode, UnitGraphState } from '../types'
 
 const node = (name: string, dependsOn: string[] = [], state: UnitGraphState = 'blocked', isMine = false): UnitGraphNode => ({
@@ -80,16 +80,33 @@ describe('rangeOf', () => {
   })
 })
 
-describe('the circle', () => {
-  test('the "yours" ring is drawn on the claimed Unit in every state, and on no other', () => {
-    for (const state of ['blocked', 'ready', 'claimed', 'finished'] as const) {
-      expect(dotSource(state, true)).toContain(MINE_RING)
-      expect(dotSource(state, false)).not.toContain(MINE_RING)
-    }
+describe('edgesOf and needsOf', () => {
+  const nodes = [node('web', ['api', 'auth', 'ghost']), node('auth'), node('api', ['auth', 'auth']), node('e2e', ['web', 'e2e'])]
+
+  test('one edge per dependency pair, dependency to dependent, across waves; unknown, self and repeated ones dropped', () => {
+    expect(edgesOf(nodes)).toEqual([
+      { from: 'api', to: 'web' },
+      { from: 'auth', to: 'web' },
+      { from: 'auth', to: 'api' },
+      { from: 'web', to: 'e2e' },
+    ])
   })
 
-  test('each state looks different', () => {
-    const looks = new Set((['blocked', 'ready', 'claimed', 'finished'] as const).map(state => dotSource(state, false)))
-    expect(looks.size).toBe(4)
+  test('a Unit with every wave folded away still lists what it needs: edges do not depend on which waves are shown', () => {
+    const waves = wavesOf(nodes)
+    expect(waves.length).toBe(4)
+    expect(needsOf(nodes[3]!, nodes)).toEqual(['web'])
+  })
+
+  test('needs name the dependency by the first word of its label, in dependsOn order', () => {
+    const labelled = [{ ...node('u1-core'), label: 'U1 u1-core' }, { ...node('u2-ui', ['u1-core']), label: 'U2 u2-ui' }, { ...node('u3', ['u2-ui', 'u1-core']), label: 'U3 u3' }]
+    expect(needsOf(labelled[2]!, labelled)).toEqual(['U2', 'U1'])
+    expect(needsOf(labelled[0]!, labelled)).toEqual([])
+  })
+})
+
+describe('the "yours" ring', () => {
+  test('is its own image in the blue, apart from every state colour', () => {
+    expect(mineSource()).toContain(MINE_RING)
   })
 })

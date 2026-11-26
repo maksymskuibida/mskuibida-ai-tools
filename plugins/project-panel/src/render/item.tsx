@@ -199,6 +199,19 @@ function chipsOf(ctx: Ctx, chips: Chip[]): (El | false)[] {
   ]
 }
 
+/** An item's status marker: the desktop's icon, the terminal's glyph. The list's rows and the Units graph both draw it, so they cannot drift. */
+export function statusMarker(ctx: Ctx, item: Item, look: Look = itemLook(item)): El {
+  const { Box, Text } = ctx.kit
+  if (isRich(ctx)) return statusIcon(ctx, item, look.glyph, look.word) as El
+  return (
+    <Box flexShrink={0}>
+      <Text color={look.color} dimColor={look.isDim}>
+        {look.glyph}
+      </Text>
+    </Box>
+  )
+}
+
 export function itemRow(ctx: Ctx, item: Item, fold: string): El {
   const { Box, Text, Link } = ctx.kit
   const look = itemLook(item)
@@ -223,15 +236,7 @@ export function itemRow(ctx: Ctx, item: Item, fold: string): El {
             )}
           </Box>
         )}
-        {rich ? (
-          statusIcon(ctx, item, look.glyph, look.word)
-        ) : (
-          <Box flexShrink={0}>
-            <Text color={look.color} dimColor={look.isDim}>
-              {look.glyph}
-            </Text>
-          </Box>
-        )}
+        {statusMarker(ctx, item, look)}
         {item.ordinal !== undefined && item.ordinal !== '' && (
           <Box flexShrink={0}>
             <Text dimColor>{item.ordinal}</Text>
